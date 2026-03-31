@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlexSheet</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        font-family:
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          Roboto,
+          'Helvetica Neue',
+          Arial,
+          sans-serif;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+      #toolbar {
+        flex-shrink: 0;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        padding: 0;
+        border-bottom: 1px solid #e1dfdd;
+        background: #f3f2f1;
+        font-size: 13px;
+      }
+      #app {
+        flex: 1;
+        min-height: 0;
+        width: 100%;
+      }
+      .fs-formula-bar {
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 8px;
+        border-bottom: 1px solid #e1dfdd;
+        background: #f3f2f1;
+        font-size: 12px;
+        min-height: 28px;
+      }
+      .fs-formula-bar__name {
+        min-width: 72px;
+        padding: 2px 6px;
+        border: 1px solid #c0c0c0;
+        border-radius: 2px;
+        background: #fff;
+        color: #333;
+      }
+      .fs-formula-bar__fx {
+        color: #605e5c;
+        font-weight: 600;
+        user-select: none;
+      }
+      .fs-formula-bar__input {
+        flex: 1;
+        min-width: 0;
+        padding: 4px 8px;
+        border: 1px solid #c0c0c0;
+        border-radius: 2px;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toolbar"></div>
+    <div id="formula-bar" class="fs-formula-bar" aria-label="编辑栏">
+      <span class="fs-formula-bar__name" id="formula-name-box">A1</span>
+      <span class="fs-formula-bar__fx" aria-hidden="true">fx</span>
+      <input
+        class="fs-formula-bar__input"
+        id="formula-input"
+        type="text"
+        spellcheck="false"
+        autocomplete="off"
+        placeholder="单元格内容"
+        aria-label="公式栏"
+      />
+    </div>
+    <div id="app"></div>
+    <script type="module" src="/packages/flexsheet/src/demo/main.ts"></script>
+  </body>
+</html>

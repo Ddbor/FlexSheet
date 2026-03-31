@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": true,
+    "rootDir": "packages/flexsheet/src",
+    "outDir": "dist"
+  },
+  "include": ["packages/flexsheet/src/**/*.ts"],
+  "exclude": ["packages/flexsheet/src/demo/**"]
+}

@@ -1,0 +1,9 @@
+node_modules
+dist
+.DS_Store
+*.log
+
+# 勿将 tsc 产物提交到各包 src（会与 *.ts 并存导致 Vite 优先加载陈旧 .js）
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map

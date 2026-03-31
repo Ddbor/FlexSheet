@@ -1,0 +1,24 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@flexsheet/core": ["packages/core/src/index.ts"],
+      "@flexsheet/shared": ["packages/shared/src/index.ts"],
+      "@flexsheet/theme": ["packages/theme/src/index.ts"],
+      "@flexsheet/formula": ["packages/formula/src/index.ts"],
+      "@flexsheet/renderer": ["packages/renderer/src/index.ts"],
+      "@flexsheet/selection": ["packages/selection/src/index.ts"],
+      "@flexsheet/editor": ["packages/editor/src/index.ts"],
+      "@flexsheet/scroll": ["packages/scroll/src/index.ts"],
+      "@flexsheet/import-export": ["packages/import-export/src/index.ts"],
+      "@flexsheet/toolbar": ["packages/toolbar/src/index.ts"],
+      "flexsheet": ["packages/flexsheet/src/index.ts"]
+    }
+  },
+  "include": ["packages/**/*.ts", "test/**/*.ts", "vitest.config.ts", "vite.config.ts"],
+  "exclude": ["node_modules", "dist", "**/dist", "packages/**/dist"]
+}

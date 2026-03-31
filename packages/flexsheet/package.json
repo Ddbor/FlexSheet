@@ -1,0 +1,37 @@
+{
+  "name": "flexsheet",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "FlexSheet — 纯前端、框架无关的 Canvas 2D 电子表格内核（模块化 + 插件化）",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@flexsheet/core": "workspace:*",
+    "@flexsheet/editor": "workspace:*",
+    "@flexsheet/formula": "workspace:*",
+    "@flexsheet/import-export": "workspace:*",
+    "@flexsheet/renderer": "workspace:*",
+    "@flexsheet/scroll": "workspace:*",
+    "@flexsheet/selection": "workspace:*",
+    "@flexsheet/shared": "workspace:*",
+    "@flexsheet/theme": "workspace:*",
+    "@flexsheet/toolbar": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
