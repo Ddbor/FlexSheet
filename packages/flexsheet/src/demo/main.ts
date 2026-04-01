@@ -1,4 +1,4 @@
-import { FlexSheet } from "../index.js";
+import { FlexSheet, mountExcelBottomBar, mountGridVerticalScrollbar } from "../index.js";
 import {
   applyRibbonCommandToFlexSheet,
   FlexSheetRibbon,
@@ -8,10 +8,17 @@ import {
 } from "@flexsheet/toolbar";
 
 const toolbar = document.getElementById("toolbar");
-const root = document.getElementById("app");
+const gridCanvasHost = document.getElementById("grid-canvas-host");
+const gridVscrollHost = document.getElementById("grid-vscroll-host");
+const bottomChrome = document.getElementById("bottom-chrome");
 const formulaBar = document.getElementById("formula-bar");
-if (toolbar === null || root === null) {
-  throw new Error("缺少 #toolbar 或 #app 容器");
+if (
+  toolbar === null ||
+  gridCanvasHost === null ||
+  gridVscrollHost === null ||
+  bottomChrome === null
+) {
+  throw new Error("缺少 #toolbar、#grid-canvas-host、#grid-vscroll-host 或 #bottom-chrome 容器");
 }
 
 toolbar.style.display = "flex";
@@ -21,9 +28,12 @@ toolbar.style.padding = "0";
 toolbar.style.gap = "0";
 
 const flexSheet = new FlexSheet({
-  container: root,
+  container: gridCanvasHost,
   formulaBar: formulaBar ?? undefined,
 });
+
+mountGridVerticalScrollbar({ container: gridVscrollHost, flexSheet });
+mountExcelBottomBar({ container: bottomChrome, flexSheet });
 
 document.body.style.backgroundColor = flexSheet.getTheme().canvasBg;
 

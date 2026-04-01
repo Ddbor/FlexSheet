@@ -20,6 +20,22 @@ import {
 const VIEW_ZOOM_MIN = 0.25;
 const VIEW_ZOOM_MAX = 4;
 
+/** 与画布横向滚动区一致的度量，供底部栏等宿主同步假滚动条。 */
+export interface HorizontalScrollMetrics {
+  readonly scrollX: number;
+  readonly maxScrollX: number;
+  readonly scrollViewportW: number;
+  readonly contentScrollWidth: number;
+}
+
+/** 与画布纵向滚动区一致的度量，供右侧假滚动条等宿主同步。 */
+export interface VerticalScrollMetrics {
+  readonly scrollY: number;
+  readonly maxScrollY: number;
+  readonly scrollViewportH: number;
+  readonly contentScrollHeight: number;
+}
+
 export interface CanvasRendererOptions {
   canvas: HTMLCanvasElement;
   workbook: Workbook;
@@ -62,6 +78,17 @@ const GRID_STROKE_CLIP_INSET = 0.5;
 const SCROLL_PANE_GRID_CLIP_INSET = 1;
 
 /**
+ * 选区外框、填充柄、行列标题强调线相对原线宽的比例（当前为原来的 2/3）。
+ */
+const SELECTION_OUTLINE_VISUAL_SCALE = 2 / 3;
+
+/** 选区涉及行列标题上的 Excel 风格粗强调线（CSS 像素，随 viewZoom 缩放）。 */
+function scaledHeaderAccentThickness(viewZoom: number): number {
+  const raw = Math.max(2, Math.min(5, Math.round(3 * viewZoom)));
+  return raw * SELECTION_OUTLINE_VISUAL_SCALE;
+}
+
+/**
  * Canvas 2D 主渲染器：行列标题、网格线、冻结窗格与视口虚拟滚动（只读数据）。
  */
 export class CanvasRenderer {
@@ -100,6 +127,10 @@ export class CanvasRenderer {
   private readonly cornerSize = { width: 48, height: 24 };
 
   private rafId: number | null = null;
+
+  private readonly viewZoomListeners = new Set<() => void>();
+
+  private readonly scrollListeners = new Set<() => void>();
 
   constructor(options: CanvasRendererOptions) {
     this.canvas = options.canvas;
@@ -142,6 +173,103 @@ export class CanvasRenderer {
     }
     this.viewZoom = z;
     this.ensureScrollClamped();
+    this.notifyViewZoomChanged();
+  }
+
+  /** 缩放比例变化时通知（含 Ribbon、状态栏等宿主 UI）。 */
+  subscribeViewZoom(listener: () => void): () => void {
+    this.viewZoomListeners.add(listener);
+    return () => {
+      this.viewZoomListeners.delete(listener);
+    };
+  }
+
+  private notifyViewZoomChanged(): void {
+    for (const fn of this.viewZoomListeners) {
+      fn();
+    }
+  }
+
+  /**
+   * 横向滚动或视口夹紧后通知（滚轮、拖拽假滚动条、`setScroll` 等）。
+   */
+  subscribeScroll(listener: () => void): () => void {
+    this.scrollListeners.add(listener);
+    return () => {
+      this.scrollListeners.delete(listener);
+    };
+  }
+
+  private notifyScrollChanged(): void {
+    for (const fn of this.scrollListeners) {
+      fn();
+    }
+  }
+
+  /**
+   * 当前活动表下与 `scrollX` 一致的横向滚动度量；无表时返回 `null`。
+   */
+  getHorizontalScrollMetrics(): HorizontalScrollMetrics | null {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return null;
+    }
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const { width: hw, height: hh } = this.getHeaderSize();
+    const layout = buildFrozenLayout(
+      sheet,
+      hw,
+      hh,
+      w,
+      h,
+      this.frozenRows,
+      this.frozenCols,
+      this.viewZoom,
+    );
+    const limits = computeScrollLimits(sheet, layout, this.viewZoom);
+    const colW = sheet.defaultColWidth * this.viewZoom;
+    const scrollColCount = Math.max(0, sheet.colCount - layout.frozenCols);
+    const contentScrollWidth = scrollColCount * colW;
+    return {
+      scrollX: this.scrollX,
+      maxScrollX: limits.maxScrollX,
+      scrollViewportW: layout.scrollViewportW,
+      contentScrollWidth,
+    };
+  }
+
+  /**
+   * 当前活动表下与 `scrollY` 一致的纵向滚动度量；无表时返回 `null`。
+   */
+  getVerticalScrollMetrics(): VerticalScrollMetrics | null {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return null;
+    }
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const { width: hw, height: hh } = this.getHeaderSize();
+    const layout = buildFrozenLayout(
+      sheet,
+      hw,
+      hh,
+      w,
+      h,
+      this.frozenRows,
+      this.frozenCols,
+      this.viewZoom,
+    );
+    const limits = computeScrollLimits(sheet, layout, this.viewZoom);
+    const rowH = sheet.defaultRowHeight * this.viewZoom;
+    const scrollRowCount = Math.max(0, sheet.rowCount - layout.frozenRows);
+    const contentScrollHeight = scrollRowCount * rowH;
+    return {
+      scrollY: this.scrollY,
+      maxScrollY: limits.maxScrollY,
+      scrollViewportH: layout.scrollViewportH,
+      contentScrollHeight,
+    };
   }
 
   zoomIn(): void {
@@ -192,8 +320,12 @@ export class CanvasRenderer {
         break;
       }
     }
+    const prevZ = this.viewZoom;
     this.viewZoom = z;
     this.ensureScrollClamped();
+    if (Math.abs(this.viewZoom - prevZ) > 1e-6) {
+      this.notifyViewZoomChanged();
+    }
     const layout = buildFrozenLayout(sheet, hw, hh, w, h, fr, fc, this.viewZoom);
     const limits = computeScrollLimits(sheet, layout, this.viewZoom);
     const revealed = scrollToRevealCell(
@@ -208,6 +340,7 @@ export class CanvasRenderer {
     );
     this.scrollX = revealed.scrollX;
     this.scrollY = revealed.scrollY;
+    this.notifyScrollChanged();
   }
 
   setShowGridLines(show: boolean): void {
@@ -317,6 +450,7 @@ export class CanvasRenderer {
   setScroll(scrollX: number, scrollY: number): void {
     this.scrollX = scrollX;
     this.scrollY = scrollY;
+    this.notifyScrollChanged();
   }
 
   /**
@@ -355,6 +489,7 @@ export class CanvasRenderer {
     const c = clampScroll(this.scrollX, this.scrollY, limits);
     this.scrollX = c.scrollX;
     this.scrollY = c.scrollY;
+    this.notifyScrollChanged();
   }
 
   resize(cssWidth: number, cssHeight: number): void {
@@ -364,6 +499,7 @@ export class CanvasRenderer {
     this.canvas.width = Math.max(1, Math.floor(cssWidth * dpr));
     this.canvas.height = Math.max(1, Math.floor(cssHeight * dpr));
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.clampScrollToActiveSheet();
   }
 
   /** 合并到下一帧绘制，减少同帧多次改数据导致的闪烁。 */
@@ -438,13 +574,15 @@ export class CanvasRenderer {
     this.scrollX = clamped.scrollX;
     this.scrollY = clamped.scrollY;
 
+    const selectionSnap = this.getSelectionSnapshot();
+
     if (this.showHeadings) {
       this.drawCorner(headerW, headerH);
       if (this.showRuler) {
         this.drawRulerOverlay(sheet, layout, headerW, headerH, w);
       }
-      this.drawAllColumnHeaders(sheet, layout, headerW, headerH, w);
-      this.drawAllRowHeaders(sheet, layout, headerW, headerH, h);
+      this.drawAllColumnHeaders(sheet, layout, headerW, headerH, w, selectionSnap);
+      this.drawAllRowHeaders(sheet, layout, headerW, headerH, h, selectionSnap);
     }
     this.drawBody(sheet, layout, headerW, headerH, w, h);
     this.drawFreezeLines(layout, w, h);
@@ -511,15 +649,43 @@ export class CanvasRenderer {
     }
   }
 
+  /**
+   * 当前选区在表内的行列闭区间（与框选矩形一致）；无快照时返回 null。
+   */
+  private getClampedSelectionSpan(
+    sheet: Worksheet,
+    selectionSnap: SelectionPaintSnapshot | null,
+  ): { startCol: number; endCol: number; startRow: number; endRow: number } | null {
+    if (selectionSnap === null) {
+      return null;
+    }
+    const n = normalizeSelectionRange(selectionSnap.range);
+    const maxC = sheet.colCount - 1;
+    const maxR = sheet.rowCount - 1;
+    if (maxC < 0 || maxR < 0) {
+      return null;
+    }
+    return {
+      startCol: Math.max(0, Math.min(n.startCol, maxC)),
+      endCol: Math.max(0, Math.min(n.endCol, maxC)),
+      startRow: Math.max(0, Math.min(n.startRow, maxR)),
+      endRow: Math.max(0, Math.min(n.endRow, maxR)),
+    };
+  }
+
   private drawAllColumnHeaders(
     sheet: Worksheet,
     layout: FrozenLayout,
     headerW: number,
     headerH: number,
     canvasW: number,
+    selectionSnap: SelectionPaintSnapshot | null,
   ): void {
     const { ctx } = this;
     const colW = this.scaledColW(sheet);
+    const selSpan = this.getClampedSelectionSpan(sheet, selectionSnap);
+    const columnInSelection = (c: number): boolean =>
+      selSpan !== null && c >= selSpan.startCol && c <= selSpan.endCol;
     const { frozenCols } = layout;
     const buf = this.viewportBuffer;
     const maxC = sheet.colCount - 1;
@@ -594,9 +760,17 @@ export class CanvasRenderer {
       ctx.clip();
       for (const c of scrollCols) {
         const x = this.cellLeftX(sheet, layout, c);
-        this.paintColumnHeaderCell(ctx, c, x, colW, headerH);
+        this.paintColumnHeaderCell(ctx, c, x, colW, headerH, columnInSelection(c));
       }
       strokeColumnHeaderGrid(scrollCols, sx0);
+      this.paintSelectionColumnHeaderBottomAccents(
+        sheet,
+        layout,
+        scrollCols,
+        colW,
+        headerH,
+        selSpan,
+      );
       ctx.restore();
     }
 
@@ -608,10 +782,42 @@ export class CanvasRenderer {
       ctx.clip();
       for (const c of frozenColsList) {
         const x = this.cellLeftX(sheet, layout, c);
-        this.paintColumnHeaderCell(ctx, c, x, colW, headerH);
+        this.paintColumnHeaderCell(ctx, c, x, colW, headerH, columnInSelection(c));
       }
       strokeColumnHeaderGrid(frozenColsList, headerW);
+      this.paintSelectionColumnHeaderBottomAccents(
+        sheet,
+        layout,
+        frozenColsList,
+        colW,
+        headerH,
+        selSpan,
+      );
       ctx.restore();
+    }
+  }
+
+  /** 选区内各列标题底部粗绿线（画在网格描边之后）。 */
+  private paintSelectionColumnHeaderBottomAccents(
+    sheet: Worksheet,
+    layout: FrozenLayout,
+    visibleCols: number[],
+    colW: number,
+    headerH: number,
+    selSpan: { startCol: number; endCol: number; startRow: number; endRow: number } | null,
+  ): void {
+    if (selSpan === null || visibleCols.length === 0) {
+      return;
+    }
+    const { ctx } = this;
+    const t = scaledHeaderAccentThickness(this.viewZoom);
+    ctx.fillStyle = this.theme.activeCellBorderColor;
+    for (const c of visibleCols) {
+      if (c < selSpan.startCol || c > selSpan.endCol) {
+        continue;
+      }
+      const x = this.cellLeftX(sheet, layout, c);
+      ctx.fillRect(x, headerH - t, colW, t);
     }
   }
 
@@ -621,11 +827,12 @@ export class CanvasRenderer {
     x: number,
     colW: number,
     headerH: number,
+    isSelectionColumn: boolean,
   ): void {
-    ctx.fillStyle = this.theme.headerBg;
+    ctx.fillStyle = isSelectionColumn ? this.theme.headerActiveBg : this.theme.headerBg;
     ctx.fillRect(x, 0, colW, headerH);
-    ctx.fillStyle = this.theme.headerColor;
-    ctx.font = `${this.scaledFontSizePx(12)}px system-ui, -apple-system, sans-serif`;
+    ctx.fillStyle = isSelectionColumn ? this.theme.activeCellBorderColor : this.theme.headerColor;
+    ctx.font = `${isSelectionColumn ? "bold " : ""}${this.scaledFontSizePx(12)}px system-ui, -apple-system, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(columnIndexToLabel(c), x + colW / 2, headerH / 2);
@@ -637,6 +844,7 @@ export class CanvasRenderer {
     headerW: number,
     headerH: number,
     canvasH: number,
+    selectionSnap: SelectionPaintSnapshot | null,
   ): void {
     const { ctx } = this;
     const rowH = this.scaledRowH(sheet);
@@ -645,6 +853,9 @@ export class CanvasRenderer {
     const maxR = sheet.rowCount - 1;
     const fh = layout.frozenHeightPx;
     const sy0 = headerH + fh;
+    const selSpanRows = this.getClampedSelectionSpan(sheet, selectionSnap);
+    const rowInSelection = (r: number): boolean =>
+      selSpanRows !== null && r >= selSpanRows.startRow && r <= selSpanRows.endRow;
 
     const collectFrozenRows = (): number[] => {
       const out: number[] = [];
@@ -714,9 +925,17 @@ export class CanvasRenderer {
       ctx.clip();
       for (const r of scrollRows) {
         const y = this.cellTopY(sheet, layout, r);
-        this.paintRowHeaderCell(ctx, r, y, rowH, headerW);
+        this.paintRowHeaderCell(ctx, r, y, rowH, headerW, rowInSelection(r));
       }
       strokeRowHeaderGrid(scrollRows, sy0);
+      this.paintSelectionRowHeaderRightAccents(
+        sheet,
+        layout,
+        scrollRows,
+        rowH,
+        headerW,
+        selSpanRows,
+      );
       ctx.restore();
     }
 
@@ -728,10 +947,42 @@ export class CanvasRenderer {
       ctx.clip();
       for (const r of frozenRowsList) {
         const y = this.cellTopY(sheet, layout, r);
-        this.paintRowHeaderCell(ctx, r, y, rowH, headerW);
+        this.paintRowHeaderCell(ctx, r, y, rowH, headerW, rowInSelection(r));
       }
       strokeRowHeaderGrid(frozenRowsList, headerH);
+      this.paintSelectionRowHeaderRightAccents(
+        sheet,
+        layout,
+        frozenRowsList,
+        rowH,
+        headerW,
+        selSpanRows,
+      );
       ctx.restore();
+    }
+  }
+
+  /** 选区内各行标题右侧（靠网格）粗绿线。 */
+  private paintSelectionRowHeaderRightAccents(
+    sheet: Worksheet,
+    layout: FrozenLayout,
+    visibleRows: number[],
+    rowH: number,
+    headerW: number,
+    selSpan: { startCol: number; endCol: number; startRow: number; endRow: number } | null,
+  ): void {
+    if (selSpan === null || visibleRows.length === 0) {
+      return;
+    }
+    const { ctx } = this;
+    const t = scaledHeaderAccentThickness(this.viewZoom);
+    ctx.fillStyle = this.theme.activeCellBorderColor;
+    for (const r of visibleRows) {
+      if (r < selSpan.startRow || r > selSpan.endRow) {
+        continue;
+      }
+      const y = this.cellTopY(sheet, layout, r);
+      ctx.fillRect(headerW - t, y, t, rowH);
     }
   }
 
@@ -741,11 +992,12 @@ export class CanvasRenderer {
     y: number,
     rowH: number,
     headerW: number,
+    isSelectionRow: boolean,
   ): void {
-    ctx.fillStyle = this.theme.headerBg;
+    ctx.fillStyle = isSelectionRow ? this.theme.headerActiveBg : this.theme.headerBg;
     ctx.fillRect(0, y, headerW, rowH);
-    ctx.fillStyle = this.theme.headerColor;
-    ctx.font = `${this.scaledFontSizePx(12)}px system-ui, -apple-system, sans-serif`;
+    ctx.fillStyle = isSelectionRow ? this.theme.activeCellBorderColor : this.theme.headerColor;
+    ctx.font = `${isSelectionRow ? "bold " : ""}${this.scaledFontSizePx(12)}px system-ui, -apple-system, sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(r + 1), headerW / 2, y + rowH / 2);
@@ -1233,7 +1485,7 @@ export class CanvasRenderer {
       const bw = (c1 - c0 + 1) * colW;
       const bh = (r1 - r0 + 1) * rowH;
       ctx.strokeStyle = this.theme.selectionBorderColor;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2 * SELECTION_OUTLINE_VISUAL_SCALE;
       ctx.strokeRect(x0 + 0.5, y0 + 0.5, bw - 1, bh - 1);
 
       ctx.restore();
@@ -1290,7 +1542,7 @@ export class CanvasRenderer {
     // 3. Excel 风格填充柄（选区右下角小方块）
     const handleCenterX = this.cellLeftX(sheet, layout, range.endCol) + colW;
     const handleCenterY = this.cellTopY(sheet, layout, range.endRow) + rowH;
-    const handleSize = 6;
+    const handleSize = 6 * SELECTION_OUTLINE_VISUAL_SCALE;
     const handleHalf = handleSize / 2;
     const bodyX = headerW;
     const bodyY = headerH;

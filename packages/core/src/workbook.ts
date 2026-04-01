@@ -9,6 +9,7 @@ export type WorkbookChangeListener = () => void;
  */
 export class Workbook {
   private readonly sheets: Worksheet[] = [];
+  private readonly sheetUnsubs = new Map<Worksheet, () => void>();
   private readonly listeners = new Set<WorkbookChangeListener>();
   private _activeSheetIndex = 0;
 
@@ -31,19 +32,44 @@ export class Workbook {
 
   set activeSheetIndex(index: number) {
     const next = Math.trunc(index);
-    if (next === this._activeSheetIndex) {
+    const clamped =
+      this.sheets.length === 0 ? 0 : Math.max(0, Math.min(next, this.sheets.length - 1));
+    if (clamped === this._activeSheetIndex) {
       return;
     }
-    this._activeSheetIndex = next;
+    this._activeSheetIndex = clamped;
     this.emit();
   }
 
   addSheet(sheet: Worksheet): void {
     this.sheets.push(sheet);
-    sheet.subscribe(() => {
+    const unsub = sheet.subscribe(() => {
       this.emit();
     });
+    this.sheetUnsubs.set(sheet, unsub);
     this.emit();
+  }
+
+  /**
+   * 按索引移除工作表；至少保留一张表时返回 true。
+   * 移除后会收紧 `activeSheetIndex` 并通知监听者。
+   */
+  removeSheetAt(index: number): boolean {
+    const i = Math.trunc(index);
+    if (i < 0 || i >= this.sheets.length || this.sheets.length <= 1) {
+      return false;
+    }
+    const [removed] = this.sheets.splice(i, 1);
+    if (removed !== undefined) {
+      const unsub = this.sheetUnsubs.get(removed);
+      unsub?.();
+      this.sheetUnsubs.delete(removed);
+    }
+    if (this._activeSheetIndex >= this.sheets.length) {
+      this._activeSheetIndex = this.sheets.length - 1;
+    }
+    this.emit();
+    return true;
   }
 
   getSheet(index: number): Worksheet | undefined {

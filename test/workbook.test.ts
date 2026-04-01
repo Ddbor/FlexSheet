@@ -72,4 +72,35 @@ describe("Workbook", () => {
     wb.activeSheetIndex = 1;
     expect(events.length).toBe(3);
   });
+
+  it("activeSheetIndex setter clamps to valid range", () => {
+    const wb = new Workbook();
+    wb.addSheet(new Worksheet("A"));
+    wb.addSheet(new Worksheet("B"));
+    wb.activeSheetIndex = 99;
+    expect(wb.activeSheetIndex).toBe(1);
+    wb.activeSheetIndex = -3;
+    expect(wb.activeSheetIndex).toBe(0);
+  });
+
+  it("removeSheetAt removes sheet and tightens active index", () => {
+    const wb = new Workbook();
+    wb.addSheet(new Worksheet("A"));
+    wb.addSheet(new Worksheet("B"));
+    wb.activeSheetIndex = 1;
+    expect(wb.removeSheetAt(0)).toBe(true);
+    expect(wb.sheetCount).toBe(1);
+    expect(wb.getSheet(0)?.name).toBe("B");
+    expect(wb.activeSheetIndex).toBe(0);
+  });
+
+  it("removeSheetAt returns false when only one sheet or bad index", () => {
+    const wb = new Workbook();
+    wb.addSheet(new Worksheet("Only"));
+    expect(wb.removeSheetAt(0)).toBe(false);
+    expect(wb.sheetCount).toBe(1);
+    wb.addSheet(new Worksheet("Two"));
+    expect(wb.removeSheetAt(-1)).toBe(false);
+    expect(wb.removeSheetAt(2)).toBe(false);
+  });
 });

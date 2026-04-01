@@ -8,8 +8,12 @@ export type WorksheetChangeListener = () => void;
  * 通过 `subscribe` / `notifyDataChanged` 与 `batch` 支持数据驱动渲染。
  */
 export class Worksheet {
-  readonly name: string;
+  private _name: string;
   private readonly cells = new Map<string, Cell>();
+
+  get name(): string {
+    return this._name;
+  }
 
   /** 逻辑行数（≥1）。规模变更请用 `setGridSize`。 */
   rowCount: number;
@@ -24,7 +28,7 @@ export class Worksheet {
   private _revision = 0;
 
   constructor(name: string, rowCount = 1000, colCount = 26) {
-    this.name = name;
+    this._name = name;
     this.rowCount = Math.max(1, rowCount);
     this.colCount = Math.max(1, colCount);
   }
@@ -151,5 +155,15 @@ export class Worksheet {
 
   hasCell(row: number, col: number): boolean {
     return this.cells.has(Cell.key(row, col));
+  }
+
+  /** 重命名工作表并通知监听者（用于标签栏等 UI）。 */
+  setName(next: string): void {
+    const t = next.trim();
+    if (t.length === 0 || t === this._name) {
+      return;
+    }
+    this._name = t;
+    this.flushNotify();
   }
 }

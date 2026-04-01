@@ -3,6 +3,21 @@ import { type Cell, Worksheet } from "@flexsheet/core";
 import { setCellValueAndRecalc } from "@flexsheet/formula";
 
 describe("Worksheet", () => {
+  it("setName trims and notifies subscribers", () => {
+    const ws = new Worksheet("Old");
+    let n = 0;
+    ws.subscribe(() => {
+      n++;
+    });
+    ws.setName("  New  ");
+    expect(ws.name).toBe("New");
+    expect(n).toBe(1);
+    ws.setName("New");
+    expect(n).toBe(1);
+    ws.setName("");
+    expect(ws.name).toBe("New");
+  });
+
   it("constructor sets name and dimensions with defaults", () => {
     const ws = new Worksheet("Data");
     expect(ws.name).toBe("Data");

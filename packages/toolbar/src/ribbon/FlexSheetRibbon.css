@@ -1,13 +1,16 @@
 /**
  * Excel 风格 Ribbon：CSS 变量便于与 SheetTheme 联动（light/dark）。
+ * 顶部选项卡栏绿底白字；当前选项卡白底绿字；面板区仍随主题。
  */
 
-/* 浅色默认对齐 Excel 桌面版功能区：白底、灰标签栏、#217346 强调绿 */
+/* 浅色：面板白底；标签栏绿底白字，选中项白底绿字（与状态栏同色带） */
 .fs-ribbon {
   --fs-ribbon-accent: #217346;
   --fs-ribbon-accent-press: #185c37;
   --fs-ribbon-bg: #ffffff;
-  --fs-ribbon-tab-strip: #f3f2f1;
+  --fs-ribbon-tab-strip: #217346;
+  --fs-ribbon-tab-label: #ffffff;
+  --fs-ribbon-tab-hover-bg: rgba(255, 255, 255, 0.16);
   --fs-ribbon-panel-bg: #ffffff;
   --fs-ribbon-border: #e1dfdd;
   --fs-ribbon-group-label: #605e5c;
@@ -29,12 +32,14 @@
   user-select: none;
 }
 
-/* 深色下仍用 Excel 系绿色强调，与浅色品牌一致 */
+/* 深色：面板深灰；选项卡栏仍为绿底白字 */
 .fs-ribbon[data-theme="dark"] {
   --fs-ribbon-accent: #6fc97b;
   --fs-ribbon-accent-press: #52b35f;
   --fs-ribbon-bg: #2d2d2d;
-  --fs-ribbon-tab-strip: #252526;
+  --fs-ribbon-tab-strip: #217346;
+  --fs-ribbon-tab-label: #ffffff;
+  --fs-ribbon-tab-hover-bg: rgba(255, 255, 255, 0.14);
   --fs-ribbon-panel-bg: #2d2d2d;
   --fs-ribbon-border: #3c3c3c;
   --fs-ribbon-group-label: #a19f9d;
@@ -48,56 +53,64 @@
   display: flex;
   flex-direction: column;
   background: var(--fs-ribbon-tab-strip);
-  border-bottom: 1px solid var(--fs-ribbon-border);
+  border-bottom: none;
 }
 
 .fs-ribbon__tablist {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 0;
   padding: 0 4px;
-  min-height: 32px;
+  min-height: 26px;
 }
 
 .fs-ribbon__tab {
-  position: relative;
+  box-sizing: border-box;
   margin: 0;
-  padding: 6px 14px 8px;
+  padding: 0 12px;
   border: none;
   background: transparent;
-  color: var(--fs-ribbon-chrome-text);
+  color: var(--fs-ribbon-tab-label);
   font: inherit;
-  font-size: 13px;
+  font-size: 12px;
   cursor: pointer;
-  border-radius: 4px 4px 0 0;
+  border-radius: 0;
   outline: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.12s ease, color 0.12s ease;
 }
 
 .fs-ribbon__tab:hover {
-  background: var(--fs-ribbon-hover);
+  background: var(--fs-ribbon-tab-hover-bg);
 }
 
 .fs-ribbon__tab:focus-visible {
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.85);
+}
+
+.fs-ribbon__tab--active:focus-visible {
   box-shadow: inset 0 0 0 2px var(--fs-ribbon-accent);
 }
 
 .fs-ribbon__tab--active {
-  background: var(--fs-ribbon-panel-bg);
+  align-self: stretch;
+  background: #ffffff;
   color: var(--fs-ribbon-accent);
   font-weight: 600;
+  z-index: 1;
+  border: none;
+  box-shadow: none;
+  border-radius: 0;
 }
 
-.fs-ribbon__tab--active::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  background: var(--fs-ribbon-accent);
-  border-radius: 1px;
+.fs-ribbon__tab--active:hover {
+  background: #fafafa;
+  color: var(--fs-ribbon-accent);
+  border: none;
+  box-shadow: none;
 }
 
 .fs-ribbon__body {
@@ -660,7 +673,7 @@
 
 @media (max-width: 900px) {
   .fs-ribbon__tab {
-    padding: 6px 10px 8px;
+    padding: 0 10px;
     font-size: 12px;
   }
 

@@ -45,6 +45,12 @@ export interface FlexSheetOptions {
   readonly formulaBar?: HTMLElement;
 }
 
+/** 距表体边缘（CSS 像素）进入自动滚动的条带宽度。 */
+const DRAG_AUTOSCROLL_MARGIN_PX = 36;
+
+/** 指针贴在边缘时的最大滚动速度（文档像素/秒，与 scrollX/scrollY 同单位）。 */
+const DRAG_AUTOSCROLL_MAX_SPEED = 880;
+
 /**
  * 对外门面：基于 Workspace + 插件挂载 Canvas，持有 Workbook 与 CanvasRenderer。
  */
@@ -69,7 +75,13 @@ export class FlexSheet {
   private resizeObserver: ResizeObserver | null = null;
   private dragSelecting = false;
   private dragPointerId: number | null = null;
+  /** 框选拖拽时用于边沿自动滚动的上一帧 client 坐标。 */
+  private lastDragClientX = 0;
+  private lastDragClientY = 0;
+  private dragAutoscrollRafId: number | null = null;
+  private dragAutoscrollPrevNow = 0;
   private workbookUnsub: (() => void) | null = null;
+  private lastWorkbookActiveIndex = 0;
 
   constructor(options: FlexSheetOptions) {
     this.formulaBarEl = options.formulaBar ?? null;
@@ -142,7 +154,18 @@ export class FlexSheet {
 
   private attachWorkbookForDataDrive(): void {
     this.workbookUnsub?.();
+    this.lastWorkbookActiveIndex = this._workbook.activeSheetIndex;
     this.workbookUnsub = this._workbook.subscribe(() => {
+      const cur = this._workbook.activeSheetIndex;
+      if (cur !== this.lastWorkbookActiveIndex) {
+        this.lastWorkbookActiveIndex = cur;
+        if (this.cellEditor.isEditing()) {
+          this.cellEditor.cancelWithoutCommit();
+        }
+        this.selection.syncWithSheet();
+        this.renderer.ensureScrollClamped();
+        this.cellEditor.syncLayout();
+      }
       this.renderer.requestRedraw();
     });
   }
@@ -156,6 +179,7 @@ export class FlexSheet {
       wb.activeSheetIndex = Math.min(wb.activeSheetIndex, wb.sheetCount - 1);
     }
     this.renderer.setWorkbook(wb);
+    this.lastWorkbookActiveIndex = wb.activeSheetIndex;
     this.renderer.ensureScrollClamped();
     this.selection.syncWithSheet();
     for (let i = 0; i < wb.sheetCount; i++) {
@@ -249,6 +273,7 @@ export class FlexSheet {
   }
 
   destroy(): void {
+    this.cancelDragAutoscrollRaf();
     this.detachDocumentDragListeners();
     this.renderer.cancelPendingRedraw();
     this.workbookUnsub?.();
@@ -306,6 +331,7 @@ export class FlexSheet {
     if (!this.dragSelecting) {
       return;
     }
+    this.cancelDragAutoscrollRaf();
     this.dragSelecting = false;
     this.dragPointerId = null;
     this.detachDocumentDragListeners();
@@ -316,6 +342,7 @@ export class FlexSheet {
         /* ignore */
       }
     }
+    this.afterSelectionChanged();
   }
 
   private bindSelectionKeyboard(): void {
@@ -333,6 +360,15 @@ export class FlexSheet {
     if (!this.dragSelecting || ev.pointerId !== this.dragPointerId) {
       return;
     }
+    this.lastDragClientX = ev.clientX;
+    this.lastDragClientY = ev.clientY;
+
+    if (this.isDragAutoscrollActive(ev.clientX, ev.clientY)) {
+      this.ensureDragAutoscrollRaf();
+      return;
+    }
+
+    this.cancelDragAutoscrollRaf();
     const hit = this.hitTestClient(ev.clientX, ev.clientY, { clampToBody: true });
     if (hit === null) {
       return;
@@ -411,16 +447,20 @@ export class FlexSheet {
     if (hit === null) {
       return;
     }
+    this.selection.selectCell(hit.row, hit.col);
+    this.revealActiveCellInViewport();
+    this.lastDragClientX = ev.clientX;
+    this.lastDragClientY = ev.clientY;
     this.dragSelecting = true;
     this.dragPointerId = ev.pointerId;
     this.attachDocumentDragListeners();
-    this.selection.selectCell(hit.row, hit.col);
     try {
       this.canvas.setPointerCapture(ev.pointerId);
     } catch {
       /* ignore */
     }
-    this.afterSelectionChanged();
+    this.cellEditor.syncLayout();
+    this.renderer.requestRedraw();
   };
 
   private readonly onKeyDown = (ev: KeyboardEvent): void => {
@@ -553,10 +593,13 @@ export class FlexSheet {
     );
   }
 
-  private afterSelectionChanged(): void {
+  /**
+   * 将活动单元格滚入视口（键盘/单击等）。
+   * 鼠标框选拖拽中不调用，避免与边沿自动滚动争抢 scroll。
+   */
+  private revealActiveCellInViewport(): void {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) {
-      this.renderer.requestRedraw();
       return;
     }
     const w = this.canvas.clientWidth;
@@ -585,9 +628,165 @@ export class FlexSheet {
       this.renderer.viewZoom,
     );
     this.renderer.setScroll(next.scrollX, next.scrollY);
+  }
+
+  private afterSelectionChanged(): void {
+    if (!this.dragSelecting) {
+      this.revealActiveCellInViewport();
+    }
     this.cellEditor.syncLayout();
     this.renderer.requestRedraw();
   }
+
+  private cancelDragAutoscrollRaf(): void {
+    if (this.dragAutoscrollRafId !== null) {
+      cancelAnimationFrame(this.dragAutoscrollRafId);
+      this.dragAutoscrollRafId = null;
+    }
+  }
+
+  private ensureDragAutoscrollRaf(): void {
+    if (this.dragAutoscrollRafId !== null) {
+      return;
+    }
+    this.dragAutoscrollPrevNow = performance.now();
+    this.dragAutoscrollRafId = requestAnimationFrame(() => {
+      this.dragAutoscrollLoop();
+    });
+  }
+
+  /**
+   * 边沿自动滚动：速度随进入条带的深度线性增加，抵住滚动极限时速度为 0（停止续帧）。
+   */
+  private computeDragAutoscrollPixelsPerSec(clientX: number, clientY: number): {
+    sx: number;
+    sy: number;
+  } {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return { sx: 0, sy: 0 };
+    }
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const corner = this.renderer.getCornerSize();
+    const layout = buildFrozenLayout(
+      sheet,
+      corner.width,
+      corner.height,
+      w,
+      h,
+      this.renderer.frozenRows,
+      this.renderer.frozenCols,
+      this.renderer.viewZoom,
+    );
+    const limits = computeScrollLimits(sheet, layout, this.renderer.viewZoom);
+    const { scrollX, scrollY } = this.renderer.getScroll();
+    const { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const M = DRAG_AUTOSCROLL_MARGIN_PX;
+    const MAX = DRAG_AUTOSCROLL_MAX_SPEED;
+
+    const { headerW, headerH, scrollViewportW, scrollViewportH } = layout;
+
+    /** 纯数据单元格区域（不含行号列、列标题行）：此处永不自动滚动。 */
+    const inDataCellArea = x > headerW && y > headerH && x <= w && y <= h;
+    if (inDataCellArea) {
+      return { sx: 0, sy: 0 };
+    }
+
+    const inColHead = y <= headerH && x >= 0 && x <= w;
+    const inRowHead = x <= headerW && y >= 0 && y <= h;
+    const outside = x < 0 || y < 0 || x > w || y > h;
+    const canAutoscroll = inColHead || inRowHead || outside;
+
+    let sx = 0;
+    let sy = 0;
+
+    /**
+     * 触发区仅限：列标题带、行号列、画布外（与 hitTest 行列头一致）。
+     * 条带深度与线性 t、MAX 不变，保证速度与平滑度。
+     */
+    if (scrollViewportW > 0 && limits.maxScrollX > 0 && canAutoscroll) {
+      const wantRight = x >= w - M || x > w;
+      const wantLeft = x <= headerW + M || x < 0;
+      if (wantRight && (inColHead || x > w || y < 0 || y > h)) {
+        const t = x > w ? 1 : Math.min(1, Math.max(0, (x - (w - M)) / M));
+        if (scrollX < limits.maxScrollX - 1e-6) {
+          sx = t * MAX;
+        }
+      } else if (
+        wantLeft &&
+        (inRowHead || (inColHead && x <= headerW + M) || x < 0 || y < 0 || y > h)
+      ) {
+        const t = x < 0 ? 1 : Math.min(1, Math.max(0, (headerW + M - x) / M));
+        if (scrollX > 1e-6) {
+          sx = -t * MAX;
+        }
+      }
+    }
+
+    if (scrollViewportH > 0 && limits.maxScrollY > 0 && canAutoscroll) {
+      const wantDown = y >= h - M || y > h;
+      const wantUp = y <= headerH + M || y < 0;
+      if (wantDown && (inRowHead || y > h || x < 0 || x > w)) {
+        const t = y > h ? 1 : Math.min(1, Math.max(0, (y - (h - M)) / M));
+        if (scrollY < limits.maxScrollY - 1e-6) {
+          sy = t * MAX;
+        }
+      } else if (
+        wantUp &&
+        (inColHead || (inRowHead && y <= headerH + M) || y < 0 || x < 0 || x > w)
+      ) {
+        const t = y < 0 ? 1 : Math.min(1, Math.max(0, (headerH + M - y) / M));
+        if (scrollY > 1e-6) {
+          sy = -t * MAX;
+        }
+      }
+    }
+
+    return { sx, sy };
+  }
+
+  private isDragAutoscrollActive(clientX: number, clientY: number): boolean {
+    const { sx, sy } = this.computeDragAutoscrollPixelsPerSec(clientX, clientY);
+    return Math.abs(sx) > 1e-6 || Math.abs(sy) > 1e-6;
+  }
+
+  private readonly dragAutoscrollLoop = (): void => {
+    this.dragAutoscrollRafId = null;
+    if (!this.dragSelecting) {
+      return;
+    }
+
+    const now = performance.now();
+    const dt = Math.min(0.08, Math.max(0, (now - this.dragAutoscrollPrevNow) / 1000));
+    this.dragAutoscrollPrevNow = now;
+
+    const { sx, sy } = this.computeDragAutoscrollPixelsPerSec(
+      this.lastDragClientX,
+      this.lastDragClientY,
+    );
+
+    if (Math.abs(sx) > 1e-6 || Math.abs(sy) > 1e-6) {
+      this.renderer.applyScrollDelta(sx * dt, sy * dt);
+      const hit = this.hitTestClient(this.lastDragClientX, this.lastDragClientY, {
+        clampToBody: true,
+      });
+      if (hit !== null) {
+        this.selection.extendFocusTo(hit.row, hit.col);
+      }
+      this.cellEditor.syncLayout();
+      this.renderer.requestRedraw();
+    }
+
+    if (
+      this.dragSelecting &&
+      this.isDragAutoscrollActive(this.lastDragClientX, this.lastDragClientY)
+    ) {
+      this.dragAutoscrollRafId = requestAnimationFrame(() => {
+        this.dragAutoscrollLoop();
+      });
+    }
+  };
 
   private syncSizeAndDraw(): void {
     const parent = this.canvas.parentElement;

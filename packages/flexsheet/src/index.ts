@@ -41,6 +41,8 @@ export {
   visibleScrollableCellRange,
   type CanvasRendererOptions,
   type FrozenLayout,
+  type HorizontalScrollMetrics,
+  type VerticalScrollMetrics,
   type RendererPluginOptions,
   type ViewportScrollLimits,
   type VisibleScrollRange,
@@ -51,6 +53,13 @@ export {
   createDefaultWorkbook,
   type FlexSheetOptions,
 } from "./flex-sheet.js";
+
+export { mountExcelBottomBar, type MountExcelBottomBarOptions } from "./excel-bottom-bar.js";
+
+export {
+  mountGridVerticalScrollbar,
+  type MountGridVerticalScrollbarOptions,
+} from "./grid-vertical-scrollbar.js";
 
 export { UndoRedoPlugin, useUndoRedo, type UndoRedoPluginOptions } from "./undo-redo-plugin.js";
 

@@ -15,9 +15,9 @@
         font-family:
           system-ui,
           -apple-system,
-          'Segoe UI',
+          "Segoe UI",
           Roboto,
-          'Helvetica Neue',
+          "Helvetica Neue",
           Arial,
           sans-serif;
       }
@@ -40,6 +40,453 @@
         flex: 1;
         min-height: 0;
         width: 100%;
+        display: flex;
+        flex-direction: column;
+      }
+      #grid-viewport {
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        flex: 1;
+        min-height: 0;
+        min-width: 0;
+        position: relative;
+      }
+      .fs-grid-viewport__canvas-host {
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        position: relative;
+      }
+      .fs-grid-vscroll {
+        flex-shrink: 0;
+        width: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        box-sizing: border-box;
+        border-left: 1px solid #c8c6c4;
+        background: #d4d4d4;
+        user-select: none;
+      }
+      .fs-grid-vscroll__btn + .fs-grid-vscroll__track {
+        margin-top: -1px;
+      }
+      .fs-grid-vscroll__track + .fs-grid-vscroll__btn {
+        margin-top: -1px;
+      }
+      .fs-grid-vscroll__btn {
+        flex-shrink: 0;
+        height: 20px;
+        min-height: 20px;
+        width: 100%;
+        padding: 0;
+        margin: 0;
+        border: 1px solid #b4b4b4;
+        border-radius: 0;
+        background: #ffffff;
+        color: #505050;
+        font-size: 8px;
+        line-height: 1;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+      }
+      .fs-grid-vscroll__btn:hover:not(:disabled) {
+        background: #f5f5f5;
+      }
+      .fs-grid-vscroll__btn:disabled {
+        opacity: 1;
+        background: #ffffff;
+        color: #505050;
+        border: 1px solid #b4b4b4;
+        cursor: default;
+      }
+      .fs-grid-vscroll__track {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        min-width: 0;
+        background: #d4d4d4;
+        border: none;
+        border-radius: 0;
+        box-sizing: border-box;
+      }
+      .fs-grid-vscroll__thumb {
+        position: absolute;
+        left: 1px;
+        width: calc(100% - 2px);
+        box-sizing: border-box;
+        border-radius: 0;
+        background: #ffffff;
+        border: 1px solid #8a8886;
+        box-shadow: none;
+        cursor: grab;
+        touch-action: none;
+      }
+      .fs-grid-vscroll__thumb--dragging {
+        cursor: grabbing;
+      }
+      .fs-excel-bottom {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: column;
+        background: #f3f2f1;
+        font-size: 12px;
+        user-select: none;
+      }
+      .fs-excel-sheet-bar {
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        min-height: 28px;
+        min-width: 0;
+        padding-right: 8px;
+        background: #f3f2f1;
+        border-top: 1px solid #c8c6c4;
+        border-bottom: 2px solid #217346;
+        box-sizing: border-box;
+        overflow-x: hidden;
+      }
+      .fs-excel-sheet-bar__left {
+        position: relative;
+        z-index: 1;
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+      }
+      .fs-excel-sheet-bar__right {
+        position: relative;
+        z-index: 2;
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        align-self: stretch;
+        gap: 5px;
+      }
+      .fs-excel-sheet-bar__grip {
+        flex-shrink: 0;
+        width: 8px;
+        height: 50%;
+        max-height: 50%;
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        cursor: col-resize;
+        border: none;
+        user-select: none;
+        touch-action: none;
+      }
+      .fs-excel-sheet-bar__grip--dragging {
+        background: #d8d7d5;
+      }
+      .fs-excel-sheet-bar__grip-dot {
+        display: block;
+        width: 2px;
+        height: 2px;
+        border-radius: 0;
+        background: #8a8886;
+      }
+      .fs-excel-sheet-bar__grid-hscroll {
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        box-sizing: border-box;
+        min-height: 0;
+        height: 50%;
+        max-height: 50%;
+        padding: 0;
+        gap: 0;
+        background: #f3f2f1;
+        border: none;
+      }
+      .fs-excel-sheet-bar__grid-hscroll--collapsed {
+        padding: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+      .fs-excel-sheet-bar__hbtn {
+        flex-shrink: 0;
+        width: 20px;
+        min-width: 20px;
+        padding: 0;
+        margin: 0;
+        border: 1px solid #b4b4b4;
+        border-radius: 0;
+        background: #ffffff;
+        color: #505050;
+        font-size: 8px;
+        line-height: 1;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        align-self: stretch;
+        min-height: 0;
+        box-sizing: border-box;
+      }
+      .fs-excel-sheet-bar__hbtn:hover {
+        background: #f5f5f5;
+      }
+      .fs-excel-sheet-bar__hbtn:disabled {
+        opacity: 1;
+        background: #ffffff;
+        color: #505050;
+        border: 1px solid #b4b4b4;
+        cursor: default;
+      }
+      .fs-excel-sheet-bar__h-track {
+        position: relative;
+        flex: 1;
+        min-width: 0;
+        min-height: 0;
+        align-self: stretch;
+        background: #d4d4d4;
+        border: none;
+        border-radius: 0;
+        box-sizing: border-box;
+      }
+      .fs-excel-sheet-bar__h-thumb {
+        position: absolute;
+        top: 0;
+        left: 0;
+        height: 100%;
+        box-sizing: border-box;
+        border-radius: 0;
+        background: #ffffff;
+        border: 1px solid #8a8886;
+        box-shadow: none;
+        cursor: grab;
+        touch-action: none;
+      }
+      .fs-excel-sheet-bar__h-thumb--dragging {
+        cursor: grabbing;
+      }
+      .fs-excel-sheet-bar__scroll {
+        flex-shrink: 0;
+        width: 22px;
+        padding: 0;
+        margin: 0;
+        border: none;
+        border-right: 1px solid #c8c6c4;
+        background: #e1dfdd;
+        color: #323130;
+        font-size: 10px;
+        line-height: 1;
+        cursor: pointer;
+      }
+      .fs-excel-sheet-bar__scroll:hover:not(:disabled) {
+        background: #d2d0ce;
+      }
+      .fs-excel-sheet-bar__scroll:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .fs-excel-sheet-bar__strip-outer {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .fs-excel-sheet-bar__strip-scroll {
+        height: 100%;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+      }
+      .fs-excel-sheet-bar__strip-scroll::-webkit-scrollbar {
+        display: none;
+      }
+      .fs-excel-sheet-bar__tabs {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: flex-end;
+        gap: 0;
+        width: max-content;
+        height: 100%;
+        padding: 0 0 0 2px;
+        min-height: 28px;
+        box-sizing: border-box;
+      }
+      .fs-excel-sheet-tab {
+        flex-shrink: 0;
+        max-width: 180px;
+        padding: 4px 12px 5px;
+        margin: 0 1px;
+        border: 1px solid #c8c6c4;
+        border-bottom: none;
+        border-radius: 3px 3px 0 0;
+        background: #e3e2e1;
+        color: #323130;
+        font: inherit;
+        cursor: pointer;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .fs-excel-sheet-tab:hover {
+        background: #edebe9;
+      }
+      .fs-excel-sheet-tab--active {
+        background: #fff;
+        border-color: #c8c6c4;
+        color: #217346;
+        font-weight: 600;
+        margin-bottom: -1px;
+        padding-bottom: 6px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
+      }
+      .fs-excel-sheet-bar__add {
+        flex-shrink: 0;
+        position: sticky;
+        right: 0;
+        z-index: 2;
+        width: 26px;
+        height: auto;
+        min-height: 22px;
+        margin: 0 0 0 1px;
+        padding: 3px 0 5px;
+        border: none;
+        background: #ecebea;
+        color: #323130;
+        font-size: 17px;
+        line-height: 1;
+        cursor: pointer;
+        box-shadow: none;
+      }
+      .fs-excel-sheet-bar__add:hover {
+        background: #d2d0ce;
+        box-shadow: none;
+      }
+      .fs-excel-status-bar {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 24px;
+        padding: 2px 6px 2px 8px;
+        background: #217346;
+        color: #ffffff;
+      }
+      .fs-excel-status-bar__msg {
+        flex: 1;
+        min-width: 0;
+        color: #ffffff;
+      }
+      .fs-excel-status-bar__zoom-wrap {
+        flex-shrink: 0;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+        padding: 0 4px 0 8px;
+      }
+      .fs-excel-status-bar__zoom-icon {
+        margin: 0;
+        padding: 0 4px;
+        border: none;
+        background: transparent;
+        color: #ffffff;
+        font-size: 14px;
+        line-height: 1;
+        cursor: pointer;
+        border-radius: 2px;
+      }
+      .fs-excel-status-bar__zoom-icon:hover {
+        background: rgba(255, 255, 255, 0.18);
+      }
+      .fs-excel-status-bar__zoom-range {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 104px;
+        height: 18px;
+        margin: 0;
+        background: transparent;
+        vertical-align: middle;
+      }
+      .fs-excel-status-bar__zoom-range:focus {
+        outline: none;
+      }
+      .fs-excel-status-bar__zoom-range:focus-visible {
+        outline: 2px solid #ffffff;
+        outline-offset: 2px;
+        border-radius: 4px;
+      }
+      .fs-excel-status-bar__zoom-range::-webkit-slider-runnable-track {
+        height: 2px;
+        background: rgba(255, 255, 255, 0.45);
+        border-radius: 1px;
+      }
+      .fs-excel-status-bar__zoom-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 12px;
+        height: 12px;
+        margin-top: -5px;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: none;
+        border: 1px solid rgba(255, 255, 255, 0.9);
+      }
+      .fs-excel-status-bar__zoom-range::-moz-range-track {
+        height: 2px;
+        background: rgba(255, 255, 255, 0.45);
+        border-radius: 1px;
+      }
+      .fs-excel-status-bar__zoom-range::-moz-range-thumb {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #ffffff;
+        box-shadow: none;
+        border: 1px solid rgba(255, 255, 255, 0.9);
+      }
+      .fs-excel-status-bar__zoom-readout {
+        min-width: 38px;
+        margin-left: 2px;
+        font-size: 12px;
+        color: #ffffff;
+        text-align: right;
+        user-select: none;
+        pointer-events: none;
+      }
+      .fs-excel-sheet-menu {
+        position: fixed;
+        z-index: 10000;
+        min-width: 140px;
+        padding: 4px 0;
+        margin: 0;
+        border: 1px solid #c8c6c4;
+        border-radius: 2px;
+        background: #fff;
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+      }
+      .fs-excel-sheet-menu__item {
+        display: block;
+        width: 100%;
+        padding: 6px 12px;
+        border: none;
+        background: #fff;
+        font: inherit;
+        text-align: left;
+        cursor: pointer;
+      }
+      .fs-excel-sheet-menu__item:hover:not(:disabled) {
+        background: #edebe9;
+      }
+      .fs-excel-sheet-menu__item:disabled {
+        opacity: 0.45;
+        cursor: default;
       }
       .fs-formula-bar {
         flex-shrink: 0;
@@ -90,7 +537,13 @@
         aria-label="公式栏"
       />
     </div>
-    <div id="app"></div>
+    <div id="app">
+      <div id="grid-viewport">
+        <div id="grid-canvas-host" class="fs-grid-viewport__canvas-host"></div>
+        <div id="grid-vscroll-host"></div>
+      </div>
+      <div id="bottom-chrome"></div>
+    </div>
     <script type="module" src="/packages/flexsheet/src/demo/main.ts"></script>
   </body>
 </html>
