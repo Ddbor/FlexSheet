@@ -520,29 +520,40 @@
         border-radius: 2px;
         font: inherit;
       }
+      /** Ribbon + 编辑栏 + 表格 + 底部栏共同祖先，用于统一拦截浏览器默认右键/快捷键。 */
+      .fs-sheet-chrome {
+        position: relative;
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        outline: none;
+      }
     </style>
   </head>
   <body>
-    <div id="toolbar"></div>
-    <div id="formula-bar" class="fs-formula-bar" aria-label="编辑栏">
-      <span class="fs-formula-bar__name" id="formula-name-box">A1</span>
-      <span class="fs-formula-bar__fx" aria-hidden="true">fx</span>
-      <input
-        class="fs-formula-bar__input"
-        id="formula-input"
-        type="text"
-        spellcheck="false"
-        autocomplete="off"
-        placeholder="单元格内容"
-        aria-label="公式栏"
-      />
-    </div>
-    <div id="app">
-      <div id="grid-viewport">
-        <div id="grid-canvas-host" class="fs-grid-viewport__canvas-host"></div>
-        <div id="grid-vscroll-host"></div>
+    <div id="fs-sheet-chrome" class="fs-sheet-chrome" tabindex="-1">
+      <div id="toolbar"></div>
+      <div id="formula-bar" class="fs-formula-bar" aria-label="编辑栏">
+        <span class="fs-formula-bar__name" id="formula-name-box">A1</span>
+        <span class="fs-formula-bar__fx" aria-hidden="true">fx</span>
+        <input
+          class="fs-formula-bar__input"
+          id="formula-input"
+          type="text"
+          spellcheck="false"
+          autocomplete="off"
+          placeholder="单元格内容"
+          aria-label="公式栏"
+        />
       </div>
-      <div id="bottom-chrome"></div>
+      <div id="app">
+        <div id="grid-viewport">
+          <div id="grid-canvas-host" class="fs-grid-viewport__canvas-host"></div>
+          <div id="grid-vscroll-host"></div>
+        </div>
+        <div id="bottom-chrome"></div>
+      </div>
     </div>
     <script type="module" src="/packages/flexsheet/src/demo/main.ts"></script>
   </body>

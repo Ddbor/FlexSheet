@@ -44,6 +44,20 @@ export function scaledRowH(sheet: Worksheet, viewZoom: number): number {
   return sheet.defaultRowHeight * viewZoom;
 }
 
+export function scaledColWidthAt(sheet: Worksheet, col: number, viewZoom: number): number {
+  if (sheet.isColHidden(col)) {
+    return 0;
+  }
+  return sheet.getColWidth(col) * viewZoom;
+}
+
+export function scaledRowHeightAt(sheet: Worksheet, row: number, viewZoom: number): number {
+  if (sheet.isRowHidden(row)) {
+    return 0;
+  }
+  return sheet.getRowHeight(row) * viewZoom;
+}
+
 export function scaledFontSizePx(base: number, viewZoom: number): number {
   return Math.max(8, Math.min(36, Math.round(base * viewZoom)));
 }

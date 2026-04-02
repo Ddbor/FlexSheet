@@ -3,6 +3,7 @@ import {
   PLUGIN_SERVICE_KEYS,
   type PluginContext,
   type SelectionPaintSnapshot,
+  type SelectionRange,
   type Workbook,
 } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
@@ -15,6 +16,8 @@ export interface RendererPluginOptions {
   readonly frozenRows: number;
   readonly frozenCols: number;
   readonly getSelectionSnapshot: () => SelectionPaintSnapshot | null;
+  /** 复制/剪切后的走马灯范围；可选。 */
+  readonly getClipboardMarqueeRange?: () => SelectionRange | null;
 }
 
 /**
@@ -61,6 +64,7 @@ export class RendererPlugin extends PluginBase {
       workbook: this.options.workbook,
       theme: this.options.theme,
       getSelectionSnapshot: this.options.getSelectionSnapshot,
+      getClipboardMarqueeRange: this.options.getClipboardMarqueeRange,
     });
     this.renderer.setFrozenPanes(this.options.frozenRows, this.options.frozenCols);
 

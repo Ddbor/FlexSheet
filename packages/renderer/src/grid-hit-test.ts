@@ -1,4 +1,5 @@
 import type { Worksheet } from "@flexsheet/core";
+import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
 import type { FrozenLayout } from "./viewport.js";
 import { clampScroll, type ViewportScrollLimits } from "./viewport.js";
 
@@ -22,8 +23,6 @@ export function hitTestHeadingPointer(
   scale = 1,
 ): HeadingHit | null {
   const { headerW, headerH } = layout;
-  const colW = sheet.defaultColWidth * scale;
-  const rowH = sheet.defaultRowHeight * scale;
 
   if (canvasX < headerW && canvasY < headerH) {
     return { kind: "selectAllCorner" };
@@ -31,7 +30,7 @@ export function hitTestHeadingPointer(
 
   if (canvasX >= headerW && canvasY < headerH) {
     const gx = canvasX - headerW;
-    const col = columnIndexFromGx(gx, sheet, layout, scrollX, colW);
+    const col = columnIndexFromGx(gx, sheet, layout, scrollX, scale);
     if (col === null) {
       return null;
     }
@@ -40,7 +39,7 @@ export function hitTestHeadingPointer(
 
   if (canvasX < headerW && canvasY >= headerH) {
     const gy = canvasY - headerH;
-    const row = rowIndexFromGy(gy, sheet, layout, scrollY, rowH);
+    const row = rowIndexFromGy(gy, sheet, layout, scrollY, scale);
     if (row === null) {
       return null;
     }
@@ -55,16 +54,13 @@ function columnIndexFromGx(
   sheet: Worksheet,
   layout: FrozenLayout,
   scrollX: number,
-  colW: number,
+  scale: number,
 ): number | null {
   const { frozenCols, frozenWidthPx } = layout;
-  let col: number;
-  if (frozenCols > 0 && gx < frozenWidthPx) {
-    col = clampIndex(Math.floor(gx / colW), 0, frozenCols - 1);
-  } else {
-    const gxScroll = gx - frozenWidthPx + scrollX;
-    col = frozenCols + Math.floor(gxScroll / colW);
-  }
+  const col =
+    gx < frozenWidthPx
+      ? locateByOffset(sheet, 0, gx, scale, "col")
+      : locateByOffset(sheet, frozenCols, gx - frozenWidthPx + scrollX, scale, "col");
   if (col < 0 || col >= sheet.colCount) {
     return null;
   }
@@ -76,16 +72,13 @@ function rowIndexFromGy(
   sheet: Worksheet,
   layout: FrozenLayout,
   scrollY: number,
-  rowH: number,
+  scale: number,
 ): number | null {
   const { frozenRows, frozenHeightPx } = layout;
-  let row: number;
-  if (frozenRows > 0 && gy < frozenHeightPx) {
-    row = clampIndex(Math.floor(gy / rowH), 0, frozenRows - 1);
-  } else {
-    const gyScroll = gy - frozenHeightPx + scrollY;
-    row = frozenRows + Math.floor(gyScroll / rowH);
-  }
+  const row =
+    gy < frozenHeightPx
+      ? locateByOffset(sheet, 0, gy, scale, "row")
+      : locateByOffset(sheet, frozenRows, gy - frozenHeightPx + scrollY, scale, "row");
   if (row < 0 || row >= sheet.rowCount) {
     return null;
   }
@@ -110,21 +103,15 @@ export function hitTestCell(
     return null;
   }
 
-  const colW = sheet.defaultColWidth * scale;
-  const rowH = sheet.defaultRowHeight * scale;
   const gx = canvasX - headerW;
   const gy = canvasY - headerH;
 
-  const col = columnIndexFromGx(gx, sheet, layout, scrollX, colW);
-  const row = rowIndexFromGy(gy, sheet, layout, scrollY, rowH);
+  const col = columnIndexFromGx(gx, sheet, layout, scrollX, scale);
+  const row = rowIndexFromGy(gy, sheet, layout, scrollY, scale);
   if (col === null || row === null) {
     return null;
   }
   return { row, col };
-}
-
-function clampIndex(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
 }
 
 /**
@@ -140,15 +127,14 @@ export function scrollToRevealCell(
   scrollY: number,
   scale = 1,
 ): { scrollX: number; scrollY: number } {
-  const colW = sheet.defaultColWidth * scale;
-  const rowH = sheet.defaultRowHeight * scale;
   const { frozenCols, frozenRows, scrollViewportW, scrollViewportH } = layout;
 
   let sx = scrollX;
   let sy = scrollY;
 
   if (col >= frozenCols) {
-    const offset = (col - frozenCols) * colW;
+    const offset = sumSizes(sheet, frozenCols, col, scale, "col");
+    const colW = scaledColWidthAt(sheet, col, scale);
     const lo = offset - scrollViewportW + colW;
     const hi = offset;
     if (lo <= hi) {
@@ -159,7 +145,8 @@ export function scrollToRevealCell(
   }
 
   if (row >= frozenRows) {
-    const offset = (row - frozenRows) * rowH;
+    const offset = sumSizes(sheet, frozenRows, row, scale, "row");
+    const rowH = scaledRowHeightAt(sheet, row, scale);
     const lo = offset - scrollViewportH + rowH;
     const hi = offset;
     if (lo <= hi) {
@@ -170,4 +157,38 @@ export function scrollToRevealCell(
   }
 
   return clampScroll(sx, sy, limits);
+}
+
+function locateByOffset(
+  sheet: Worksheet,
+  start: number,
+  offset: number,
+  scale: number,
+  axis: "row" | "col",
+): number {
+  let remain = Math.max(0, offset);
+  const count = axis === "row" ? sheet.rowCount : sheet.colCount;
+  for (let i = start; i < count; i++) {
+    const size =
+      axis === "row" ? scaledRowHeightAt(sheet, i, scale) : scaledColWidthAt(sheet, i, scale);
+    if (remain < size) {
+      return i;
+    }
+    remain -= size;
+  }
+  return Math.max(start, count - 1);
+}
+
+function sumSizes(
+  sheet: Worksheet,
+  start: number,
+  endExcl: number,
+  scale: number,
+  axis: "row" | "col",
+): number {
+  let s = 0;
+  for (let i = start; i < endExcl; i++) {
+    s += axis === "row" ? scaledRowHeightAt(sheet, i, scale) : scaledColWidthAt(sheet, i, scale);
+  }
+  return s;
 }

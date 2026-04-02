@@ -1,4 +1,5 @@
 import type { Worksheet } from "@flexsheet/core";
+import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
 
 /** 视口与虚拟滚动：scroll 仅作用于「非冻结」行列区域（像素）。 */
 export interface ViewportScrollLimits {
@@ -31,12 +32,16 @@ export function buildFrozenLayout(
   frozenCols: number,
   scale = 1,
 ): FrozenLayout {
-  const colW = sheet.defaultColWidth * scale;
-  const rowH = sheet.defaultRowHeight * scale;
   const fc = Math.max(0, Math.min(frozenCols, sheet.colCount));
   const fr = Math.max(0, Math.min(frozenRows, sheet.rowCount));
-  const fw = fc * colW;
-  const fh = fr * rowH;
+  let fw = 0;
+  for (let c = 0; c < fc; c++) {
+    fw += scaledColWidthAt(sheet, c, scale);
+  }
+  let fh = 0;
+  for (let r = 0; r < fr; r++) {
+    fh += scaledRowHeightAt(sheet, r, scale);
+  }
   const scrollViewportW = Math.max(0, canvasW - headerW - fw);
   const scrollViewportH = Math.max(0, canvasH - headerH - fh);
   return {
@@ -56,13 +61,15 @@ export function computeScrollLimits(
   layout: FrozenLayout,
   scale = 1,
 ): ViewportScrollLimits {
-  const colW = sheet.defaultColWidth * scale;
-  const rowH = sheet.defaultRowHeight * scale;
   const { scrollViewportW, scrollViewportH } = layout;
-  const scrollColCount = Math.max(0, sheet.colCount - layout.frozenCols);
-  const scrollRowCount = Math.max(0, sheet.rowCount - layout.frozenRows);
-  const contentW = scrollColCount * colW;
-  const contentH = scrollRowCount * rowH;
+  let contentW = 0;
+  for (let c = layout.frozenCols; c < sheet.colCount; c++) {
+    contentW += scaledColWidthAt(sheet, c, scale);
+  }
+  let contentH = 0;
+  for (let r = layout.frozenRows; r < sheet.rowCount; r++) {
+    contentH += scaledRowHeightAt(sheet, r, scale);
+  }
   return {
     maxScrollX: Math.max(0, contentW - scrollViewportW),
     maxScrollY: Math.max(0, contentH - scrollViewportH),
@@ -98,8 +105,6 @@ export function visibleScrollableCellRange(
   buffer: number,
   scale = 1,
 ): VisibleScrollRange {
-  const colW = sheet.defaultColWidth * scale;
-  const rowH = sheet.defaultRowHeight * scale;
   const { frozenCols, frozenRows, scrollViewportW, scrollViewportH } = layout;
 
   if (sheet.colCount <= 0 || sheet.rowCount <= 0) {
@@ -115,10 +120,10 @@ export function visibleScrollableCellRange(
     startCol = frozenCols;
     endCol = frozenCols - 1;
   } else {
-    const firstScrollCol = frozenCols + Math.floor(scrollX / colW);
-    const lastScrollCol = frozenCols + Math.ceil((scrollX + scrollViewportW) / colW) - 1;
-    startCol = Math.max(frozenCols, firstScrollCol - buffer);
-    endCol = Math.min(sheet.colCount - 1, lastScrollCol + buffer);
+    const col = locateIndexByOffset(sheet, frozenCols, scrollX, scale, "col");
+    const end = locateIndexByOffset(sheet, frozenCols, scrollX + scrollViewportW, scale, "col");
+    startCol = Math.max(frozenCols, col - buffer);
+    endCol = Math.min(sheet.colCount - 1, end + buffer);
   }
 
   let startRow = frozenRows;
@@ -130,13 +135,33 @@ export function visibleScrollableCellRange(
     startRow = frozenRows;
     endRow = frozenRows - 1;
   } else {
-    const firstScrollRow = frozenRows + Math.floor(scrollY / rowH);
-    const lastScrollRow = frozenRows + Math.ceil((scrollY + scrollViewportH) / rowH) - 1;
-    startRow = Math.max(frozenRows, firstScrollRow - buffer);
-    endRow = Math.min(sheet.rowCount - 1, lastScrollRow + buffer);
+    const row = locateIndexByOffset(sheet, frozenRows, scrollY, scale, "row");
+    const end = locateIndexByOffset(sheet, frozenRows, scrollY + scrollViewportH, scale, "row");
+    startRow = Math.max(frozenRows, row - buffer);
+    endRow = Math.min(sheet.rowCount - 1, end + buffer);
   }
 
   return { startCol, endCol, startRow, endRow };
+}
+
+function locateIndexByOffset(
+  sheet: Worksheet,
+  start: number,
+  offset: number,
+  scale: number,
+  axis: "row" | "col",
+): number {
+  let remain = Math.max(0, offset);
+  const count = axis === "row" ? sheet.rowCount : sheet.colCount;
+  for (let i = start; i < count; i++) {
+    const size =
+      axis === "row" ? scaledRowHeightAt(sheet, i, scale) : scaledColWidthAt(sheet, i, scale);
+    if (remain < size) {
+      return i;
+    }
+    remain -= size;
+  }
+  return Math.max(start, count - 1);
 }
 
 /**

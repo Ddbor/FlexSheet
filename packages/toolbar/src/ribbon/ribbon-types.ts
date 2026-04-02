@@ -17,6 +17,11 @@ export interface RibbonCommandEvent {
 export interface FlexSheetRibbonOptions {
   /** 挂载容器（通常为 #toolbar） */
   readonly container: HTMLElement;
+  /**
+   * 「文件」Backstage 全屏覆盖的祖先节点（通常为含编辑栏与表格的 #fs-sheet-chrome）。
+   * 未传时使用 `container.parentElement`，需为该节点设置 `position: relative`。
+   */
+  readonly backstageCoverRoot?: HTMLElement;
   /** 可选：传入后可通过 `syncTheme` 与 `getRenderer()` 联动 */
   readonly flexSheet?: FlexSheetLike;
   /** 按钮、下拉项等交互回调 */

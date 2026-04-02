@@ -4,11 +4,10 @@ import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geo
 import {
   argbToCss,
   formatCellDisplay,
-  scaledColW,
+  scaledColWidthAt,
   scaledFontSizePx,
-  scaledRowH,
+  scaledRowHeightAt,
   snapLine,
-  truncateText,
 } from "./canvas-renderer-utils.js";
 import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
 import type { FrozenLayout } from "./viewport.js";
@@ -37,10 +36,11 @@ function paintBodyCellFills(
   c1: number,
 ): void {
   const { ctx } = env;
-  const colW = scaledColW(sheet, env.viewZoom);
-  const rowH = scaledRowH(sheet, env.viewZoom);
   for (let r = r0; r <= r1; r++) {
+    const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
     for (let c = c0; c <= c1; c++) {
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      if (colW <= 0 || rowH <= 0) continue;
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
       const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
       if (!cellIntersectsCanvas(x, y, colW, rowH, headerW, headerH, canvasW, canvasH)) {
@@ -72,10 +72,29 @@ function paintBodyCellTexts(
   c1: number,
 ): void {
   const { ctx } = env;
-  const colW = scaledColW(sheet, env.viewZoom);
-  const rowH = scaledRowH(sheet, env.viewZoom);
+  const hasVisibleContent = (row: number, col: number): boolean => {
+    if (col < 0 || col >= sheet.colCount || row < 0 || row >= sheet.rowCount) {
+      return false;
+    }
+    return formatCellDisplay(sheet.getCell(row, col).value) !== "";
+  };
+
+  const extendedTextWidth = (row: number, col: number, baseW: number): number => {
+    let w = baseW;
+    for (let c = col + 1; c < sheet.colCount; c++) {
+      if (hasVisibleContent(row, c)) {
+        break;
+      }
+      w += scaledColWidthAt(sheet, c, env.viewZoom);
+    }
+    return w;
+  };
+
   for (let r = r0; r <= r1; r++) {
+    const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
     for (let c = c0; c <= c1; c++) {
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      if (colW <= 0 || rowH <= 0) continue;
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
       const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
       if (!cellIntersectsCanvas(x, y, colW, rowH, headerW, headerH, canvasW, canvasH)) {
@@ -94,11 +113,31 @@ function paintBodyCellTexts(
       const weight = cell.style?.bold === true ? "600" : "400";
       ctx.font = `${weight} ${scaledFontSizePx(13, env.viewZoom)}px system-ui, -apple-system, sans-serif`;
       ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
+      ctx.textBaseline = "top";
       const pad = 4;
-      const maxTextW = colW - pad * 2;
-      const display = truncateText(ctx, text, maxTextW);
-      ctx.fillText(display, x + pad, y + rowH / 2);
+      const baseX = x + pad;
+      const multiline = text.includes("\n");
+      const drawW = multiline ? colW : extendedTextWidth(r, c, colW);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, drawW, rowH);
+      ctx.clip();
+      if (multiline) {
+        const lines = text.split("\n");
+        const lineH = Math.max(12, scaledFontSizePx(13, env.viewZoom) * 1.25);
+        let yy = y + 2;
+        for (const line of lines) {
+          if (yy + lineH > y + rowH + 1e-6) {
+            break;
+          }
+          ctx.fillText(line, baseX, yy);
+          yy += lineH;
+        }
+      } else {
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, baseX, y + rowH / 2);
+      }
+      ctx.restore();
     }
   }
 }
@@ -111,8 +150,6 @@ function strokeBodyGrid(
   r1: number,
   c0: number,
   c1: number,
-  colW: number,
-  rowH: number,
   clipBounds: { minX: number; minY: number; maxX: number; maxY: number },
 ): void {
   const { ctx } = env;
@@ -128,15 +165,20 @@ function strokeBodyGrid(
   ctx.beginPath();
 
   const yTop = cellTopY(sheet, layout, r0, env.viewZoom, env.scrollY);
-  const yBottom = cellTopY(sheet, layout, r1, env.viewZoom, env.scrollY) + rowH;
+  const yBottom =
+    cellTopY(sheet, layout, r1, env.viewZoom, env.scrollY) +
+    scaledRowHeightAt(sheet, r1, env.viewZoom);
   const xLeft = cellLeftX(sheet, layout, c0, env.viewZoom, env.scrollX);
-  const xRight = cellLeftX(sheet, layout, c1, env.viewZoom, env.scrollX) + colW;
+  const xRight =
+    cellLeftX(sheet, layout, c1, env.viewZoom, env.scrollX) +
+    scaledColWidthAt(sheet, c1, env.viewZoom);
 
   for (let c = c0; c <= c1 + 1; c++) {
     const x =
       c < sheet.colCount
         ? cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX)
-        : cellLeftX(sheet, layout, sheet.colCount - 1, env.viewZoom, env.scrollX) + colW;
+        : cellLeftX(sheet, layout, sheet.colCount - 1, env.viewZoom, env.scrollX) +
+          scaledColWidthAt(sheet, sheet.colCount - 1, env.viewZoom);
 
     if (c === frozenCols) {
       continue;
@@ -158,7 +200,8 @@ function strokeBodyGrid(
     const y =
       r < sheet.rowCount
         ? cellTopY(sheet, layout, r, env.viewZoom, env.scrollY)
-        : cellTopY(sheet, layout, sheet.rowCount - 1, env.viewZoom, env.scrollY) + rowH;
+        : cellTopY(sheet, layout, sheet.rowCount - 1, env.viewZoom, env.scrollY) +
+          scaledRowHeightAt(sheet, sheet.rowCount - 1, env.viewZoom);
 
     if (r === frozenRows) {
       continue;
@@ -203,8 +246,6 @@ function runBodyQuadrantPass(
       maxY: clipY + clipH,
     };
   }
-  const colW = scaledColW(sheet, env.viewZoom);
-  const rowH = scaledRowH(sheet, env.viewZoom);
   ctx.save();
   ctx.beginPath();
   ctx.rect(clipX, clipY, clipW, clipH);
@@ -212,7 +253,7 @@ function runBodyQuadrantPass(
   paintBodyCellFills(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
 
   if (strokeBounds !== null && env.showGridLines) {
-    strokeBodyGrid(env, sheet, layout, r0, r1, c0, c1, colW, rowH, strokeBounds);
+    strokeBodyGrid(env, sheet, layout, r0, r1, c0, c1, strokeBounds);
   }
 
   paintBodyCellTexts(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);

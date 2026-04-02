@@ -54,6 +54,7 @@ export {
   FlexSheet,
   createDefaultWorkbook,
   type FlexSheetOptions,
+  type FlexSheetSurfaceHit,
 } from "./flex-sheet.js";
 
 export { mountExcelBottomBar, type MountExcelBottomBarOptions } from "./excel-bottom-bar.js";
@@ -66,6 +67,37 @@ export {
 export { UndoRedoPlugin, useUndoRedo, type UndoRedoPluginOptions } from "./undo-redo-plugin.js";
 
 export {
+  CONTEXT_MENU_SCOPE,
+  SheetContextMenuPlugin,
+  useSheetContextMenu,
+  type SheetContextMenuPluginOptions,
+} from "./sheet-context-menu-plugin.js";
+
+export {
+  SheetChromeGuardPlugin,
+  useSheetChromeGuard,
+  type SheetChromeGuardPluginOptions,
+} from "./sheet-chrome-guard-plugin.js";
+
+export {
+  ClipboardPlugin,
+  useClipboard,
+  type ClipboardPluginOptions,
+} from "./clipboard-plugin.js";
+
+export { CutClearRegionCommand, PasteRegionCommand } from "./clipboard/clipboard-commands.js";
+export {
+  DeleteColsCommand,
+  DeleteRowsCommand,
+  InsertColsCommand,
+  InsertRowsCommand,
+  SetColHiddenCommand,
+  SetColWidthCommand,
+  SetRowHeightCommand,
+  SetRowHiddenCommand,
+} from "./sheet-structure-commands.js";
+
+export {
   createDefaultDarkTheme,
   createDefaultLightTheme,
   ThemePlugin,
@@ -75,6 +107,7 @@ export {
 export { columnIndexToLabel } from "@flexsheet/shared";
 
 export {
+  ClearRegionContentsCommand,
   evaluateAst,
   parseFormula,
   recalcWorksheet,

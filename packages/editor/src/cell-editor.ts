@@ -33,7 +33,7 @@ export interface BeginEditOptions {
 }
 
 /**
- * 单个浮层 input，绝对定位于宿主内，与 Canvas 单元格对齐。
+ * 单个浮层 textarea，绝对定位于宿主内，与 Canvas 单元格对齐。
  */
 export class CellEditor {
   private readonly host: HTMLElement;
@@ -44,7 +44,8 @@ export class CellEditor {
   private readonly onCommit: (row: number, col: number, value: CellScalar) => void;
   private readonly onEditEnd?: () => void;
 
-  private readonly input: HTMLInputElement;
+  private readonly input: HTMLTextAreaElement;
+  private readonly measureCanvas: HTMLCanvasElement;
 
   private editing = false;
   private editingRow = 0;
@@ -65,8 +66,7 @@ export class CellEditor {
       this.host.style.position = "relative";
     }
 
-    this.input = document.createElement("input");
-    this.input.type = "text";
+    this.input = document.createElement("textarea");
     this.input.autocomplete = "off";
     this.input.spellcheck = false;
     this.input.style.position = "absolute";
@@ -79,13 +79,18 @@ export class CellEditor {
     this.input.style.paddingBottom = "0";
     this.input.style.font = "13px system-ui, -apple-system, sans-serif";
     this.input.style.borderRadius = "0";
+    this.input.style.whiteSpace = "pre";
+    this.input.style.overflow = "hidden";
+    this.input.style.resize = "none";
     this.input.style.display = "none";
     this.applyTheme(this.getTheme());
+    this.measureCanvas = document.createElement("canvas");
 
     this.host.appendChild(this.input);
     this.input.addEventListener("keydown", this.onInputKeyDown);
     this.input.addEventListener("blur", this.onInputBlur);
     this.input.addEventListener("dblclick", this.onInputDblClick);
+    this.input.addEventListener("input", this.onInputValueChanged);
   }
 
   isEditing(): boolean {
@@ -150,6 +155,7 @@ export class CellEditor {
     this.input.removeEventListener("keydown", this.onInputKeyDown);
     this.input.removeEventListener("blur", this.onInputBlur);
     this.input.removeEventListener("dblclick", this.onInputDblClick);
+    this.input.removeEventListener("input", this.onInputValueChanged);
     if (this.editing) {
       this.commitFromEditor();
     }
@@ -202,7 +208,8 @@ export class CellEditor {
     this.input.style.minHeight = `${rect.height}px`;
     const borderTotal = 4;
     const innerH = Math.max(0, rect.height - borderTotal);
-    this.input.style.lineHeight = `${innerH}px`;
+    this.input.style.lineHeight = `${Math.max(16, innerH)}px`;
+    this.applyAutoWidthByContent();
   }
 
   private getTextStartScreenX(): number {
@@ -234,8 +241,12 @@ export class CellEditor {
     });
   };
 
+  private readonly onInputValueChanged = (): void => {
+    this.applyAutoWidthByContent();
+  };
+
   private readonly onInputKeyDown = (ev: KeyboardEvent): void => {
-    if (ev.key === "Enter") {
+    if (ev.key === "Enter" && !ev.altKey) {
       if (ev.isComposing) {
         return;
       }
@@ -280,5 +291,29 @@ export class CellEditor {
     this.input.style.display = "none";
     this.onCommit(row, col, value);
     this.onEditEnd?.();
+  }
+
+  private applyAutoWidthByContent(): void {
+    if (!this.editing) {
+      return;
+    }
+    const rect = this.getCellRect(this.editingRow, this.editingCol);
+    if (rect === null) {
+      return;
+    }
+    const ctx = this.measureCanvas.getContext("2d");
+    if (ctx === null) {
+      return;
+    }
+    const font = this.getCellFontCss(this.editingRow, this.editingCol);
+    ctx.font = font;
+    const lines = this.input.value.split("\n");
+    let maxLineW = 0;
+    for (const line of lines) {
+      maxLineW = Math.max(maxLineW, ctx.measureText(line).width);
+    }
+    const pad = 10;
+    const desired = Math.ceil(maxLineW + pad);
+    this.input.style.width = `${Math.max(rect.width, desired)}px`;
   }
 }

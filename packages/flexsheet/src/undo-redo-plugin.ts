@@ -3,6 +3,8 @@ import type { CellEditor } from "@flexsheet/editor";
 
 export interface UndoRedoPluginOptions {
   readonly canvas: HTMLCanvasElement;
+  /** 快捷键监听目标；通常为 `chromeRoot`（含 Ribbon、画布、底部栏），否则为画布。 */
+  readonly keyTarget?: HTMLElement;
 }
 
 /**
@@ -13,11 +15,11 @@ export class UndoRedoPlugin extends PluginBase {
   readonly name = "flexsheet.undoRedo";
 
   private ctx: PluginContext | null = null;
-  private readonly canvas: HTMLCanvasElement;
+  private readonly keyTarget: HTMLElement;
 
   constructor(options: UndoRedoPluginOptions) {
     super();
-    this.canvas = options.canvas;
+    this.keyTarget = options.keyTarget ?? options.canvas;
   }
 
   override install(ctx: PluginContext): void {
@@ -25,11 +27,11 @@ export class UndoRedoPlugin extends PluginBase {
   }
 
   override activate(): void {
-    this.canvas.addEventListener("keydown", this.onKeyDown, true);
+    this.keyTarget.addEventListener("keydown", this.onKeyDown, true);
   }
 
   override deactivate(): void {
-    this.canvas.removeEventListener("keydown", this.onKeyDown, true);
+    this.keyTarget.removeEventListener("keydown", this.onKeyDown, true);
   }
 
   override destroy(): void {

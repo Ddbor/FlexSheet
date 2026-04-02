@@ -1,6 +1,6 @@
 import type { Worksheet } from "@flexsheet/core";
 import type { FrozenLayout } from "./viewport.js";
-import { scaledColW, scaledRowH } from "./canvas-renderer-utils.js";
+import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
 
 /** 列 `c` 左边缘画布 X（含冻结与滚动）。 */
 export function cellLeftX(
@@ -10,12 +10,18 @@ export function cellLeftX(
   viewZoom: number,
   scrollX: number,
 ): number {
-  const colW = scaledColW(sheet, viewZoom);
   const { headerW, frozenCols, frozenWidthPx } = layout;
+  const sumColWidths = (start: number, endExcl: number): number => {
+    let s = 0;
+    for (let i = start; i < endExcl; i++) {
+      s += scaledColWidthAt(sheet, i, viewZoom);
+    }
+    return s;
+  };
   if (c < frozenCols) {
-    return headerW + c * colW;
+    return headerW + sumColWidths(0, c);
   }
-  return headerW + frozenWidthPx + (c - frozenCols) * colW - scrollX;
+  return headerW + frozenWidthPx + sumColWidths(frozenCols, c) - scrollX;
 }
 
 /** 行 `r` 顶边画布 Y（含冻结与滚动）。 */
@@ -26,12 +32,18 @@ export function cellTopY(
   viewZoom: number,
   scrollY: number,
 ): number {
-  const rowH = scaledRowH(sheet, viewZoom);
   const { headerH, frozenRows, frozenHeightPx } = layout;
+  const sumRowHeights = (start: number, endExcl: number): number => {
+    let s = 0;
+    for (let i = start; i < endExcl; i++) {
+      s += scaledRowHeightAt(sheet, i, viewZoom);
+    }
+    return s;
+  };
   if (r < frozenRows) {
-    return headerH + r * rowH;
+    return headerH + sumRowHeights(0, r);
   }
-  return headerH + frozenHeightPx + (r - frozenRows) * rowH - scrollY;
+  return headerH + frozenHeightPx + sumRowHeights(frozenRows, r) - scrollY;
 }
 
 export function cellIntersectsCanvas(

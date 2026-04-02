@@ -6,8 +6,10 @@ import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import { getClampedSelectionSpan } from "./canvas-renderer-selection-span.js";
 import {
   scaledColW,
+  scaledColWidthAt,
   scaledFontSizePx,
   scaledRowH,
+  scaledRowHeightAt,
   snapLine,
   viewScaledSelectionOutlineWidth,
 } from "./canvas-renderer-utils.js";
@@ -70,7 +72,6 @@ export function drawRulerOverlay(
   canvasW: number,
 ): void {
   const { ctx } = env;
-  const colW = scaledColW(sheet, env.viewZoom);
   const yRuler = snapLine(headerH);
   ctx.strokeStyle = env.theme.gridLineColor;
   ctx.lineWidth = 1;
@@ -82,6 +83,7 @@ export function drawRulerOverlay(
   const drawTicks = (c0: number, c1: number): void => {
     for (let c = c0; c <= c1; c++) {
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
       if (x + colW <= headerW || x >= canvasW) {
         continue;
       }
@@ -99,6 +101,7 @@ export function drawRulerOverlay(
     ctx.beginPath();
     ctx.rect(sx0, 0, canvasW - sx0, headerH);
     ctx.clip();
+    const colW = scaledColW(sheet, env.viewZoom);
     const first = frozenCols + Math.floor(env.scrollX / colW) - 1;
     const last = frozenCols + Math.ceil((env.scrollX + layout.scrollViewportW) / colW) + 1;
     drawTicks(Math.max(frozenCols, first), Math.min(maxC, last));
@@ -154,7 +157,6 @@ export function drawAllColumnHeaders(
   selectionSnap: SelectionPaintSnapshot | null,
 ): void {
   const { ctx } = env;
-  const colW = scaledColW(sheet, env.viewZoom);
   const selSpan = getClampedSelectionSpan(sheet, selectionSnap);
   const columnInSelection = (c: number): boolean =>
     selSpan !== null && c >= selSpan.startCol && c <= selSpan.endCol;
@@ -168,6 +170,7 @@ export function drawAllColumnHeaders(
     const out: number[] = [];
     for (let c = 0; c < frozenCols && c <= maxC; c++) {
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
       if (x + colW <= headerW || x >= canvasW) {
         continue;
       }
@@ -188,6 +191,7 @@ export function drawAllColumnHeaders(
     const c1 = Math.min(maxC, last);
     for (let c = c0; c <= c1; c++) {
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
       if (x + colW <= headerW || x >= canvasW) {
         continue;
       }
@@ -217,7 +221,8 @@ export function drawAllColumnHeaders(
       ctx.lineTo(xs, yBot);
     }
     const lastC = visibleCols[visibleCols.length - 1];
-    const xe = snapLine(cellLeftX(sheet, layout, lastC, env.viewZoom, env.scrollX) + colW);
+    const lastW = scaledColWidthAt(sheet, lastC, env.viewZoom);
+    const xe = snapLine(cellLeftX(sheet, layout, lastC, env.viewZoom, env.scrollX) + lastW);
     ctx.moveTo(xe, yTop);
     ctx.lineTo(xe, yBot);
     ctx.stroke();
@@ -231,6 +236,7 @@ export function drawAllColumnHeaders(
     ctx.clip();
     for (const c of scrollCols) {
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
       paintColumnHeaderCell(ctx, env.theme, env.viewZoom, c, x, colW, headerH, columnInSelection(c));
     }
     strokeColumnHeaderGrid(scrollCols, sx0);
@@ -245,6 +251,7 @@ export function drawAllColumnHeaders(
     ctx.clip();
     for (const c of frozenColsList) {
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
       paintColumnHeaderCell(ctx, env.theme, env.viewZoom, c, x, colW, headerH, columnInSelection(c));
     }
     strokeColumnHeaderGrid(frozenColsList, headerW);
@@ -262,7 +269,6 @@ export function drawAllRowHeaders(
   selectionSnap: SelectionPaintSnapshot | null,
 ): void {
   const { ctx } = env;
-  const rowH = scaledRowH(sheet, env.viewZoom);
   const { frozenRows } = layout;
   const buf = env.viewportBuffer;
   const maxR = sheet.rowCount - 1;
@@ -276,6 +282,7 @@ export function drawAllRowHeaders(
     const out: number[] = [];
     for (let r = 0; r < frozenRows && r <= maxR; r++) {
       const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
       if (y + rowH <= headerH || y >= canvasH) {
         continue;
       }
@@ -296,6 +303,7 @@ export function drawAllRowHeaders(
     const r1 = Math.min(maxR, last);
     for (let r = r0; r <= r1; r++) {
       const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
       if (y + rowH <= headerH || y >= canvasH) {
         continue;
       }
@@ -328,7 +336,8 @@ export function drawAllRowHeaders(
       ctx.lineTo(xRight, ys);
     }
     const lastR = visibleRows[visibleRows.length - 1];
-    const ye = snapLine(cellTopY(sheet, layout, lastR, env.viewZoom, env.scrollY) + rowH);
+    const lastH = scaledRowHeightAt(sheet, lastR, env.viewZoom);
+    const ye = snapLine(cellTopY(sheet, layout, lastR, env.viewZoom, env.scrollY) + lastH);
     ctx.moveTo(xLeft, ye);
     ctx.lineTo(xRight, ye);
     ctx.stroke();
@@ -342,6 +351,7 @@ export function drawAllRowHeaders(
     ctx.clip();
     for (const r of scrollRows) {
       const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
       paintRowHeaderCell(ctx, env.theme, env.viewZoom, r, y, rowH, headerW, rowInSelection(r));
     }
     strokeRowHeaderGrid(scrollRows, sy0);
@@ -356,6 +366,7 @@ export function drawAllRowHeaders(
     ctx.clip();
     for (const r of frozenRowsList) {
       const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
       paintRowHeaderCell(ctx, env.theme, env.viewZoom, r, y, rowH, headerW, rowInSelection(r));
     }
     strokeRowHeaderGrid(frozenRowsList, headerH);
@@ -381,8 +392,6 @@ export function paintAllHeaderSelectionAccents(
     return;
   }
   const { ctx } = env;
-  const colW = scaledColW(sheet, env.viewZoom);
-  const rowH = scaledRowH(sheet, env.viewZoom);
   const t = viewScaledSelectionOutlineWidth(env.viewZoom);
   const omitColBottom = selSpan.startRow === 0;
   const omitRowRight = selSpan.startCol === 0;
@@ -401,6 +410,7 @@ export function paintAllHeaderSelectionAccents(
         continue;
       }
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
       if (x + colW <= headerW || x >= canvasW) {
         continue;
       }
@@ -424,6 +434,7 @@ export function paintAllHeaderSelectionAccents(
         continue;
       }
       const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
       if (y + rowH <= headerH || y >= canvasH) {
         continue;
       }

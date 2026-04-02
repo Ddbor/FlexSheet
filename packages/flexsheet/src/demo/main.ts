@@ -7,18 +7,22 @@ import {
   type RibbonCommandEvent,
 } from "@flexsheet/toolbar";
 
+const chromeRoot = document.getElementById("fs-sheet-chrome");
 const toolbar = document.getElementById("toolbar");
 const gridCanvasHost = document.getElementById("grid-canvas-host");
 const gridVscrollHost = document.getElementById("grid-vscroll-host");
 const bottomChrome = document.getElementById("bottom-chrome");
 const formulaBar = document.getElementById("formula-bar");
 if (
+  chromeRoot === null ||
   toolbar === null ||
   gridCanvasHost === null ||
   gridVscrollHost === null ||
   bottomChrome === null
 ) {
-  throw new Error("缺少 #toolbar、#grid-canvas-host、#grid-vscroll-host 或 #bottom-chrome 容器");
+  throw new Error(
+    "缺少 #fs-sheet-chrome、#toolbar、#grid-canvas-host、#grid-vscroll-host 或 #bottom-chrome 容器",
+  );
 }
 
 toolbar.style.display = "flex";
@@ -30,6 +34,7 @@ toolbar.style.gap = "0";
 const flexSheet = new FlexSheet({
   container: gridCanvasHost,
   formulaBar: formulaBar ?? undefined,
+  chromeRoot,
 });
 
 mountGridVerticalScrollbar({ container: gridVscrollHost, flexSheet });
@@ -46,6 +51,7 @@ const syncRibbonUndoRedo = (): void => {
 
 new FlexSheetRibbon({
   container: toolbar,
+  backstageCoverRoot: chromeRoot,
   flexSheet,
   onHomeTabMounted: (handles) => {
     homeHandles = handles;

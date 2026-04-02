@@ -21,6 +21,10 @@ export class Worksheet {
   colCount: number;
   defaultRowHeight = 20;
   defaultColWidth = 64;
+  private readonly rowHeights = new Map<number, number>();
+  private readonly colWidths = new Map<number, number>();
+  private readonly hiddenRows = new Set<number>();
+  private readonly hiddenCols = new Set<number>();
 
   private readonly changeListeners = new Set<WorksheetChangeListener>();
   private batchDepth = 0;
@@ -96,7 +100,168 @@ export class Worksheet {
     }
     this.rowCount = r;
     this.colCount = c;
+    this.reindexMetadataOnGridClamp();
     this.touchData();
+  }
+
+  getRowHeight(row: number): number {
+    if (!Number.isInteger(row) || row < 0 || row >= this.rowCount) {
+      return this.defaultRowHeight;
+    }
+    return this.rowHeights.get(row) ?? this.defaultRowHeight;
+  }
+
+  getColWidth(col: number): number {
+    if (!Number.isInteger(col) || col < 0 || col >= this.colCount) {
+      return this.defaultColWidth;
+    }
+    return this.colWidths.get(col) ?? this.defaultColWidth;
+  }
+
+  setRowHeight(row: number, height: number): void {
+    if (!Number.isInteger(row) || row < 0 || row >= this.rowCount) {
+      return;
+    }
+    const h = Math.max(2, Math.trunc(height));
+    if (h === this.defaultRowHeight) {
+      this.rowHeights.delete(row);
+    } else {
+      this.rowHeights.set(row, h);
+    }
+    this.touchData();
+  }
+
+  setColWidth(col: number, width: number): void {
+    if (!Number.isInteger(col) || col < 0 || col >= this.colCount) {
+      return;
+    }
+    const w = Math.max(2, Math.trunc(width));
+    if (w === this.defaultColWidth) {
+      this.colWidths.delete(col);
+    } else {
+      this.colWidths.set(col, w);
+    }
+    this.touchData();
+  }
+
+  isRowHidden(row: number): boolean {
+    return this.hiddenRows.has(row);
+  }
+
+  isColHidden(col: number): boolean {
+    return this.hiddenCols.has(col);
+  }
+
+  setRowHidden(row: number, hidden: boolean): void {
+    if (!Number.isInteger(row) || row < 0 || row >= this.rowCount) {
+      return;
+    }
+    if (hidden) {
+      this.hiddenRows.add(row);
+    } else {
+      this.hiddenRows.delete(row);
+    }
+    this.touchData();
+  }
+
+  setColHidden(col: number, hidden: boolean): void {
+    if (!Number.isInteger(col) || col < 0 || col >= this.colCount) {
+      return;
+    }
+    if (hidden) {
+      this.hiddenCols.add(col);
+    } else {
+      this.hiddenCols.delete(col);
+    }
+    this.touchData();
+  }
+
+  insertRows(atRow: number, count: number): void {
+    const start = clampIndex(atRow, 0, this.rowCount);
+    const n = Math.max(1, Math.trunc(count));
+    this.batch(() => {
+      this.reindexCells((row, col) => (row >= start ? { row: row + n, col } : { row, col }));
+      this.reindexRowMetadata((row) => (row >= start ? row + n : row));
+      this.rowCount += n;
+      this.notifyDataChanged();
+    });
+  }
+
+  deleteRows(atRow: number, count: number): void {
+    if (this.rowCount <= 1) {
+      return;
+    }
+    const start = clampIndex(atRow, 0, this.rowCount - 1);
+    const n = Math.max(1, Math.trunc(count));
+    const end = Math.min(this.rowCount - 1, start + n - 1);
+    const removed = end - start + 1;
+    const nextRowCount = Math.max(1, this.rowCount - removed);
+    this.batch(() => {
+      this.reindexCells((row, col) => {
+        if (row < start) {
+          return { row, col };
+        }
+        if (row > end) {
+          return { row: row - removed, col };
+        }
+        return null;
+      });
+      this.reindexRowMetadata((row) => {
+        if (row < start) {
+          return row;
+        }
+        if (row > end) {
+          return row - removed;
+        }
+        return null;
+      });
+      this.rowCount = nextRowCount;
+      this.notifyDataChanged();
+    });
+  }
+
+  insertCols(atCol: number, count: number): void {
+    const start = clampIndex(atCol, 0, this.colCount);
+    const n = Math.max(1, Math.trunc(count));
+    this.batch(() => {
+      this.reindexCells((row, col) => (col >= start ? { row, col: col + n } : { row, col }));
+      this.reindexColMetadata((col) => (col >= start ? col + n : col));
+      this.colCount += n;
+      this.notifyDataChanged();
+    });
+  }
+
+  deleteCols(atCol: number, count: number): void {
+    if (this.colCount <= 1) {
+      return;
+    }
+    const start = clampIndex(atCol, 0, this.colCount - 1);
+    const n = Math.max(1, Math.trunc(count));
+    const end = Math.min(this.colCount - 1, start + n - 1);
+    const removed = end - start + 1;
+    const nextColCount = Math.max(1, this.colCount - removed);
+    this.batch(() => {
+      this.reindexCells((row, col) => {
+        if (col < start) {
+          return { row, col };
+        }
+        if (col > end) {
+          return { row, col: col - removed };
+        }
+        return null;
+      });
+      this.reindexColMetadata((col) => {
+        if (col < start) {
+          return col;
+        }
+        if (col > end) {
+          return col - removed;
+        }
+        return null;
+      });
+      this.colCount = nextColCount;
+      this.notifyDataChanged();
+    });
   }
 
   getCell(row: number, col: number): Cell {
@@ -166,4 +331,76 @@ export class Worksheet {
     this._name = t;
     this.flushNotify();
   }
+
+  private reindexCells(
+    mapper: (row: number, col: number) => { row: number; col: number } | null,
+  ): void {
+    const next = new Map<string, Cell>();
+    for (const oldCell of this.cells.values()) {
+      const target = mapper(oldCell.row, oldCell.col);
+      if (target === null) {
+        continue;
+      }
+      if (target.row < 0 || target.col < 0) {
+        continue;
+      }
+      const cell = new Cell(target.row, target.col, oldCell.value);
+      cell.formula = oldCell.formula;
+      cell.style = oldCell.style;
+      next.set(Cell.key(target.row, target.col), cell);
+    }
+    this.cells.clear();
+    for (const [k, v] of next) {
+      this.cells.set(k, v);
+    }
+  }
+
+  private reindexRowMetadata(mapper: (row: number) => number | null): void {
+    this.reindexNumberMap(this.rowHeights, mapper);
+    this.reindexNumberSet(this.hiddenRows, mapper);
+  }
+
+  private reindexColMetadata(mapper: (col: number) => number | null): void {
+    this.reindexNumberMap(this.colWidths, mapper);
+    this.reindexNumberSet(this.hiddenCols, mapper);
+  }
+
+  private reindexNumberMap(map: Map<number, number>, mapper: (index: number) => number | null): void {
+    const next = new Map<number, number>();
+    for (const [idx, value] of map) {
+      const target = mapper(idx);
+      if (target === null || target < 0) {
+        continue;
+      }
+      next.set(target, value);
+    }
+    map.clear();
+    for (const [idx, value] of next) {
+      map.set(idx, value);
+    }
+  }
+
+  private reindexNumberSet(set: Set<number>, mapper: (index: number) => number | null): void {
+    const next = new Set<number>();
+    for (const idx of set) {
+      const target = mapper(idx);
+      if (target === null || target < 0) {
+        continue;
+      }
+      next.add(target);
+    }
+    set.clear();
+    for (const idx of next) {
+      set.add(idx);
+    }
+  }
+
+  private reindexMetadataOnGridClamp(): void {
+    this.reindexRowMetadata((row) => (row >= this.rowCount ? null : row));
+    this.reindexColMetadata((col) => (col >= this.colCount ? null : col));
+  }
+}
+
+function clampIndex(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, Math.trunc(v)));
 }

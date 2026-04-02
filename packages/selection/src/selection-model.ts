@@ -47,6 +47,18 @@ export class SelectionModel {
     });
   }
 
+  setNormalizedRange(range: SelectionRange): void {
+    const sheet = this.getSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const n = normalizeSelectionRange(range);
+    this.anchorRow = clamp(n.startRow, 0, sheet.rowCount - 1);
+    this.anchorCol = clamp(n.startCol, 0, sheet.colCount - 1);
+    this.focusRow = clamp(n.endRow, 0, sheet.rowCount - 1);
+    this.focusCol = clamp(n.endCol, 0, sheet.colCount - 1);
+  }
+
   /** 单击：单格选区，锚点与焦点合一。 */
   selectCell(row: number, col: number): void {
     const sheet = this.getSheet();

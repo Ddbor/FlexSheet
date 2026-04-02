@@ -25,6 +25,7 @@ import {
   type HeaderPaintEnv,
 } from "./canvas-renderer-headers.js";
 import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
+import { drawClipboardMarqueeOverlay } from "./canvas-renderer-clipboard-marquee.js";
 import { drawSelectionOverlay, type SelectionOverlayEnv } from "./canvas-renderer-selection-overlay.js";
 import type {
   CanvasRendererOptions,
@@ -32,7 +33,11 @@ import type {
   VerticalScrollMetrics,
 } from "./canvas-renderer-types.js";
 export type { CanvasRendererOptions, HorizontalScrollMetrics, VerticalScrollMetrics } from "./canvas-renderer-types.js";
-import { scaledColW, scaledFontSizePx, scaledRowH } from "./canvas-renderer-utils.js";
+import {
+  scaledColWidthAt,
+  scaledFontSizePx,
+  scaledRowHeightAt,
+} from "./canvas-renderer-utils.js";
 import { buildFrozenLayout, clampScroll, computeScrollLimits } from "./viewport.js";
 
 /**
@@ -44,6 +49,10 @@ export class CanvasRenderer {
   private workbook: Workbook;
   private theme: SheetTheme;
   private getSelectionSnapshot: () => SelectionPaintSnapshot | null;
+  private getClipboardMarqueeRange: () => SelectionRange | null;
+
+  /** 走马灯动画：在 `paint` 末尾调度下一帧重绘。 */
+  private marqueeContinuationRaf: number | null = null;
 
   /** 仅作用于非冻结列/行（文档像素）。 */
   scrollX = 0;
@@ -87,10 +96,15 @@ export class CanvasRenderer {
     this.workbook = options.workbook;
     this.theme = options.theme;
     this.getSelectionSnapshot = options.getSelectionSnapshot ?? (() => null);
+    this.getClipboardMarqueeRange = options.getClipboardMarqueeRange ?? (() => null);
   }
 
   setSelectionSnapshotProvider(fn: (() => SelectionPaintSnapshot | null) | undefined): void {
     this.getSelectionSnapshot = fn ?? (() => null);
+  }
+
+  setClipboardMarqueeRangeProvider(fn: (() => SelectionRange | null) | undefined): void {
+    this.getClipboardMarqueeRange = fn ?? (() => null);
   }
 
   getHeaderSize(): Readonly<{ width: number; height: number }> {
@@ -161,9 +175,10 @@ export class CanvasRenderer {
       return null;
     }
     const { sheet, layout } = ctx;
-    const colW = sheet.defaultColWidth * this.viewZoom;
-    const scrollColCount = Math.max(0, sheet.colCount - layout.frozenCols);
-    const contentScrollWidth = scrollColCount * colW;
+    let contentScrollWidth = 0;
+    for (let c = layout.frozenCols; c < sheet.colCount; c++) {
+      contentScrollWidth += scaledColWidthAt(sheet, c, this.viewZoom);
+    }
     return {
       scrollX: this.scrollX,
       maxScrollX: ctx.limits.maxScrollX,
@@ -185,9 +200,10 @@ export class CanvasRenderer {
       return null;
     }
     const { sheet, layout } = ctx;
-    const rowH = sheet.defaultRowHeight * this.viewZoom;
-    const scrollRowCount = Math.max(0, sheet.rowCount - layout.frozenRows);
-    const contentScrollHeight = scrollRowCount * rowH;
+    let contentScrollHeight = 0;
+    for (let r = layout.frozenRows; r < sheet.rowCount; r++) {
+      contentScrollHeight += scaledRowHeightAt(sheet, r, this.viewZoom);
+    }
     return {
       scrollY: this.scrollY,
       maxScrollY: ctx.limits.maxScrollY,
@@ -326,8 +342,8 @@ export class CanvasRenderer {
     return {
       x: cellLeftX(sheet, ctx.layout, col, this.viewZoom, this.scrollX),
       y: cellTopY(sheet, ctx.layout, row, this.viewZoom, this.scrollY),
-      width: scaledColW(sheet, this.viewZoom),
-      height: scaledRowH(sheet, this.viewZoom),
+      width: scaledColWidthAt(sheet, col, this.viewZoom),
+      height: scaledRowHeightAt(sheet, row, this.viewZoom),
     };
   }
 
@@ -411,6 +427,27 @@ export class CanvasRenderer {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+    this.clearMarqueeContinuation();
+  }
+
+  private clearMarqueeContinuation(): void {
+    if (this.marqueeContinuationRaf !== null) {
+      cancelAnimationFrame(this.marqueeContinuationRaf);
+      this.marqueeContinuationRaf = null;
+    }
+  }
+
+  private scheduleMarqueeContinuation(): void {
+    if (typeof requestAnimationFrame === "undefined") {
+      return;
+    }
+    if (this.marqueeContinuationRaf !== null) {
+      return;
+    }
+    this.marqueeContinuationRaf = requestAnimationFrame(() => {
+      this.marqueeContinuationRaf = null;
+      this.requestRedraw();
+    });
   }
 
   draw(): void {
@@ -469,6 +506,7 @@ export class CanvasRenderer {
     ctx.fillRect(0, 0, w, h);
 
     if (sheet === undefined) {
+      this.clearMarqueeContinuation();
       ctx.fillStyle = this.theme.cellColor;
       ctx.font = "14px system-ui, sans-serif";
       ctx.textAlign = "left";
@@ -487,6 +525,7 @@ export class CanvasRenderer {
       this.frozenCols,
     );
     if (frozenCtx === null) {
+      this.clearMarqueeContinuation();
       ctx.restore();
       return;
     }
@@ -516,6 +555,25 @@ export class CanvasRenderer {
     }
     drawFreezeLines(ctx, this.theme, layout, w, h);
     drawSelectionOverlay(this.selectionEnv(), sheet, layout, headerW, headerH, w, h, selectionSnap);
+
+    const clipboardMarqueeRange = this.getClipboardMarqueeRange();
+    if (clipboardMarqueeRange === null) {
+      this.clearMarqueeContinuation();
+    } else {
+      const phasePx = performance.now() * 0.011;
+      drawClipboardMarqueeOverlay(
+        this.selectionEnv(),
+        sheet,
+        layout,
+        headerW,
+        headerH,
+        w,
+        h,
+        clipboardMarqueeRange,
+        phasePx,
+      );
+      this.scheduleMarqueeContinuation();
+    }
 
     ctx.restore();
   }

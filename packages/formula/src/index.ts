@@ -13,5 +13,6 @@ export {
 } from "./recalc.js";
 
 export { SetCellValueCommand } from "./commands/set-cell-value-command.js";
+export { ClearRegionContentsCommand } from "./commands/clear-region-contents-command.js";
 
 export { FormulaEnginePlugin } from "./formula-plugin.js";

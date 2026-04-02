@@ -14,6 +14,7 @@ import type {
   RibbonTabId,
 } from "./ribbon-types.js";
 import type { RibbonEmit } from "../toolbar/toolbar-button.js";
+import { createRibbonBackstage, type RibbonBackstageHandles } from "./ribbon-backstage.js";
 
 import "./FlexSheetRibbon.css";
 
@@ -30,16 +31,19 @@ const TAB_LABEL: Record<RibbonTabId, string> = {
 
 export class FlexSheetRibbon {
   private readonly root: HTMLElement;
+  private readonly coverRoot: HTMLElement;
   private readonly onCommand?: (ev: RibbonCommandEvent) => void;
   private flexSheet: FlexSheetLike | undefined;
   private activeTab: RibbonTabId = "home";
   private readonly tabButtons = new Map<RibbonTabId, HTMLButtonElement>();
   private readonly panels = new Map<RibbonTabId, HTMLElement>();
   private readonly onDocPointerDown: (e: PointerEvent) => void;
+  private backstage: RibbonBackstageHandles | null = null;
 
   constructor(options: FlexSheetRibbonOptions) {
     this.onCommand = options.onCommand;
     this.flexSheet = options.flexSheet;
+    this.coverRoot = options.backstageCoverRoot ?? options.container.parentElement ?? document.body;
     this.root = document.createElement("div");
     this.root.className = "fs-ribbon";
     this.root.setAttribute("role", "region");
@@ -48,10 +52,20 @@ export class FlexSheetRibbon {
     const header = document.createElement("div");
     header.className = "fs-ribbon__header";
 
+    const fileTab = document.createElement("button");
+    fileTab.type = "button";
+    fileTab.className = "fs-ribbon__tab";
+    fileTab.textContent = "文件";
+    fileTab.setAttribute("aria-label", "文件菜单");
+    fileTab.addEventListener("click", () => {
+      this.openBackstage();
+    });
+
     const tablist = document.createElement("div");
     tablist.className = "fs-ribbon__tablist";
     tablist.setAttribute("role", "tablist");
     tablist.setAttribute("aria-label", "主选项卡");
+    tablist.appendChild(fileTab);
 
     for (const id of TAB_ORDER) {
       const btn = document.createElement("button");
@@ -171,6 +185,7 @@ export class FlexSheetRibbon {
       this.root.style.removeProperty("--fs-ribbon-accent");
       this.root.style.removeProperty("--fs-ribbon-accent-press");
     }
+    this.backstage?.applyThemeMode(theme.mode);
   }
 
   private applyThemeMode(mode: "light" | "dark"): void {
@@ -185,6 +200,29 @@ export class FlexSheetRibbon {
         m.hidden = true;
       }
     });
+  }
+
+  private openBackstage(): void {
+    this.closeAllDropdowns();
+    if (this.backstage !== null) {
+      return;
+    }
+    const handles = createRibbonBackstage(() => {
+      this.closeBackstage();
+    });
+    handles.applyThemeMode(this.root.dataset.theme === "dark" ? "dark" : "light");
+    this.coverRoot.appendChild(handles.root);
+    this.backstage = handles;
+    const back = handles.root.querySelector<HTMLButtonElement>(".fs-ribbon-backstage__back");
+    back?.focus();
+  }
+
+  private closeBackstage(): void {
+    if (this.backstage === null) {
+      return;
+    }
+    this.backstage.root.remove();
+    this.backstage = null;
   }
 
   private selectTab(id: RibbonTabId): void {
@@ -235,6 +273,7 @@ export class FlexSheetRibbon {
 
   destroy(): void {
     document.removeEventListener("pointerdown", this.onDocPointerDown, true);
+    this.closeBackstage();
     this.root.remove();
   }
 }

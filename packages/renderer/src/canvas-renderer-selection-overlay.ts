@@ -3,7 +3,11 @@ import type { Worksheet } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
 import { SELECTION_OUTLINE_VISUAL_SCALE } from "./canvas-renderer-constants.js";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
-import { scaledColW, scaledRowH, viewScaledSelectionOutlineWidth } from "./canvas-renderer-utils.js";
+import {
+  scaledColWidthAt,
+  scaledRowHeightAt,
+  viewScaledSelectionOutlineWidth,
+} from "./canvas-renderer-utils.js";
 import { collectFrozenBodyQuadrantPasses } from "./frozen-body-quadrants.js";
 import type { FrozenLayout } from "./viewport.js";
 
@@ -33,8 +37,6 @@ export function drawSelectionOverlay(
   const { ctx } = env;
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
-  const colW = scaledColW(sheet, env.viewZoom);
-  const rowH = scaledRowH(sheet, env.viewZoom);
 
   const passes = collectFrozenBodyQuadrantPasses(
     sheet,
@@ -73,6 +75,11 @@ export function drawSelectionOverlay(
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
         if (r === activeRow && c === activeCol) {
+          continue;
+        }
+        const colW = scaledColWidthAt(sheet, c, env.viewZoom);
+        const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
+        if (colW <= 0 || rowH <= 0) {
           continue;
         }
         const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
@@ -120,8 +127,14 @@ export function drawSelectionOverlay(
 
     const x0 = cellLeftX(sheet, layout, c0, env.viewZoom, env.scrollX);
     const y0 = cellTopY(sheet, layout, r0, env.viewZoom, env.scrollY);
-    const bw = (c1 - c0 + 1) * colW;
-    const bh = (r1 - r0 + 1) * rowH;
+    let bw = 0;
+    for (let c = c0; c <= c1; c++) {
+      bw += scaledColWidthAt(sheet, c, env.viewZoom);
+    }
+    let bh = 0;
+    for (let r = r0; r <= r1; r++) {
+      bh += scaledRowHeightAt(sheet, r, env.viewZoom);
+    }
     ctx.strokeStyle = env.theme.selectionBorderColor;
     ctx.lineWidth = viewScaledSelectionOutlineWidth(env.viewZoom);
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, bw - 1, bh - 1);
@@ -133,8 +146,12 @@ export function drawSelectionOverlay(
     drawBorderPass(p.clipX, p.clipY, p.clipW, p.clipH, p.r0, p.r1, p.c0, p.c1);
   }
 
-  const handleCenterX = cellLeftX(sheet, layout, range.endCol, env.viewZoom, env.scrollX) + colW;
-  const handleCenterY = cellTopY(sheet, layout, range.endRow, env.viewZoom, env.scrollY) + rowH;
+  const handleCenterX =
+    cellLeftX(sheet, layout, range.endCol, env.viewZoom, env.scrollX) +
+    scaledColWidthAt(sheet, range.endCol, env.viewZoom);
+  const handleCenterY =
+    cellTopY(sheet, layout, range.endRow, env.viewZoom, env.scrollY) +
+    scaledRowHeightAt(sheet, range.endRow, env.viewZoom);
   const handleSize = Math.max(4, 6 * SELECTION_OUTLINE_VISUAL_SCALE * env.viewZoom);
   const handleHalf = handleSize / 2;
   const bodyX = headerW;
