@@ -23,8 +23,8 @@ describe("Worksheet", () => {
     expect(ws.name).toBe("Data");
     expect(ws.rowCount).toBe(1000);
     expect(ws.colCount).toBe(26);
-    expect(ws.defaultRowHeight).toBe(24);
-    expect(ws.defaultColWidth).toBe(80);
+    expect(ws.defaultRowHeight).toBe(20);
+    expect(ws.defaultColWidth).toBe(64);
   });
 
   it("constructor accepts custom row and column counts", () => {

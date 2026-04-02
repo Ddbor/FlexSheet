@@ -19,8 +19,8 @@ export class Worksheet {
   rowCount: number;
   /** 逻辑列数（≥1）。规模变更请用 `setGridSize`。 */
   colCount: number;
-  defaultRowHeight = 24;
-  defaultColWidth = 80;
+  defaultRowHeight = 20;
+  defaultColWidth = 64;
 
   private readonly changeListeners = new Set<WorksheetChangeListener>();
   private batchDepth = 0;

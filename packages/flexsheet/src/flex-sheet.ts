@@ -16,9 +16,11 @@ import {
   RendererPlugin,
   scrollToRevealCell,
   hitTestCell,
+  hitTestHeadingPointer,
   buildFrozenLayout,
   computeScrollLimits,
   type CanvasRenderer,
+  type HeadingHit,
 } from "@flexsheet/renderer";
 import { ScrollPlugin } from "@flexsheet/scroll";
 import { SelectionRegistryPlugin } from "@flexsheet/selection";
@@ -443,9 +445,30 @@ export class FlexSheet {
       return;
     }
     this.canvas.focus();
+
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+
+    const headingHit = this.hitTestHeadingFromClient(ev.clientX, ev.clientY);
+    if (headingHit !== null) {
+      ev.preventDefault();
+      if (this.cellEditor.isEditing()) {
+        this.cellEditor.cancelWithoutCommit();
+      }
+      const expand = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+      this.applyHeadingHitSelection(headingHit, sheet, expand);
+      this.afterSelectionChanged();
+      return;
+    }
+
     const hit = this.hitTestClient(ev.clientX, ev.clientY);
     if (hit === null) {
       return;
+    }
+    if (this.cellEditor.isEditing()) {
+      this.cellEditor.cancelWithoutCommit();
     }
     this.selection.selectCell(hit.row, hit.col);
     this.revealActiveCellInViewport();
@@ -552,6 +575,81 @@ export class FlexSheet {
       x: ((clientX - rect.left) / rw) * cw,
       y: ((clientY - rect.top) / rh) * ch,
     };
+  }
+
+  private hitTestHeadingFromClient(clientX: number, clientY: number): HeadingHit | null {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return null;
+    }
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const corner = this.renderer.getCornerSize();
+    const layout = buildFrozenLayout(
+      sheet,
+      corner.width,
+      corner.height,
+      w,
+      h,
+      this.renderer.frozenRows,
+      this.renderer.frozenCols,
+      this.renderer.viewZoom,
+    );
+    return hitTestHeadingPointer(
+      x,
+      y,
+      sheet,
+      layout,
+      this.renderer.scrollX,
+      this.renderer.scrollY,
+      this.renderer.viewZoom,
+    );
+  }
+
+  private applyHeadingHitSelection(hit: HeadingHit, sheet: Worksheet, expand: boolean): void {
+    const lastR = Math.max(0, sheet.rowCount - 1);
+    const lastC = Math.max(0, sheet.colCount - 1);
+    if (hit.kind === "selectAllCorner") {
+      if (expand) {
+        this.selection.unionWithRange({
+          startRow: 0,
+          startCol: 0,
+          endRow: lastR,
+          endCol: lastC,
+        });
+      } else {
+        this.selection.selectEntireSheet();
+      }
+      return;
+    }
+    if (hit.kind === "columnHeader") {
+      const c = hit.col;
+      if (expand) {
+        this.selection.unionWithRange({
+          startRow: 0,
+          startCol: c,
+          endRow: lastR,
+          endCol: c,
+        });
+      } else {
+        this.selection.selectEntireColumn(c);
+      }
+      return;
+    }
+    if (hit.kind === "rowHeader") {
+      const r = hit.row;
+      if (expand) {
+        this.selection.unionWithRange({
+          startRow: r,
+          startCol: 0,
+          endRow: r,
+          endCol: lastC,
+        });
+      } else {
+        this.selection.selectEntireRow(r);
+      }
+    }
   }
 
   private hitTestClient(

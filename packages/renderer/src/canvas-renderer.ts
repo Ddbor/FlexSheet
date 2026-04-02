@@ -63,29 +63,31 @@ function argbToCss(argb: string): string | undefined {
   return `rgba(${r},${g},${b},${a})`;
 }
 
-/** 1px 线段对齐到设备无关像素中心（避免模糊与双线粗细不均）。 */
+/**
+ * 全表统一 1px 描边坐标：对齐到 CSS 像素中心，与 Excel 类表格一致。
+ * 列头竖线、行头横线、表体网格、冻结线、标题分割线均须用此函数，避免缝与双线。
+ */
 function snapLine(v: number): number {
   return Math.round(v) + 0.5;
 }
 
-/** 网格线 stroke 相对内容 clip 的内缩（CSS 像素），避免 1px 描边在 clip 边界外溢到冻结区。 */
-const GRID_STROKE_CLIP_INSET = 0.5;
-
 /**
- * 右下角滚动象限网格专用内缩（≥ 线宽的一半 + 抗锯齿余量）。
- * 仅 0.5 时，stroke 仍可能在冻结边界内侧露出，滚动时像「网格线滚进冻结区」。
- */
-const SCROLL_PANE_GRID_CLIP_INSET = 1;
-
-/**
- * 选区外框、填充柄、行列标题强调线相对原线宽的比例（当前为原来的 2/3）。
+ * 选区外框、填充柄相对「逻辑 2px 描边」的视觉比例（略细，接近 Excel）。
  */
 const SELECTION_OUTLINE_VISUAL_SCALE = 2 / 3;
 
-/** 选区涉及行列标题上的 Excel 风格粗强调线（CSS 像素，随 viewZoom 缩放）。 */
-function scaledHeaderAccentThickness(viewZoom: number): number {
-  const raw = Math.max(2, Math.min(5, Math.round(3 * viewZoom)));
-  return raw * SELECTION_OUTLINE_VISUAL_SCALE;
+/** zoom=1 时行号列默认宽度（CSS px），与表体同乘 viewZoom。 */
+const HEADER_STRIP_BASE_WIDTH = 40;
+
+/** zoom=1 时列标区域高度（CSS px），与表体同乘 viewZoom。 */
+const HEADER_STRIP_BASE_HEIGHT = 24;
+
+/**
+ * 激活单元格/选区描边与行列标题强调带共用线宽（CSS 像素），随 viewZoom 线性缩放，保证视觉一致。
+ */
+function viewScaledSelectionOutlineWidth(viewZoom: number): number {
+  const z = Math.max(VIEW_ZOOM_MIN, Math.min(VIEW_ZOOM_MAX, viewZoom));
+  return Math.max(1, 2 * SELECTION_OUTLINE_VISUAL_SCALE * z);
 }
 
 /**
@@ -124,8 +126,6 @@ export class CanvasRenderer {
   /** 宏是否使用相对引用。 */
   macroUseRelativeReference = false;
 
-  private readonly cornerSize = { width: 48, height: 24 };
-
   private rafId: number | null = null;
 
   private readonly viewZoomListeners = new Set<() => void>();
@@ -150,12 +150,17 @@ export class CanvasRenderer {
 
   /**
    * 行列标题区尺寸（隐藏标题时为 0，表体从画布左上角起算）。
+   * 与单元格 defaultColWidth/defaultRowHeight 一样乘以 viewZoom，缩放时与网格同步。
    */
   getHeaderSize(): Readonly<{ width: number; height: number }> {
     if (!this.showHeadings) {
       return { width: 0, height: 0 };
     }
-    return this.cornerSize;
+    const z = this.viewZoom;
+    return {
+      width: HEADER_STRIP_BASE_WIDTH * z,
+      height: HEADER_STRIP_BASE_HEIGHT * z,
+    };
   }
 
   getCornerSize(): Readonly<{ width: number; height: number }> {
@@ -585,6 +590,11 @@ export class CanvasRenderer {
       this.drawAllRowHeaders(sheet, layout, headerW, headerH, h, selectionSnap);
     }
     this.drawBody(sheet, layout, headerW, headerH, w, h);
+    if (this.showHeadings) {
+      this.drawHeadingBodyDividerLines(headerW, headerH, w, h);
+      /** 列底/行右强调线在分割线之上；与表体选区邻接时省略对应边，避免与选区描边叠粗。 */
+      this.paintAllHeaderSelectionAccents(sheet, layout, headerW, headerH, w, h, selectionSnap);
+    }
     this.drawFreezeLines(layout, w, h);
     this.drawSelectionOverlay(sheet, layout, headerW, headerH, w, h);
 
@@ -597,10 +607,38 @@ export class CanvasRenderer {
     ctx.fillRect(0, 0, headerW, headerH);
     ctx.strokeStyle = this.theme.headerLineColor;
     ctx.lineWidth = 1;
-    ctx.strokeRect(0.5, 0.5, headerW - 1, headerH - 1);
+    /** 只画与画布外缘相接的左、上两边；右、下与列头/行头网格共用同一条 snapLine，避免错位与加粗。 */
+    ctx.beginPath();
+    const xt = snapLine(0);
+    const yt = snapLine(0);
+    const xr = snapLine(headerW);
+    const yb = snapLine(headerH);
+    ctx.moveTo(xt, yt);
+    ctx.lineTo(xr, yt);
+    ctx.moveTo(xt, yt);
+    ctx.lineTo(xt, yb);
+    ctx.stroke();
+
+    /** 右下角直角三角标（全选夹角），与 Excel 类似。 */
+    const inset = 4;
+    const leg = Math.max(5, Math.min(headerW, headerH) * 0.36);
+    const brx = headerW - inset;
+    const bry = headerH - inset;
+    ctx.beginPath();
+    ctx.moveTo(brx - leg, bry);
+    ctx.lineTo(brx, bry);
+    ctx.lineTo(brx, bry - leg);
+    ctx.closePath();
+    ctx.fillStyle = this.theme.headerColor;
+    ctx.globalAlpha = 0.38;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = this.theme.headerLineColor;
+    ctx.lineWidth = 1;
+    ctx.stroke();
   }
 
-  /** 列标题区域底部刻度（与主题 header 线色一致）。 */
+  /** 列标题区域底部刻度；水平基线与表体网格同色，由 `drawHeadingBodyDividerLines` 在表体绘制之后统一画出，此处只画向上刻度。 */
   private drawRulerOverlay(
     sheet: Worksheet,
     layout: FrozenLayout,
@@ -610,13 +648,9 @@ export class CanvasRenderer {
   ): void {
     const { ctx } = this;
     const colW = this.scaledColW(sheet);
-    const yBase = headerH - 1.5;
-    ctx.strokeStyle = this.theme.headerLineColor;
+    const yRuler = snapLine(headerH);
+    ctx.strokeStyle = this.theme.gridLineColor;
     ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(headerW, snapLine(yBase));
-    ctx.lineTo(canvasW, snapLine(yBase));
-    ctx.stroke();
     const { frozenCols } = layout;
     const maxC = sheet.colCount - 1;
     const fw = layout.frozenWidthPx;
@@ -629,8 +663,8 @@ export class CanvasRenderer {
           continue;
         }
         ctx.beginPath();
-        ctx.moveTo(snapLine(x), yBase);
-        ctx.lineTo(snapLine(x), yBase - tickH);
+        ctx.moveTo(snapLine(x), yRuler);
+        ctx.lineTo(snapLine(x), yRuler - tickH);
         ctx.stroke();
       }
     };
@@ -729,25 +763,27 @@ export class CanvasRenderer {
       if (visibleCols.length === 0) {
         return;
       }
+      const yTop = snapLine(0);
+      const yBot = snapLine(headerH);
+      const xClip = snapLine(clipLeft);
       ctx.strokeStyle = this.theme.headerLineColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(snapLine(clipLeft), 0);
-      ctx.lineTo(snapLine(clipLeft), headerH);
-      ctx.moveTo(snapLine(clipLeft), snapLine(0));
-      ctx.lineTo(snapLine(canvasW), snapLine(0));
-      ctx.moveTo(snapLine(clipLeft), snapLine(headerH));
-      ctx.lineTo(snapLine(canvasW), snapLine(headerH));
+      ctx.moveTo(xClip, yTop);
+      ctx.lineTo(xClip, yBot);
+      ctx.moveTo(xClip, yTop);
+      ctx.lineTo(snapLine(canvasW), yTop);
+      /** 底边与表体分隔线由 `drawHeadingBodyDividerLines` 用 gridLineColor 绘制，避免双线。 */
       for (const c of visibleCols) {
         const x = this.cellLeftX(sheet, layout, c);
         const xs = snapLine(x);
-        ctx.moveTo(xs, 0);
-        ctx.lineTo(xs, headerH);
+        ctx.moveTo(xs, yTop);
+        ctx.lineTo(xs, yBot);
       }
       const lastC = visibleCols[visibleCols.length - 1];
       const xe = snapLine(this.cellLeftX(sheet, layout, lastC) + colW);
-      ctx.moveTo(xe, 0);
-      ctx.lineTo(xe, headerH);
+      ctx.moveTo(xe, yTop);
+      ctx.lineTo(xe, yBot);
       ctx.stroke();
     };
 
@@ -763,14 +799,6 @@ export class CanvasRenderer {
         this.paintColumnHeaderCell(ctx, c, x, colW, headerH, columnInSelection(c));
       }
       strokeColumnHeaderGrid(scrollCols, sx0);
-      this.paintSelectionColumnHeaderBottomAccents(
-        sheet,
-        layout,
-        scrollCols,
-        colW,
-        headerH,
-        selSpan,
-      );
       ctx.restore();
     }
 
@@ -785,39 +813,7 @@ export class CanvasRenderer {
         this.paintColumnHeaderCell(ctx, c, x, colW, headerH, columnInSelection(c));
       }
       strokeColumnHeaderGrid(frozenColsList, headerW);
-      this.paintSelectionColumnHeaderBottomAccents(
-        sheet,
-        layout,
-        frozenColsList,
-        colW,
-        headerH,
-        selSpan,
-      );
       ctx.restore();
-    }
-  }
-
-  /** 选区内各列标题底部粗绿线（画在网格描边之后）。 */
-  private paintSelectionColumnHeaderBottomAccents(
-    sheet: Worksheet,
-    layout: FrozenLayout,
-    visibleCols: number[],
-    colW: number,
-    headerH: number,
-    selSpan: { startCol: number; endCol: number; startRow: number; endRow: number } | null,
-  ): void {
-    if (selSpan === null || visibleCols.length === 0) {
-      return;
-    }
-    const { ctx } = this;
-    const t = scaledHeaderAccentThickness(this.viewZoom);
-    ctx.fillStyle = this.theme.activeCellBorderColor;
-    for (const c of visibleCols) {
-      if (c < selSpan.startCol || c > selSpan.endCol) {
-        continue;
-      }
-      const x = this.cellLeftX(sheet, layout, c);
-      ctx.fillRect(x, headerH - t, colW, t);
     }
   }
 
@@ -894,25 +890,30 @@ export class CanvasRenderer {
       if (visibleRows.length === 0) {
         return;
       }
+      const xLeft = snapLine(0);
+      const xRight = snapLine(headerW);
+      const yClip = snapLine(clipTop);
+      const yEnd = snapLine(canvasH);
       ctx.strokeStyle = this.theme.headerLineColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(0, snapLine(clipTop));
-      ctx.lineTo(snapLine(headerW), snapLine(clipTop));
-      ctx.moveTo(snapLine(0), snapLine(clipTop));
-      ctx.lineTo(snapLine(0), snapLine(canvasH));
-      ctx.moveTo(snapLine(headerW), snapLine(clipTop));
-      ctx.lineTo(snapLine(headerW), snapLine(canvasH));
+      if (clipTop !== headerH) {
+        ctx.moveTo(xLeft, yClip);
+        ctx.lineTo(xRight, yClip);
+      }
+      ctx.moveTo(xLeft, yClip);
+      ctx.lineTo(xLeft, yEnd);
+      /** 行号区右侧与表体分隔线由 `drawHeadingBodyDividerLines` 用 gridLineColor 绘制，避免双线。 */
       for (const r of visibleRows) {
         const y = this.cellTopY(sheet, layout, r);
         const ys = snapLine(y);
-        ctx.moveTo(0, ys);
-        ctx.lineTo(headerW, ys);
+        ctx.moveTo(xLeft, ys);
+        ctx.lineTo(xRight, ys);
       }
       const lastR = visibleRows[visibleRows.length - 1];
       const ye = snapLine(this.cellTopY(sheet, layout, lastR) + rowH);
-      ctx.moveTo(0, ye);
-      ctx.lineTo(headerW, ye);
+      ctx.moveTo(xLeft, ye);
+      ctx.lineTo(xRight, ye);
       ctx.stroke();
     };
 
@@ -928,14 +929,6 @@ export class CanvasRenderer {
         this.paintRowHeaderCell(ctx, r, y, rowH, headerW, rowInSelection(r));
       }
       strokeRowHeaderGrid(scrollRows, sy0);
-      this.paintSelectionRowHeaderRightAccents(
-        sheet,
-        layout,
-        scrollRows,
-        rowH,
-        headerW,
-        selSpanRows,
-      );
       ctx.restore();
     }
 
@@ -950,39 +943,7 @@ export class CanvasRenderer {
         this.paintRowHeaderCell(ctx, r, y, rowH, headerW, rowInSelection(r));
       }
       strokeRowHeaderGrid(frozenRowsList, headerH);
-      this.paintSelectionRowHeaderRightAccents(
-        sheet,
-        layout,
-        frozenRowsList,
-        rowH,
-        headerW,
-        selSpanRows,
-      );
       ctx.restore();
-    }
-  }
-
-  /** 选区内各行标题右侧（靠网格）粗绿线。 */
-  private paintSelectionRowHeaderRightAccents(
-    sheet: Worksheet,
-    layout: FrozenLayout,
-    visibleRows: number[],
-    rowH: number,
-    headerW: number,
-    selSpan: { startCol: number; endCol: number; startRow: number; endRow: number } | null,
-  ): void {
-    if (selSpan === null || visibleRows.length === 0) {
-      return;
-    }
-    const { ctx } = this;
-    const t = scaledHeaderAccentThickness(this.viewZoom);
-    ctx.fillStyle = this.theme.activeCellBorderColor;
-    for (const r of visibleRows) {
-      if (r < selSpan.startRow || r > selSpan.endRow) {
-        continue;
-      }
-      const y = this.cellTopY(sheet, layout, r);
-      ctx.fillRect(headerW - t, y, t, rowH);
     }
   }
 
@@ -1001,6 +962,81 @@ export class CanvasRenderer {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(String(r + 1), headerW / 2, y + rowH / 2);
+  }
+
+  /**
+   * 选区对应的列标题底边、行标题右侧强调带（`activeCellBorderColor`）。
+   * 须在 `drawHeadingBodyDividerLines` 之后绘制，压在网格分割线上方。
+   * 选区包含第 0 行时不再画列底强调（与表体顶边选框邻接）；包含第 0 列时不再画行右强调（与表体左边选框邻接），避免双线叠粗。
+   */
+  private paintAllHeaderSelectionAccents(
+    sheet: Worksheet,
+    layout: FrozenLayout,
+    headerW: number,
+    headerH: number,
+    canvasW: number,
+    canvasH: number,
+    selectionSnap: SelectionPaintSnapshot | null,
+  ): void {
+    if (selectionSnap === null) {
+      return;
+    }
+    const selSpan = this.getClampedSelectionSpan(sheet, selectionSnap);
+    if (selSpan === null) {
+      return;
+    }
+    const { ctx } = this;
+    const colW = this.scaledColW(sheet);
+    const rowH = this.scaledRowH(sheet);
+    const t = viewScaledSelectionOutlineWidth(this.viewZoom);
+    const omitColBottom = selSpan.startRow === 0;
+    const omitRowRight = selSpan.startCol === 0;
+
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+
+    if (!omitColBottom) {
+      ctx.beginPath();
+      ctx.rect(headerW, 0, canvasW - headerW, headerH);
+      ctx.clip();
+      ctx.fillStyle = this.theme.activeCellBorderColor;
+      for (let c = selSpan.startCol; c <= selSpan.endCol; c++) {
+        if (c < 0 || c >= sheet.colCount) {
+          continue;
+        }
+        const x = this.cellLeftX(sheet, layout, c);
+        if (x + colW <= headerW || x >= canvasW) {
+          continue;
+        }
+        ctx.fillRect(x, headerH - t, colW, t);
+      }
+    }
+
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+
+    if (!omitRowRight) {
+      ctx.beginPath();
+      ctx.rect(0, headerH, headerW, canvasH - headerH);
+      ctx.clip();
+      ctx.fillStyle = this.theme.activeCellBorderColor;
+      for (let r = selSpan.startRow; r <= selSpan.endRow; r++) {
+        if (r < 0 || r >= sheet.rowCount) {
+          continue;
+        }
+        const y = this.cellTopY(sheet, layout, r);
+        if (y + rowH <= headerH || y >= canvasH) {
+          continue;
+        }
+        ctx.fillRect(headerW - t, y, t, rowH);
+      }
+    }
+
+    ctx.restore();
   }
 
   /** 列 `c` 左边缘画布 X（含冻结与滚动）。 */
@@ -1082,47 +1118,16 @@ export class CanvasRenderer {
       if (r0 > r1 || c0 > c1) {
         return;
       }
-      const inset = GRID_STROKE_CLIP_INSET;
-      /** 右下角滚动象限：仅内缩靠冻结区的一侧（左、上），避免 1px 网格线外溢进冻结带；右、下仍贴画布边 */
-      const isScrollPane =
-        Math.abs(clipX - sx0) < 1e-6 && Math.abs(clipY - sy0) < 1e-6 && clipW > 0 && clipH > 0;
-
-      let innerX: number;
-      let innerY: number;
-      let innerW: number;
-      let innerH: number;
+      /** 网格线与表体 clip 外缘对齐（snapLine），不再内缩，避免与标题/冻结线出现可见缝。 */
       let strokeBounds: { minX: number; minY: number; maxX: number; maxY: number } | null = null;
-
-      if (isScrollPane) {
-        const sInset = SCROLL_PANE_GRID_CLIP_INSET;
-        innerX = clipX + sInset;
-        innerY = clipY + sInset;
-        innerW = Math.max(0, clipW - sInset);
-        innerH = Math.max(0, clipH - sInset);
-        if (innerW > 0 && innerH > 0) {
-          /** 与嵌套 `rect(innerX,innerY,innerW,innerH)` 完全一致，线段端点不超出实际 clip */
-          strokeBounds = {
-            minX: innerX,
-            minY: innerY,
-            maxX: innerX + innerW,
-            maxY: innerY + innerH,
-          };
-        }
-      } else {
-        innerX = clipX + inset;
-        innerY = clipY + inset;
-        innerW = Math.max(0, clipW - 2 * inset);
-        innerH = Math.max(0, clipH - 2 * inset);
-        if (innerW > 0 && innerH > 0) {
-          strokeBounds = {
-            minX: innerX,
-            minY: innerY,
-            maxX: clipX + clipW - inset,
-            maxY: clipY + clipH - inset,
-          };
-        }
+      if (clipW > 0 && clipH > 0) {
+        strokeBounds = {
+          minX: clipX,
+          minY: clipY,
+          maxX: clipX + clipW,
+          maxY: clipY + clipH,
+        };
       }
-
       ctx.save();
       ctx.beginPath();
       ctx.rect(clipX, clipY, clipW, clipH);
@@ -1130,12 +1135,7 @@ export class CanvasRenderer {
       this.paintBodyCellFills(sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
 
       if (strokeBounds !== null && this.showGridLines) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(innerX, innerY, innerW, innerH);
-        ctx.clip();
         this.strokeBodyGrid(sheet, layout, r0, r1, c0, c1, colW, rowH, strokeBounds);
-        ctx.restore();
       }
 
       this.paintBodyCellTexts(sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
@@ -1351,6 +1351,8 @@ export class CanvasRenderer {
     }
     const { range, activeRow, activeCol } = snap;
     const { ctx } = this;
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
     const colW = this.scaledColW(sheet);
     const rowH = this.scaledRowH(sheet);
     const buf = this.viewportBuffer;
@@ -1485,7 +1487,7 @@ export class CanvasRenderer {
       const bw = (c1 - c0 + 1) * colW;
       const bh = (r1 - r0 + 1) * rowH;
       ctx.strokeStyle = this.theme.selectionBorderColor;
-      ctx.lineWidth = 2 * SELECTION_OUTLINE_VISUAL_SCALE;
+      ctx.lineWidth = viewScaledSelectionOutlineWidth(this.viewZoom);
       ctx.strokeRect(x0 + 0.5, y0 + 0.5, bw - 1, bh - 1);
 
       ctx.restore();
@@ -1542,7 +1544,7 @@ export class CanvasRenderer {
     // 3. Excel 风格填充柄（选区右下角小方块）
     const handleCenterX = this.cellLeftX(sheet, layout, range.endCol) + colW;
     const handleCenterY = this.cellTopY(sheet, layout, range.endRow) + rowH;
-    const handleSize = 6 * SELECTION_OUTLINE_VISUAL_SCALE;
+    const handleSize = Math.max(4, 6 * SELECTION_OUTLINE_VISUAL_SCALE * this.viewZoom);
     const handleHalf = handleSize / 2;
     const bodyX = headerW;
     const bodyY = headerH;
@@ -1564,6 +1566,41 @@ export class CanvasRenderer {
   }
 
   /**
+   * 列标题底边、行标题右侧与表体之间的分隔线：与表体网格同色同线宽，snapLine 对齐。
+   * 须在 `drawBody` 之后绘制，以免首行/首列填充盖住线段；与 `strokeBodyGrid` 在 (headerW,headerH) 处衔接，无双线。
+   */
+  private drawHeadingBodyDividerLines(
+    headerW: number,
+    headerH: number,
+    canvasW: number,
+    canvasH: number,
+  ): void {
+    if (headerW <= 0 || headerH <= 0) {
+      return;
+    }
+    const { ctx } = this;
+    const x0 = snapLine(0);
+    const xHw = snapLine(headerW);
+    const y0 = snapLine(headerH);
+    const x1 = snapLine(canvasW);
+    const y1 = snapLine(canvasH);
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+    ctx.strokeStyle = this.theme.gridLineColor;
+    ctx.lineWidth = 1;
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    ctx.lineTo(x1, y0);
+    ctx.moveTo(xHw, y0);
+    ctx.lineTo(xHw, y1);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
    * 冻结分隔线：只画在表体区域 [headerW,canvasW)×[headerH,canvasH)，不贯穿行列标题。
    * 若从 (0,0) 或 (0,sy0) 画到全画布，会在 (sx0,sy0) 形成十字并叠在冻结格与 C3 角上，
    * 滚动时像「C3 左上交叉线」穿入冻结区；表体-only 后十字仅出现在可滚动象限内。
@@ -1575,24 +1612,26 @@ export class CanvasRenderer {
       return;
     }
     ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
     ctx.strokeStyle = this.theme.freezeLineColor;
     ctx.lineWidth = 1;
-    const bodyTop = headerH;
-    const bodyBottom = canvasH;
-    const bodyLeft = headerW;
-    const bodyRight = canvasW;
+    const xBody0 = snapLine(headerW);
+    const yBody0 = snapLine(headerH);
+    const xBody1 = snapLine(canvasW);
+    const yBody1 = snapLine(canvasH);
     if (frozenCols > 0) {
       const x = headerW + frozenWidthPx;
       ctx.beginPath();
-      ctx.moveTo(snapLine(x), bodyTop);
-      ctx.lineTo(snapLine(x), bodyBottom);
+      ctx.moveTo(snapLine(x), yBody0);
+      ctx.lineTo(snapLine(x), yBody1);
       ctx.stroke();
     }
     if (frozenRows > 0) {
       const y = headerH + frozenHeightPx;
       ctx.beginPath();
-      ctx.moveTo(bodyLeft, snapLine(y));
-      ctx.lineTo(bodyRight, snapLine(y));
+      ctx.moveTo(xBody0, snapLine(y));
+      ctx.lineTo(xBody1, snapLine(y));
       ctx.stroke();
     }
     ctx.restore();

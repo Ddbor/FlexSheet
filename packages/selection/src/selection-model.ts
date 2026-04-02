@@ -1,6 +1,17 @@
 import type { Worksheet } from "@flexsheet/core";
 import { normalizeSelectionRange, type SelectionRange } from "@flexsheet/core";
 
+function unionSelectionRanges(a: SelectionRange, b: SelectionRange): SelectionRange {
+  const na = normalizeSelectionRange(a);
+  const nb = normalizeSelectionRange(b);
+  return normalizeSelectionRange({
+    startRow: Math.min(na.startRow, nb.startRow),
+    startCol: Math.min(na.startCol, nb.startCol),
+    endRow: Math.max(na.endRow, nb.endRow),
+    endCol: Math.max(na.endCol, nb.endCol),
+  });
+}
+
 export type SheetGetter = () => Worksheet | undefined;
 
 /**
@@ -48,6 +59,64 @@ export class SelectionModel {
     this.anchorCol = c;
     this.focusRow = r;
     this.focusCol = c;
+  }
+
+  /** 选中整列（活动格为列顶格，与 Excel 一致）。 */
+  selectEntireColumn(col: number): void {
+    const sheet = this.getSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const c = clamp(col, 0, sheet.colCount - 1);
+    const lastR = Math.max(0, sheet.rowCount - 1);
+    this.anchorRow = lastR;
+    this.anchorCol = c;
+    this.focusRow = 0;
+    this.focusCol = c;
+  }
+
+  /** 选中整行（活动格为行首格）。 */
+  selectEntireRow(row: number): void {
+    const sheet = this.getSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const r = clamp(row, 0, sheet.rowCount - 1);
+    const lastC = Math.max(0, sheet.colCount - 1);
+    this.anchorRow = r;
+    this.anchorCol = lastC;
+    this.focusRow = r;
+    this.focusCol = 0;
+  }
+
+  /** 选中整张表（活动格为 A1）。 */
+  selectEntireSheet(): void {
+    const sheet = this.getSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const lastR = Math.max(0, sheet.rowCount - 1);
+    const lastC = Math.max(0, sheet.colCount - 1);
+    this.anchorRow = lastR;
+    this.anchorCol = lastC;
+    this.focusRow = 0;
+    this.focusCol = 0;
+  }
+
+  /**
+   * 与当前选区做轴对齐外包矩形合并（Shift / Ctrl 点行列头时与单矩形模型一致）。
+   */
+  unionWithRange(range: SelectionRange): void {
+    const sheet = this.getSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const u = unionSelectionRanges(this.getNormalizedRange(), range);
+    this.anchorRow = u.startRow;
+    this.anchorCol = u.startCol;
+    this.focusRow = u.endRow;
+    this.focusCol = u.endCol;
+    this.clampToSheet();
   }
 
   /** 拖拽或 Shift+方向键：锚点不动，扩展焦点。 */

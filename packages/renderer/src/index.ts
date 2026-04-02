@@ -5,7 +5,12 @@ export {
   type VerticalScrollMetrics,
 } from "./canvas-renderer.js";
 export { RendererPlugin, type RendererPluginOptions } from "./renderer-plugin.js";
-export { hitTestCell, scrollToRevealCell } from "./grid-hit-test.js";
+export {
+  hitTestCell,
+  hitTestHeadingPointer,
+  scrollToRevealCell,
+  type HeadingHit,
+} from "./grid-hit-test.js";
 export {
   bodyPaintExtents,
   buildFrozenLayout,

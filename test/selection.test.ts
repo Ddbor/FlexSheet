@@ -105,4 +105,43 @@ describe("SelectionModel", () => {
     model.selectCell(0, 0);
     expect(model.getActiveCell()).toEqual({ row: 0, col: 0 });
   });
+
+  it("selectEntireColumn / Row / Sheet set full spans", () => {
+    const sheet = new Worksheet("S", 8, 6);
+    const model = new SelectionModel(() => sheet);
+    model.selectEntireColumn(2);
+    expect(model.getNormalizedRange()).toEqual({
+      startRow: 0,
+      startCol: 2,
+      endRow: 7,
+      endCol: 2,
+    });
+    model.selectEntireRow(3);
+    expect(model.getNormalizedRange()).toEqual({
+      startRow: 3,
+      startCol: 0,
+      endRow: 3,
+      endCol: 5,
+    });
+    model.selectEntireSheet();
+    expect(model.getNormalizedRange()).toEqual({
+      startRow: 0,
+      startCol: 0,
+      endRow: 7,
+      endCol: 5,
+    });
+  });
+
+  it("unionWithRange merges to axis-aligned bounding box", () => {
+    const sheet = new Worksheet("S", 10, 10);
+    const model = new SelectionModel(() => sheet);
+    model.selectCell(1, 1);
+    model.unionWithRange({ startRow: 0, startCol: 5, endRow: 9, endCol: 5 });
+    expect(model.getNormalizedRange()).toEqual({
+      startRow: 0,
+      startCol: 1,
+      endRow: 9,
+      endCol: 5,
+    });
+  });
 });
