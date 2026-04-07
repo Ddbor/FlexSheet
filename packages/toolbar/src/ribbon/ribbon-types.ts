@@ -2,7 +2,7 @@
  * Ribbon 标签与对外命令事件（宿主可据此驱动 FlexSheet / CanvasRenderer）。
  */
 
-import type { SelectionRange } from "@flexsheet/core";
+import type { SelectionRange, Workbook } from "@flexsheet/core";
 import type { CanvasRenderer } from "@flexsheet/renderer";
 import type { SheetTheme } from "@flexsheet/theme";
 export type RibbonTabId = "home" | "insert" | "pageLayout" | "formula" | "data" | "view";
@@ -51,6 +51,9 @@ export interface FlexSheetLike {
   canUndo(): boolean;
   canRedo(): boolean;
   subscribeUndoRedo(listener: () => void): () => void;
+  /** 存在时 Backstage 可提供 JSON 保存/导入。 */
+  readonly workbook?: Workbook;
+  loadWorkbook?(wb: Workbook): void;
 }
 
 export type { ViewTabHandles } from "./tabs/view-tab.js";

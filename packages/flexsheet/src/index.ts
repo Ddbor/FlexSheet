@@ -147,10 +147,25 @@ export { ScrollPlugin } from "@flexsheet/scroll";
 export { FEATURE_LAYER_PLACEHOLDER } from "./feature/plugin-placeholder.js";
 
 export {
+  DEFAULT_FLEXSHEET_JSON_EXPORT_OPTIONS,
+  DEFAULT_FLEXSHEET_JSON_IMPORT_OPTIONS,
+  downloadJsonText,
   downloadXlsxBlob,
+  decodeTextFileBytes,
+  DEFAULT_XLSX_EXPORT_OPTIONS,
   exportWorkbookToXlsxBlob,
   exportWorkbookToXlsxBytes,
+  FLEXSHEET_JSON_FORMAT,
+  FLEXSHEET_JSON_FORMAT_VERSION,
+  FLEXSHEET_JSON_GENERATOR_APP,
   importXlsxToWorkbook,
+  type XlsxExportOptions,
+  parseFlexSheetJson,
+  serializeWorkbookToJsonDocument,
+  workbookFromFlexSheetJsonDocument,
+  type FlexSheetJsonDocument,
+  type FlexSheetJsonExportOptions,
+  type FlexSheetJsonImportOptions,
 } from "@flexsheet/import-export";
 
 export {

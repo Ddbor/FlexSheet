@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@flexsheet/core": "workspace:*",
+    "@flexsheet/import-export": "workspace:*",
     "@flexsheet/renderer": "workspace:*",
     "@flexsheet/theme": "workspace:*"
   },

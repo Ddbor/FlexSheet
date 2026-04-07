@@ -46,12 +46,30 @@ interface StyleSignaturePayload {
   readonly fill: string;
 }
 
-function buildStyleTable(workbook: Workbook): StyleTable {
+function minimalStyleTable(): StyleTable {
+  const xfBySig = new Map<string, number>();
+  xfBySig.set("", 0);
+  const fontsXml: string[] = [
+    `<font><sz val="11"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/></font>`,
+  ];
+  const fillsXml: string[] = [
+    `<fill><patternFill patternType="none"/></fill>`,
+    `<fill><patternFill patternType="gray125"/></fill>`,
+  ];
+  const cellXfsXml: string[] = [`<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`];
+  return { xfBySig, fontsXml, fillsXml, cellXfsXml };
+}
+
+function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTable {
+  if (!opts.includeStyles) {
+    return minimalStyleTable();
+  }
+
   const xfBySig = new Map<string, number>();
   xfBySig.set("", 0);
 
   const fontsXml: string[] = [
-    `<font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font>`,
+    `<font><sz val="11"/><color rgb="FF000000"/><name val="Calibri"/><family val="2"/></font>`,
   ];
   const fillsXml: string[] = [
     `<fill><patternFill patternType="none"/></fill>`,
@@ -72,7 +90,7 @@ function buildStyleTable(workbook: Workbook): StyleTable {
     const needFont = st.b || st.fg !== "";
     if (needFont) {
       const bold = st.b ? "<b/>" : "";
-      const color = st.fg !== "" ? `<color rgb="${escapeXml(st.fg)}"/>` : `<color theme="1"/>`;
+      const color = st.fg !== "" ? `<color rgb="${escapeXml(st.fg)}"/>` : `<color rgb="FF000000"/>`;
       fontsXml.push(
         `<font>${bold}<sz val="11"/>${color}<name val="Calibri"/><family val="2"/></font>`,
       );
@@ -101,6 +119,9 @@ function buildStyleTable(workbook: Workbook): StyleTable {
       continue;
     }
     sh.iterateCells((c) => {
+      if (!shouldExportCellForXlsx(c, opts)) {
+        return;
+      }
       ensureStyle(styleSignature(c.style));
     });
   }
@@ -123,7 +144,43 @@ function buildStylesXml(table: StyleTable): string {
   );
 }
 
-function usedBounds(sheet: Worksheet): {
+/** XLSX 导出选项（与 Backstage「导出 Excel」复选框对应；未实现项仅占位）。 */
+export interface XlsxExportOptions {
+  readonly includeStyles: boolean;
+  readonly includeFormulas: boolean;
+  /** 导出仅有样式、无公式且无值的单元格。 */
+  readonly includeSparseStyledEmpty: boolean;
+}
+
+export const DEFAULT_XLSX_EXPORT_OPTIONS: XlsxExportOptions = {
+  includeStyles: true,
+  includeFormulas: true,
+  includeSparseStyledEmpty: true,
+};
+
+function shouldExportCellForXlsx(cell: Cell, opts: XlsxExportOptions): boolean {
+  const hasF = cell.formula !== null && cell.formula.length > 0;
+  const hasV = cell.value !== null && cell.value !== "";
+  const hasSt = cell.style !== null && Object.keys(cell.style).length > 0;
+  if (hasF && opts.includeFormulas) {
+    return true;
+  }
+  if (hasF && !opts.includeFormulas) {
+    return hasV;
+  }
+  if (hasV) {
+    return true;
+  }
+  if (opts.includeSparseStyledEmpty && hasSt && opts.includeStyles) {
+    return true;
+  }
+  return false;
+}
+
+function usedBoundsFiltered(
+  sheet: Worksheet,
+  opts: XlsxExportOptions,
+): {
   minR: number;
   maxR: number;
   minC: number;
@@ -135,6 +192,9 @@ function usedBounds(sheet: Worksheet): {
   let maxC = -1;
   let hasCell = false;
   sheet.iterateCells((c) => {
+    if (!shouldExportCellForXlsx(c, opts)) {
+      return;
+    }
     hasCell = true;
     minR = Math.min(minR, c.row);
     maxR = Math.max(maxR, c.row);
@@ -171,14 +231,20 @@ function cachedValueXml(value: CellScalar): string {
   return `<v>${escapeXml(String(value))}</v>`;
 }
 
-function cellToXml(cell: Cell, sst: Map<string, number>, xfBySig: Map<string, number>): string {
+function cellToXml(
+  cell: Cell,
+  sst: Map<string, number>,
+  xfBySig: Map<string, number>,
+  opts: XlsxExportOptions,
+): string {
   const ref = formatCellRef(cell.row, cell.col);
-  const sig = styleSignature(cell.style);
-  const xf = xfBySig.get(sig) ?? 0;
-  const sAttr = xf > 0 ? ` s="${xf}"` : "";
+  const sig = opts.includeStyles ? styleSignature(cell.style) : "";
+  const xf = opts.includeStyles ? (xfBySig.get(sig) ?? 0) : 0;
+  const sAttr = opts.includeStyles && xf > 0 ? ` s="${xf}"` : "";
 
-  if (cell.formula !== null) {
-    const f = escapeXml(ooxmlFormula(cell.formula));
+  const hasF = cell.formula !== null && cell.formula.length > 0;
+  if (hasF && opts.includeFormulas) {
+    const f = escapeXml(ooxmlFormula(cell.formula as string));
     const vPart = cachedValueXml(cell.value);
     const tStr = typeof cell.value === "string" && cell.value !== "" ? ` t="str"` : "";
     return `<c r="${ref}"${sAttr}${tStr}><f>${f}</f>${vPart}</c>`;
@@ -197,9 +263,13 @@ function cellToXml(cell: Cell, sst: Map<string, number>, xfBySig: Map<string, nu
   return `<c r="${ref}"${sAttr} t="s"><v>${si}</v></c>`;
 }
 
-function buildSharedStrings(workbook: Workbook): { xml: string; index: Map<string, number> } {
+function buildSharedStrings(
+  workbook: Workbook,
+  opts: XlsxExportOptions,
+): { xml: string; index: Map<string, number> } {
   const ordered: string[] = [];
   const index = new Map<string, number>();
+  let stringRefCount = 0;
   const add = (s: string): void => {
     if (index.has(s)) {
       return;
@@ -214,8 +284,13 @@ function buildSharedStrings(workbook: Workbook): { xml: string; index: Map<strin
       continue;
     }
     sh.iterateCells((c) => {
-      if (c.formula === null && typeof c.value === "string" && c.value !== "") {
+      if (!shouldExportCellForXlsx(c, opts)) {
+        return;
+      }
+      const asLiteral = c.formula === null || !opts.includeFormulas;
+      if (asLiteral && typeof c.value === "string" && c.value !== "") {
         add(c.value);
+        stringRefCount += 1;
       }
     });
   }
@@ -228,7 +303,7 @@ function buildSharedStrings(workbook: Workbook): { xml: string; index: Map<strin
   });
   const xml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<sst xmlns="${SS_MAIN}" count="${ordered.length}" uniqueCount="${ordered.length}">` +
+    `<sst xmlns="${SS_MAIN}" count="${stringRefCount}" uniqueCount="${ordered.length}">` +
     parts.join("") +
     `</sst>`;
   return { xml, index };
@@ -239,13 +314,17 @@ function buildSheetXml(
   sheetIndex: number,
   sst: Map<string, number>,
   xfBySig: Map<string, number>,
+  opts: XlsxExportOptions,
 ): string {
-  const b = usedBounds(sheet);
+  const b = usedBoundsFiltered(sheet, opts);
   const dim =
     b === null ? "A1" : `${formatCellRef(b.minR, b.minC)}:${formatCellRef(b.maxR, b.maxC)}`;
 
   const byRow = new Map<number, Cell[]>();
   sheet.iterateCells((c) => {
+    if (!shouldExportCellForXlsx(c, opts)) {
+      return;
+    }
     const arr = byRow.get(c.row);
     if (arr === undefined) {
       byRow.set(c.row, [c]);
@@ -267,7 +346,7 @@ function buildSheetXml(
     cells.sort((a, b) => a.col - b.col);
     const spans =
       cells.length > 0 ? `${cells[0].col + 1}:${cells[cells.length - 1].col + 1}` : "1:1";
-    const cXml = cells.map((c) => cellToXml(c, sst, xfBySig)).join("");
+    const cXml = cells.map((c) => cellToXml(c, sst, xfBySig, opts)).join("");
     rowXml.push(`<row r="${r + 1}" spans="${spans}" ht="${ht}" customHeight="1">${cXml}</row>`);
   }
 
@@ -298,14 +377,17 @@ function sanitizeSheetName(name: string, index: number): string {
 }
 
 /** 导出为标准 XLSX（ECMA-376 OPC + ZIP + deflate）。 */
-export function exportWorkbookToXlsxBytes(workbook: Workbook): Uint8Array {
+export function exportWorkbookToXlsxBytes(
+  workbook: Workbook,
+  options: XlsxExportOptions = DEFAULT_XLSX_EXPORT_OPTIONS,
+): Uint8Array {
   if (workbook.sheetCount === 0) {
     throw new Error("工作簿至少需一张工作表");
   }
 
-  const styleTable = buildStyleTable(workbook);
+  const styleTable = buildStyleTable(workbook, options);
   const stylesXml = buildStylesXml(styleTable);
-  const { xml: sstXml, index: sstMap } = buildSharedStrings(workbook);
+  const { xml: sstXml, index: sstMap } = buildSharedStrings(workbook, options);
 
   const sheetParts: string[] = [];
   for (let i = 0; i < workbook.sheetCount; i++) {
@@ -313,7 +395,7 @@ export function exportWorkbookToXlsxBytes(workbook: Workbook): Uint8Array {
     if (sh === undefined) {
       continue;
     }
-    sheetParts.push(buildSheetXml(sh, i, sstMap, styleTable.xfBySig));
+    sheetParts.push(buildSheetXml(sh, i, sstMap, styleTable.xfBySig, options));
   }
 
   const sheetNames = sheetParts.map((_, i) => {
@@ -347,7 +429,7 @@ export function exportWorkbookToXlsxBytes(workbook: Workbook): Uint8Array {
   const workbookXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<workbook xmlns="${SS_MAIN}" xmlns:r="${REL_NS}">` +
-    `<fileVersion appName="xl"/><workbookPr date1904="false"/>` +
+    `<workbookPr date1904="false"/>` +
     `<bookViews><workbookView xWindow="0" yWindow="0"/></bookViews>` +
     `<sheets>${sheetsXml}</sheets>` +
     `<calcPr calcId="191029"/>` +
@@ -426,8 +508,11 @@ export function exportWorkbookToXlsxBytes(workbook: Workbook): Uint8Array {
   return buildZipArchive(files);
 }
 
-export function exportWorkbookToXlsxBlob(workbook: Workbook): Blob {
-  const bytes = exportWorkbookToXlsxBytes(workbook);
+export function exportWorkbookToXlsxBlob(
+  workbook: Workbook,
+  options?: XlsxExportOptions,
+): Blob {
+  const bytes = exportWorkbookToXlsxBytes(workbook, options ?? DEFAULT_XLSX_EXPORT_OPTIONS);
   return new Blob([new Uint8Array(bytes)], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });

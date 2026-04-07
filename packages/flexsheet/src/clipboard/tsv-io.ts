@@ -1,5 +1,5 @@
 /**
- * TSV 纯文本：列用 \\t、行用 \\n；含制表符/换行/双引号的字段用 CSV 风格双引号包裹。
+ * TSV 纯文本：列用 \\t、行用 \\n；含制表符/换行/双引号的字段用 RFC 4180 式双引号包裹。
  */
 
 export function escapeTsvField(text: string): string {

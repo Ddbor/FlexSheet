@@ -48,15 +48,15 @@
 }
 
 .fs-ribbon-backstage__back-wrap {
-  padding: 12px 12px 8px;
+  padding: 14px 12px 10px;
 }
 
 .fs-ribbon-backstage__back {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   margin: 0;
   padding: 0;
   border: 1px solid transparent;
@@ -137,6 +137,11 @@
   max-width: 720px;
 }
 
+.fs-ribbon-backstage__panel--import {
+  max-width: none;
+  width: 100%;
+}
+
 .fs-backstage__page-title {
   margin: 0 0 8px;
   font-size: 28px;
@@ -214,6 +219,11 @@
   outline-offset: 2px;
 }
 
+.fs-backstage__open-card--drop.fs-backstage__open-card--dragover {
+  border-color: var(--fs-backstage-accent);
+  background: var(--fs-backstage-card-hover);
+}
+
 .fs-backstage__open-card-icon {
   color: var(--fs-backstage-muted);
 }
@@ -222,4 +232,167 @@
   margin: 16px 0 0;
   font-size: 14px;
   color: var(--fs-backstage-muted);
+}
+
+.fs-backstage__import-shell {
+  width: 100%;
+  max-width: 960px;
+}
+
+.fs-backstage__import-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  margin-top: 4px;
+}
+
+.fs-backstage__import-types {
+  flex: 0 0 220px;
+  padding-right: 16px;
+  border-right: 1px solid var(--fs-backstage-border);
+  min-width: 0;
+}
+
+.fs-backstage__import-type-btn {
+  display: block;
+  width: 100%;
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.fs-backstage__import-type-btn:hover {
+  background: var(--fs-backstage-sidebar-hover);
+}
+
+.fs-backstage__import-type-btn--active {
+  background: var(--fs-backstage-sidebar-active);
+  font-weight: 600;
+}
+
+.fs-backstage__import-type-btn:focus-visible {
+  outline: 2px solid var(--fs-backstage-accent);
+  outline-offset: -2px;
+}
+
+.fs-backstage__import-detail {
+  flex: 1;
+  min-width: 0;
+  padding-left: 28px;
+}
+
+.fs-backstage__import-section-title {
+  margin: 20px 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fs-backstage-muted);
+}
+
+.fs-backstage__import-check-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.fs-backstage__import-field-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.fs-backstage__import-field-label {
+  flex: 0 0 104px;
+  color: var(--fs-backstage-text);
+}
+
+.fs-backstage__save-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 28px;
+  max-width: 520px;
+}
+
+.fs-backstage__save-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.fs-backstage__filename-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fs-backstage__filename-input {
+  min-width: 280px;
+  padding: 8px 10px;
+  border: 1px solid var(--fs-backstage-card-border);
+  border-radius: 2px;
+  font: inherit;
+  background: var(--fs-backstage-main-bg);
+  color: var(--fs-backstage-text);
+}
+
+.fs-backstage__filename-input:focus-visible {
+  outline: 2px solid var(--fs-backstage-accent);
+  outline-offset: 1px;
+}
+
+.fs-backstage__filename-ext {
+  color: var(--fs-backstage-muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.fs-backstage__btn-primary {
+  padding: 8px 28px;
+  border: none;
+  border-radius: 2px;
+  background: var(--fs-backstage-accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fs-backstage__btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.fs-backstage__btn-primary:focus-visible {
+  outline: 2px solid var(--fs-backstage-accent);
+  outline-offset: 2px;
+}
+
+.fs-backstage__import-hint {
+  margin: 0 0 20px;
+  font-size: 14px;
+  color: var(--fs-backstage-muted);
+  line-height: 1.5;
+}
+
+.fs-backstage__msg {
+  margin: 16px 0 0;
+  font-size: 14px;
+  color: var(--fs-backstage-muted);
+}
+
+.fs-backstage__msg--error {
+  color: #c50f1f;
+}
+
+.fs-ribbon-backstage[data-theme="dark"] .fs-backstage__msg--error {
+  color: #f1707b;
 }

@@ -53,6 +53,22 @@ describe("xlsx export/import", () => {
     expect(s1?.getCell(0, 1).formula).toContain("第一页");
   });
 
+  it("sharedStrings count is total refs, uniqueCount is distinct strings (Excel SST)", () => {
+    const wb = new Workbook();
+    const s = new Worksheet("S");
+    wb.addSheet(s);
+    s.getCell(0, 0).value = "dup";
+    s.getCell(0, 1).value = "dup";
+    s.getCell(0, 2).value = "dup";
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const sst = new TextDecoder().decode(map.get("xl/sharedStrings.xml"));
+    expect(sst).toContain('count="3"');
+    expect(sst).toContain('uniqueCount="1"');
+  });
+
   it("ZIP is valid OPC with required parts", () => {
     const wb = new Workbook();
     wb.addSheet(new Worksheet("S"));

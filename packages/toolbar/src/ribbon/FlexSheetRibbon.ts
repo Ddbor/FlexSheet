@@ -209,7 +209,7 @@ export class FlexSheetRibbon {
     }
     const handles = createRibbonBackstage(() => {
       this.closeBackstage();
-    });
+    }, { flexSheet: this.flexSheet });
     handles.applyThemeMode(this.root.dataset.theme === "dark" ? "dark" : "light");
     this.coverRoot.appendChild(handles.root);
     this.backstage = handles;
