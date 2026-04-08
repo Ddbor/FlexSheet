@@ -165,4 +165,12 @@ describe("Worksheet", () => {
     expect(ws.getCell(1, 0).value).toBe(4);
     expect(n).toBe(2);
   });
+
+  it("mergeCenter clears indent and sets horizontal center on master", () => {
+    const ws = new Worksheet("S");
+    ws.getCell(0, 0).style = { indentLevel: 2 };
+    ws.applyMergeForSelection({ startRow: 0, endRow: 1, startCol: 0, endCol: 1 }, "mergeCenter");
+    expect(ws.getCell(0, 0).style?.indentLevel).toBeUndefined();
+    expect(ws.getCell(0, 0).style?.hAlign).toBe("center");
+  });
 });

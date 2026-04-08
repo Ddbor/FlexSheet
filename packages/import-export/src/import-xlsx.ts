@@ -1,6 +1,12 @@
 import { Workbook } from "@flexsheet/core";
 import { Worksheet } from "@flexsheet/core";
-import type { CellScalar, CellStyle } from "@flexsheet/core";
+import type {
+  CellBorderKind,
+  CellBorderSide,
+  CellScalar,
+  CellStyle,
+  CellTextOrientation,
+} from "@flexsheet/core";
 import { parseCellRef } from "./a1.js";
 import { unzipToMap } from "./zip-reader.js";
 import { recalcWorksheet } from "@flexsheet/formula";
@@ -46,12 +52,53 @@ function parseFontStyle(fontEl: Element): Partial<CellStyle> {
   if (childrenLocal(fontEl, "b").length > 0) {
     st.bold = true;
   }
+  if (childrenLocal(fontEl, "i").length > 0) {
+    st.italic = true;
+  }
+  const uEl = firstLocal(fontEl, "u");
+  if (uEl !== undefined) {
+    const uv = uEl.getAttribute("val");
+    st.underline = uv === "double" ? "double" : "single";
+  }
+  const szEl = firstLocal(fontEl, "sz");
+  if (szEl !== undefined) {
+    const v = Number(szEl.getAttribute("val"));
+    if (Number.isFinite(v) && v > 0) {
+      st.fontSizePt = v;
+    }
+  }
+  const nameEl = firstLocal(fontEl, "name");
+  if (nameEl !== undefined) {
+    const nm = nameEl.getAttribute("val");
+    if (nm !== null && nm !== "") {
+      st.fontFamily = nm;
+    }
+  }
   const color = firstLocal(fontEl, "color");
   const rgb = color?.getAttribute("rgb");
   if (rgb !== null && rgb !== undefined && rgb !== "") {
     st.fgArgb = rgb;
   }
   return st;
+}
+
+function parseTextOrientationFromOoxml(n: number): CellTextOrientation | undefined {
+  if (n === 45) {
+    return "angleUp45";
+  }
+  if (n === 135) {
+    return "angleDown45";
+  }
+  if (n === 255) {
+    return "verticalStack";
+  }
+  if (n === 90) {
+    return "rotateUp90";
+  }
+  if (n === 180) {
+    return "rotateDown90";
+  }
+  return undefined;
 }
 
 function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
@@ -85,6 +132,58 @@ function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
   if (align.getAttribute("wrapText") === "1") {
     out.wrapText = true;
   }
+  const tr = align.getAttribute("textRotation");
+  if (tr !== null && tr !== "") {
+    const n = Number(tr);
+    if (Number.isFinite(n)) {
+      const o = parseTextOrientationFromOoxml(n);
+      if (o !== undefined) {
+        out.textOrientation = o;
+      }
+    }
+  }
+  return out;
+}
+
+const OOXML_BORDER_TO_KIND: Record<string, CellBorderKind> = {
+  thin: "thin",
+  medium: "medium",
+  thick: "thick",
+  double: "double",
+  hairline: "hairline",
+};
+
+function ooxmlBorderKind(style: string): CellBorderKind {
+  return OOXML_BORDER_TO_KIND[style] ?? "thin";
+}
+
+function parseBorderSidesFromBorderEl(borderEl: Element): Partial<CellStyle> {
+  const out: Partial<CellStyle> = {};
+  const one = (
+    tag: "left" | "right" | "top" | "bottom",
+    prop: "borderLeft" | "borderRight" | "borderTop" | "borderBottom",
+  ): void => {
+    const el = firstLocal(borderEl, tag);
+    if (el === undefined) {
+      return;
+    }
+    const style = el.getAttribute("style");
+    if (style === null || style === "") {
+      return;
+    }
+    const kind = ooxmlBorderKind(style);
+    const colorEl = firstLocal(el, "color");
+    const rgb = colorEl?.getAttribute("rgb");
+    const side: CellBorderSide =
+      rgb !== null && rgb !== undefined && rgb !== ""
+        ? { kind, colorArgb: rgb }
+        : { kind };
+    out[prop] = side;
+  };
+  one("left", "borderLeft");
+  one("right", "borderRight");
+  one("top", "borderTop");
+  one("bottom", "borderBottom");
   return out;
 }
 
@@ -112,28 +211,37 @@ function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
   const root = doc.documentElement;
   const fontsEl = firstLocal(root, "fonts");
   const fillsEl = firstLocal(root, "fills");
+  const bordersEl = firstLocal(root, "borders");
   const cellXfsEl = firstLocal(root, "cellXfs");
   if (fontsEl === undefined || fillsEl === undefined || cellXfsEl === undefined) {
     return [];
   }
   const fontEls = childrenLocal(fontsEl, "font");
   const fillEls = childrenLocal(fillsEl, "fill");
+  const borderEls =
+    bordersEl !== undefined ? childrenLocal(bordersEl, "border") : [];
   const fontParts = fontEls.map((f) => parseFontStyle(f));
   const fillParts = fillEls.map((f) => parseFillStyle(f));
+  const borderParts = borderEls.map((b) => parseBorderSidesFromBorderEl(b));
 
   const xfs = childrenLocal(cellXfsEl, "xf");
   const table: (CellStyle | null)[] = [];
   for (const xf of xfs) {
     const fontId = Number(xf.getAttribute("fontId") ?? "0");
     const fillId = Number(xf.getAttribute("fillId") ?? "0");
+    const borderId = Number(xf.getAttribute("borderId") ?? "0");
     const applyFont = xf.getAttribute("applyFont") === "1";
     const applyFill = xf.getAttribute("applyFill") === "1";
+    const applyBorder = xf.getAttribute("applyBorder") === "1";
     const st: CellStyle = {};
     if (applyFont && fontParts[fontId] !== undefined) {
       Object.assign(st, fontParts[fontId]);
     }
     if (applyFill && fillParts[fillId] !== undefined) {
       Object.assign(st, fillParts[fillId]);
+    }
+    if (applyBorder && borderParts[borderId] !== undefined) {
+      Object.assign(st, borderParts[borderId]);
     }
     Object.assign(st, parseAlignmentFromXf(xf));
     table.push(Object.keys(st).length > 0 ? st : null);
@@ -198,6 +306,62 @@ function parseCellValue(
   return { value: vText, formula: null };
 }
 
+function parseMergeRef(ref: string): {
+  masterRow: number;
+  masterCol: number;
+  rowSpan: number;
+  colSpan: number;
+} | null {
+  const parts = ref.split(":");
+  if (parts.length !== 2) {
+    return null;
+  }
+  const a = parseCellRef(parts[0] ?? "");
+  const b = parseCellRef(parts[1] ?? "");
+  if (a === null || b === null) {
+    return null;
+  }
+  const minR = Math.min(a.row, b.row);
+  const maxR = Math.max(a.row, b.row);
+  const minC = Math.min(a.col, b.col);
+  const maxC = Math.max(a.col, b.col);
+  return {
+    masterRow: minR,
+    masterCol: minC,
+    rowSpan: maxR - minR + 1,
+    colSpan: maxC - minC + 1,
+  };
+}
+
+function parseMergeRegionsFromSheet(root: Element): readonly {
+  readonly masterRow: number;
+  readonly masterCol: number;
+  readonly rowSpan: number;
+  readonly colSpan: number;
+}[] {
+  const mergeRoot = firstLocal(root, "mergeCells");
+  if (mergeRoot === undefined) {
+    return [];
+  }
+  const out: {
+    masterRow: number;
+    masterCol: number;
+    rowSpan: number;
+    colSpan: number;
+  }[] = [];
+  for (const mc of childrenLocal(mergeRoot, "mergeCell")) {
+    const ref = mc.getAttribute("ref");
+    if (ref === null) {
+      continue;
+    }
+    const p = parseMergeRef(ref);
+    if (p !== null && (p.rowSpan > 1 || p.colSpan > 1)) {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
 function parseSheet(
   xml: string,
   sst: string[],
@@ -208,6 +372,8 @@ function parseSheet(
   const root = doc.documentElement;
   let maxR = 0;
   let maxC = 0;
+
+  const mergeRegions = parseMergeRegionsFromSheet(root);
 
   const sfmt = firstLocal(root, "sheetFormatPr");
   const defaultRowHt =
@@ -220,6 +386,8 @@ function parseSheet(
 
   const data = firstLocal(root, "sheetData");
   if (data === undefined) {
+    sheet.restoreMergeRegionsFromSnapshot(mergeRegions);
+    sheet.notifyDataChanged();
     return sheet;
   }
 
@@ -251,11 +419,64 @@ function parseSheet(
         }
       }
     }
+    for (const r of mergeRegions) {
+      maxR = Math.max(maxR, r.masterRow + r.rowSpan - 1);
+      maxC = Math.max(maxC, r.masterCol + r.colSpan - 1);
+    }
     const nextR = Math.max(sheet.rowCount, maxR + 1);
     const nextC = Math.max(sheet.colCount, maxC + 1);
     sheet.rowCount = Math.max(1, nextR);
     sheet.colCount = Math.max(1, nextC);
+
+    for (const row of childrenLocal(data, "row")) {
+      const rAttr = row.getAttribute("r");
+      if (rAttr === null) {
+        continue;
+      }
+      const rowNum = Number(rAttr);
+      if (!Number.isFinite(rowNum) || rowNum < 1) {
+        continue;
+      }
+      const rr = rowNum - 1;
+      if (rr < 0 || rr >= sheet.rowCount) {
+        continue;
+      }
+      const ht = row.getAttribute("ht");
+      if (ht !== null && ht !== "") {
+        const pt = Number(ht);
+        if (Number.isFinite(pt) && pt > 0) {
+          sheet.setRowHeight(rr, Math.max(2, Math.round((pt * 96) / 72)));
+        }
+      }
+    }
   });
+  sheet.batch(() => {
+    const colsRoot = firstLocal(root, "cols");
+    if (colsRoot === undefined) {
+      return;
+    }
+    for (const col of childrenLocal(colsRoot, "col")) {
+      const min = Number(col.getAttribute("min"));
+      const max = Number(col.getAttribute("max"));
+      const wAttr = col.getAttribute("width");
+      if (!Number.isFinite(min) || !Number.isFinite(max) || wAttr === null || wAttr === "") {
+        continue;
+      }
+      const charW = Number(wAttr);
+      if (!Number.isFinite(charW) || charW <= 0) {
+        continue;
+      }
+      const px = Math.max(2, Math.round(charW * 7 + 5));
+      const minCol = Math.trunc(min) - 1;
+      const maxCol = Math.trunc(max) - 1;
+      for (let cc = minCol; cc <= maxCol; cc++) {
+        if (cc >= 0 && cc < sheet.colCount) {
+          sheet.setColWidth(cc, px);
+        }
+      }
+    }
+  });
+  sheet.restoreMergeRegionsFromSnapshot(mergeRegions);
   sheet.notifyDataChanged();
   return sheet;
 }

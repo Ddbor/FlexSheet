@@ -21,4 +21,22 @@ describe("CellStyle alignment patch", () => {
     expect(applyCellStylePatch({ indentLevel: 2 }, { indentLevel: null })).toBeNull();
     expect(applyCellStylePatch({ wrapText: true }, { wrapText: null })).toBeNull();
   });
+
+  it("applies and clears textOrientation", () => {
+    expect(applyCellStylePatch(null, { textOrientation: "rotateUp90" })).toEqual({
+      textOrientation: "rotateUp90",
+    });
+    expect(
+      applyCellStylePatch({ textOrientation: "verticalStack" }, { textOrientation: null }),
+    ).toBeNull();
+  });
+
+  it("horizontal align and indent are mutually exclusive via patch", () => {
+    expect(
+      applyCellStylePatch({ indentLevel: 2, hAlign: "center" }, { hAlign: "left", indentLevel: null }),
+    ).toEqual({ hAlign: "left" });
+    expect(applyCellStylePatch({ hAlign: "center" }, { indentLevel: 1, hAlign: null })).toEqual({
+      indentLevel: 1,
+    });
+  });
 });

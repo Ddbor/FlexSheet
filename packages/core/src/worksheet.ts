@@ -28,7 +28,10 @@ export class Worksheet {
   private readonly hiddenCols = new Set<number>();
 
   /** 合并区域：主格键 `row,col` → 跨度（≥2 格）。 */
-  private mergeRegionsByMaster = new Map<string, { readonly rowSpan: number; readonly colSpan: number }>();
+  private mergeRegionsByMaster = new Map<
+    string,
+    { readonly rowSpan: number; readonly colSpan: number }
+  >();
   /** 格键 → 主格键（含主格自身）。 */
   private mergeCellToMaster = new Map<string, string>();
 
@@ -365,7 +368,10 @@ export class Worksheet {
   /**
    * 合并区域信息：主格为 `anchorRow/anchorCol`；未合并时为 1×1。
    */
-  getMergedRectInfo(row: number, col: number): {
+  getMergedRectInfo(
+    row: number,
+    col: number,
+  ): {
     readonly anchorRow: number;
     readonly anchorCol: number;
     readonly rowSpan: number;
@@ -376,13 +382,23 @@ export class Worksheet {
     if (span === undefined) {
       return { anchorRow: anchor.row, anchorCol: anchor.col, rowSpan: 1, colSpan: 1 };
     }
-    return { anchorRow: anchor.row, anchorCol: anchor.col, rowSpan: span.rowSpan, colSpan: span.colSpan };
+    return {
+      anchorRow: anchor.row,
+      anchorCol: anchor.col,
+      rowSpan: span.rowSpan,
+      colSpan: span.colSpan,
+    };
   }
 
   /**
    * 键盘方向键移动一步（不含 Shift 扩展）：从合并区域穿出时按 Excel 习惯从主格边缘离开。
    */
-  moveFocusFrom(row: number, col: number, deltaRow: number, deltaCol: number): {
+  moveFocusFrom(
+    row: number,
+    col: number,
+    deltaRow: number,
+    deltaCol: number,
+  ): {
     readonly row: number;
     readonly col: number;
   } {
@@ -493,7 +509,7 @@ export class Worksheet {
           this.setCellStyle(
             n.startRow,
             n.startCol,
-            applyCellStylePatch(cell.style, { hAlign: "center" }),
+            applyCellStylePatch(cell.style, { hAlign: "center", indentLevel: null }),
           );
         }
       }
@@ -571,7 +587,10 @@ export class Worksheet {
     this.reindexNumberSet(this.hiddenCols, mapper);
   }
 
-  private reindexNumberMap(map: Map<number, number>, mapper: (index: number) => number | null): void {
+  private reindexNumberMap(
+    map: Map<number, number>,
+    mapper: (index: number) => number | null,
+  ): void {
     const next = new Map<number, number>();
     for (const [idx, value] of map) {
       const target = mapper(idx);

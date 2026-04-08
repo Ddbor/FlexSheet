@@ -227,13 +227,13 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.applySelectionStylePatch({ vAlign: "bottom" });
       return true;
     case "home.align.left":
-      fs.applySelectionStylePatch({ hAlign: "left" });
+      fs.applySelectionStylePatch({ hAlign: "left", indentLevel: null });
       return true;
     case "home.align.center":
-      fs.applySelectionStylePatch({ hAlign: "center" });
+      fs.applySelectionStylePatch({ hAlign: "center", indentLevel: null });
       return true;
     case "home.align.right":
-      fs.applySelectionStylePatch({ hAlign: "right" });
+      fs.applySelectionStylePatch({ hAlign: "right", indentLevel: null });
       return true;
     case "home.align.indentIncrease":
       fs.applySelectionIndentStep(1);
@@ -278,6 +278,21 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.applySelectionMerge("unmerge");
       return true;
     }
+    case "home.align.textDirection.counterClockwise":
+      fs.applySelectionStylePatch({ textOrientation: "angleUp45" });
+      return true;
+    case "home.align.textDirection.clockwise":
+      fs.applySelectionStylePatch({ textOrientation: "angleDown45" });
+      return true;
+    case "home.align.textDirection.vertical":
+      fs.applySelectionStylePatch({ textOrientation: "verticalStack" });
+      return true;
+    case "home.align.textDirection.rotateUp":
+      fs.applySelectionStylePatch({ textOrientation: "rotateUp90" });
+      return true;
+    case "home.align.textDirection.rotateDown":
+      fs.applySelectionStylePatch({ textOrientation: "rotateDown90" });
+      return true;
     default: {
       const fam = FONT_FAMILY_CSS.get(ev.id);
       if (fam !== undefined) {

@@ -1,4 +1,4 @@
-import type { CellStyle, Worksheet } from "@flexsheet/core";
+import type { CellStyle, CellTextOrientation, Worksheet } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import {
@@ -118,6 +118,61 @@ function resolvedVAlign(st: CellStyle | null | undefined): "top" | "middle" | "b
   return v === "top" || v === "bottom" ? v : "middle";
 }
 
+function resolvedTextOrientation(st: CellStyle | null | undefined): CellTextOrientation {
+  return st?.textOrientation ?? "horizontal";
+}
+
+/** 非水平方向时忽略下划线（与 Canvas 测量一致）。 */
+function paintOrientedBodyText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  drawW: number,
+  rowH: number,
+  orient: Exclude<CellTextOrientation, "horizontal">,
+  fontPx: number,
+): void {
+  const cx = x + drawW / 2;
+  const cy = y + rowH / 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  if (orient === "verticalStack") {
+    const chars = Array.from(text);
+    const lineH = Math.max(fontPx * 1.2, 12);
+    const totalH = chars.length * lineH;
+    let yy = cy - totalH / 2 + lineH / 2;
+    for (const ch of chars) {
+      if (yy - lineH / 2 > y + rowH + 1e-6) {
+        break;
+      }
+      ctx.fillText(ch, cx, yy);
+      yy += lineH;
+    }
+    return;
+  }
+  ctx.save();
+  ctx.translate(cx, cy);
+  switch (orient) {
+    case "angleUp45":
+      ctx.rotate(-Math.PI / 4);
+      break;
+    case "angleDown45":
+      ctx.rotate(Math.PI / 4);
+      break;
+    case "rotateUp90":
+      ctx.rotate(-Math.PI / 2);
+      break;
+    case "rotateDown90":
+      ctx.rotate(Math.PI / 2);
+      break;
+    default:
+      break;
+  }
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
 function clampIndentLevel(raw: number | undefined): number {
   if (raw === undefined || !Number.isFinite(raw)) {
     return 0;
@@ -229,8 +284,13 @@ function paintBodyCellTexts(
       const innerW = Math.max(1, colW - 2 * pad - indentPx);
 
       const wrap = cell.style?.wrapText === true;
+      const orient = resolvedTextOrientation(cell.style);
+      const orientActive = orient !== "horizontal";
       let lines: string[];
-      if (wrap) {
+      if (orientActive) {
+        const raw = text.includes("\n") ? text.split("\n")[0] ?? "" : text;
+        lines = [raw];
+      } else if (wrap) {
         lines = wrapCellLines(ctx, text, innerW);
       } else if (text.includes("\n")) {
         lines = text.split("\n");
@@ -238,8 +298,8 @@ function paintBodyCellTexts(
         lines = [text];
       }
 
-      const onlySingleLineVisual = !wrap && !text.includes("\n");
-      const drawW = onlySingleLineVisual ? extendedTextWidth(r, c, colW) : colW;
+      const onlySingleLineVisual = orientActive || lines.length === 1;
+      const drawW = onlySingleLineVisual && !orientActive ? extendedTextWidth(r, c, colW) : colW;
       const underlineKind = cell.style?.underline;
       const ink = String(ctx.fillStyle);
       ctx.save();
@@ -293,6 +353,11 @@ function paintBodyCellTexts(
             strokeCellTextUnderline(ctx, line, lineLeft, baselineY, underlineKind, ink, fontPx);
           }
           yy += lineH;
+        }
+      } else if (orientActive) {
+        const line = lines[0] ?? "";
+        if (line !== "") {
+          paintOrientedBodyText(ctx, line, x, y, drawW, rowH, orient, fontPx);
         }
       } else {
         const m = ctx.measureText(text);

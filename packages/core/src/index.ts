@@ -8,6 +8,7 @@ export {
   type CellScalar,
   type CellStyle,
   type CellStylePatch,
+  type CellTextOrientation,
   type CellVerticalAlign,
 } from "./cell.js";
 export { Workbook, type WorkbookChangeListener } from "./workbook.js";

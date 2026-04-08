@@ -209,9 +209,11 @@ export class ApplySelectionIndentStepCommand implements ICommand {
         const beforeClone = before === null ? null : { ...before };
         const cur = beforeClone?.indentLevel ?? 0;
         const nextLv = Math.max(0, Math.min(MAX_INDENT_LEVEL, cur + dir));
-        const after = applyCellStylePatch(beforeClone, {
-          indentLevel: nextLv === 0 ? null : nextLv,
-        });
+        const patch: CellStylePatch =
+          nextLv === 0
+            ? { indentLevel: null }
+            : { indentLevel: nextLv, hAlign: null };
+        const after = applyCellStylePatch(beforeClone, patch);
         list.push({ row: r, col: c, before: beforeClone, after });
       }
     }

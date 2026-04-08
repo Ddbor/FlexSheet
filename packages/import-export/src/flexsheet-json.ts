@@ -129,6 +129,7 @@ function isCellStyle(v: unknown): v is CellStyle {
     "vAlign",
     "indentLevel",
     "wrapText",
+    "textOrientation",
   ]);
   for (const k of keys) {
     if (!allowed.has(k)) {
@@ -186,6 +187,18 @@ function isCellStyle(v: unknown): v is CellStyle {
   }
   if (v.wrapText !== undefined && typeof v.wrapText !== "boolean") {
     return false;
+  }
+  if (v.textOrientation !== undefined) {
+    const ok =
+      v.textOrientation === "horizontal" ||
+      v.textOrientation === "angleUp45" ||
+      v.textOrientation === "angleDown45" ||
+      v.textOrientation === "verticalStack" ||
+      v.textOrientation === "rotateUp90" ||
+      v.textOrientation === "rotateDown90";
+    if (!ok) {
+      return false;
+    }
   }
   return true;
 }

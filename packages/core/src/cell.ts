@@ -19,6 +19,23 @@ export type CellHorizontalAlign = "left" | "center" | "right";
 /** 垂直对齐（未设置视为垂直居中，与默认绘制一致）。 */
 export type CellVerticalAlign = "top" | "middle" | "bottom";
 
+/**
+ * 文本方向（与 Ribbon「方向」及 OOXML `alignment/@textRotation` 子集对应）。
+ * 未设置视为 `horizontal`。
+ */
+export type CellTextOrientation =
+  | "horizontal"
+  /** 逆时针倾斜约 45°（与 Excel「逆时针角度」一致）。 */
+  | "angleUp45"
+  /** 顺时针倾斜约 45°。 */
+  | "angleDown45"
+  /** 竖排堆叠字符（与 Excel 竖排文字 / textRotation=255 一致）。 */
+  | "verticalStack"
+  /** 整行文字逆时针 90°（自下而上读）。 */
+  | "rotateUp90"
+  /** 整行文字顺时针 90°（自上而下读）。 */
+  | "rotateDown90";
+
 /** 单元格单边边框线型（与 Ribbon 边框预设子集一致）。 */
 export type CellBorderKind = "thin" | "medium" | "thick" | "double" | "hairline";
 
@@ -52,6 +69,8 @@ export interface CellStyle {
   indentLevel?: number;
   /** 自动换行（单元格内按列宽折行）。 */
   wrapText?: boolean;
+  /** 文本方向；未设置为水平。 */
+  textOrientation?: CellTextOrientation;
   /** 单元格上/左/下/右边框（合并格仅存于主格）。 */
   borderTop?: CellBorderSide;
   borderLeft?: CellBorderSide;
@@ -74,6 +93,7 @@ export type CellStylePatch = {
   readonly vAlign?: CellVerticalAlign | null;
   readonly indentLevel?: number | null;
   readonly wrapText?: boolean | null;
+  readonly textOrientation?: CellTextOrientation | null;
   readonly borderTop?: CellBorderSide | null;
   readonly borderLeft?: CellBorderSide | null;
   readonly borderBottom?: CellBorderSide | null;
@@ -165,6 +185,13 @@ export function applyCellStylePatch(
       delete next.wrapText;
     } else {
       next.wrapText = patch.wrapText;
+    }
+  }
+  if (patch.textOrientation !== undefined) {
+    if (patch.textOrientation === null) {
+      delete next.textOrientation;
+    } else {
+      next.textOrientation = patch.textOrientation;
     }
   }
   if (patch.borderTop !== undefined) {
