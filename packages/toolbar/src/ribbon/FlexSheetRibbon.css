@@ -475,6 +475,81 @@
     -2px 0;
 }
 
+/* 开始 -> 数字：格式下拉 + 快捷按钮（百分比、千分位 | 增减小数） */
+.fs-ribbon-number .fs-ribbon-stack {
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.fs-ribbon-number .fs-ribbon-stack__row--gap {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+}
+
+.fs-ribbon-number .fs-dd--wide {
+  min-width: 96px;
+}
+
+.fs-ribbon-number .fs-dd__trigger {
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 7px;
+}
+
+.fs-ribbon-number .fs-dd__trigger .fs-dd__label {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fs-ribbon-number__quick {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 2px;
+}
+
+.fs-ribbon-number__quick .fs-tb-btn {
+  box-sizing: border-box;
+  min-width: 24px;
+  height: 26px;
+  padding: 0 3px;
+}
+
+.fs-ribbon-number__quick .fs-tb-btn__label:empty {
+  display: none;
+}
+
+.fs-ribbon-number__quick-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 20px;
+  margin: 0 2px;
+  background: rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+.fs-ribbon[data-theme="dark"] .fs-ribbon-number__quick-sep {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.fs-ribbon-number__quick .fs-tb-btn__icon {
+  width: 16px;
+  height: 16px;
+}
+
 /* 开始 -> 对齐方式分组布局（三列同高、两行对齐；border-box 避免高度与 padding 叠加导致忽高忽低） */
 .fs-ribbon-group__content.fs-ribbon-align {
   flex-direction: row;
@@ -811,6 +886,35 @@
 .fs-dd__item:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.fs-dd__item--with-icon {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.fs-dd__item-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  color: inherit;
+}
+
+.fs-dd__item-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
+.fs-dd__item-label {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 /* 字体名称列表：固定高度 + 纵向滚动，与 Excel 字体下拉类似 */

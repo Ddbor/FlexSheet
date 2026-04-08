@@ -1,7 +1,14 @@
-import { normalizeSelectionRange, type SelectionRange, type Worksheet } from "@flexsheet/core";
+import {
+  adjustDecimalPlacesInFormat,
+  applyCommaStyleFromFormat,
+  normalizeSelectionRange,
+  type SelectionRange,
+  type Worksheet,
+} from "@flexsheet/core";
 import { RIBBON_FONT_FAMILY_ITEMS } from "./font-family-items.js";
 import { argb8ToCssHex6, cssHexToFillArgb } from "./ribbon-color-argb.js";
 import { showRibbonColorDialog } from "./ribbon-color-dialog.js";
+import { getNumberFormatPresetByCommandId } from "./ribbon-number-format-chrome.js";
 import type { FlexSheetLike, RibbonCommandEvent } from "./ribbon-types.js";
 
 const FONT_FAMILY_CSS = new Map<string, string>(
@@ -127,6 +134,11 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
   if (tryApplyRibbonBorder(ev, fs)) {
     return true;
   }
+  const preset = getNumberFormatPresetByCommandId(ev.id);
+  if (preset !== undefined) {
+    fs.applySelectionStylePatch({ numberFormat: preset.format === "" ? null : preset.format });
+    return true;
+  }
   switch (ev.id) {
     case "home.undo.back":
       fs.undo();
@@ -215,6 +227,26 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.applySelectionStylePatch(
         allDoubleUnderline ? { underline: null } : { underline: "double" },
       );
+      return true;
+    }
+    case "home.number.quick.percent":
+      fs.applySelectionStylePatch({ numberFormat: "0%" });
+      return true;
+    case "home.number.quick.comma": {
+      const cur = fs.getActiveCellStyle()?.numberFormat;
+      fs.applySelectionStylePatch({ numberFormat: applyCommaStyleFromFormat(cur) });
+      return true;
+    }
+    case "home.number.quick.increaseDecimal": {
+      const cur = fs.getActiveCellStyle()?.numberFormat;
+      const next = adjustDecimalPlacesInFormat(cur, 1);
+      fs.applySelectionStylePatch({ numberFormat: next === "" ? null : next });
+      return true;
+    }
+    case "home.number.quick.decreaseDecimal": {
+      const cur = fs.getActiveCellStyle()?.numberFormat;
+      const next = adjustDecimalPlacesInFormat(cur, -1);
+      fs.applySelectionStylePatch({ numberFormat: next === "" ? null : next });
       return true;
     }
     case "home.align.top":

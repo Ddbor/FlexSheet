@@ -203,6 +203,77 @@ function parseFillStyle(fillEl: Element): Partial<CellStyle> {
   return {};
 }
 
+/** Excel 内置 numFmtId → formatCode（子集；与导出/常见文件一致）。 */
+const EXCEL_BUILTIN_NUMFMT_ID_TO_CODE: Readonly<Record<number, string>> = {
+  0: "General",
+  1: "0",
+  2: "0.00",
+  3: "#,##0",
+  4: "#,##0.00",
+  5: '"$"#,##0_);("$"#,##0)',
+  6: '"$"#,##0.00_);("$"#,##0.00)',
+  7: '"$"#,##0.00_);[Red]("$"#,##0.00)',
+  8: '"$"#,##0.00_);("$"#,##0.00)',
+  9: "0%",
+  10: "0.00%",
+  11: "0.00E+00",
+  12: "# ?/?",
+  13: "# ??/??",
+  14: "m/d/yyyy",
+  15: "d-mmm-yy",
+  16: "d-mmm",
+  17: "mmm-yy",
+  18: "h:mm AM/PM",
+  19: "h:mm:ss AM/PM",
+  20: "h:mm",
+  21: "h:mm:ss",
+  22: "m/d/yyyy h:mm",
+  37: "#,##0_);(#,##0)",
+  38: "#,##0_);[Red](#,##0)",
+  39: "#,##0.00_);(#,##0.00)",
+  40: "#,##0.00_);[Red](#,##0.00)",
+  42: '_("$"* #,##0.00_);_("$"* (#,##0.00_);_("$"* "-"??_);_(@_)',
+  45: "mm:ss",
+  46: "[h]:mm:ss",
+  47: "##0.0E+0",
+  48: "##0.0E+0",
+  49: "@",
+};
+
+function parseCustomNumFmts(root: Element): Map<number, string> {
+  const out = new Map<number, string>();
+  const numFmtsEl = firstLocal(root, "numFmts");
+  if (numFmtsEl === undefined) {
+    return out;
+  }
+  for (const nm of childrenLocal(numFmtsEl, "numFmt")) {
+    const id = Number(nm.getAttribute("numFmtId") ?? "");
+    const code = nm.getAttribute("formatCode");
+    if (Number.isFinite(id) && code !== null && code !== "") {
+      out.set(id, code);
+    }
+  }
+  return out;
+}
+
+function numberFormatFromNumFmtId(
+  id: number,
+  custom: ReadonlyMap<number, string>,
+): string | undefined {
+  if (!Number.isFinite(id) || id === 0) {
+    return undefined;
+  }
+  const c = custom.get(id);
+  if (c !== undefined) {
+    return c;
+  }
+  const b = EXCEL_BUILTIN_NUMFMT_ID_TO_CODE[id];
+  if (b !== undefined && b !== "General") {
+    return b;
+  }
+  return undefined;
+}
+
 function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
   if (stylesXml === undefined) {
     return [];
@@ -223,6 +294,7 @@ function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
   const fontParts = fontEls.map((f) => parseFontStyle(f));
   const fillParts = fillEls.map((f) => parseFillStyle(f));
   const borderParts = borderEls.map((b) => parseBorderSidesFromBorderEl(b));
+  const customNumFmt = parseCustomNumFmts(root);
 
   const xfs = childrenLocal(cellXfsEl, "xf");
   const table: (CellStyle | null)[] = [];
@@ -233,6 +305,8 @@ function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
     const applyFont = xf.getAttribute("applyFont") === "1";
     const applyFill = xf.getAttribute("applyFill") === "1";
     const applyBorder = xf.getAttribute("applyBorder") === "1";
+    const applyNumber = xf.getAttribute("applyNumberFormat") === "1";
+    const numFmtId = Number(xf.getAttribute("numFmtId") ?? "0");
     const st: CellStyle = {};
     if (applyFont && fontParts[fontId] !== undefined) {
       Object.assign(st, fontParts[fontId]);
@@ -244,6 +318,12 @@ function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
       Object.assign(st, borderParts[borderId]);
     }
     Object.assign(st, parseAlignmentFromXf(xf));
+    if (applyNumber || numFmtId > 0) {
+      const nf = numberFormatFromNumFmtId(numFmtId, customNumFmt);
+      if (nf !== undefined) {
+        st.numberFormat = nf;
+      }
+    }
     table.push(Object.keys(st).length > 0 ? st : null);
   }
   return table;

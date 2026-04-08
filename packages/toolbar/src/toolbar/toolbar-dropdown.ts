@@ -8,6 +8,8 @@ export interface DropdownItem {
   readonly disabled?: boolean;
   /** 菜单项以该 CSS font-family 展示名称（字体预览） */
   readonly previewFontFamily?: string;
+  /** 左侧图标（与 Ribbon 命令图标一致，单色 currentColor） */
+  readonly icon?: () => SVGSVGElement;
 }
 
 export interface ToolbarDropdownOptions {
@@ -81,13 +83,26 @@ export function createToolbarDropdown(
     row.type = "button";
     row.className = "fs-dd__item";
     row.setAttribute("role", "menuitem");
-    row.textContent = it.label;
     row.dataset.commandId = it.id;
     if (it.previewFontFamily !== undefined && it.previewFontFamily !== "") {
       row.style.fontFamily = it.previewFontFamily;
     }
     if (it.disabled === true) {
       row.disabled = true;
+    }
+    if (it.icon !== undefined) {
+      row.classList.add("fs-dd__item--with-icon");
+      const icWrap = document.createElement("span");
+      icWrap.className = "fs-dd__item-icon";
+      icWrap.setAttribute("aria-hidden", "true");
+      icWrap.appendChild(it.icon());
+      const lab = document.createElement("span");
+      lab.className = "fs-dd__item-label";
+      lab.textContent = it.label;
+      row.appendChild(icWrap);
+      row.appendChild(lab);
+    } else {
+      row.textContent = it.label;
     }
     row.addEventListener("click", (ev) => {
       ev.stopPropagation();

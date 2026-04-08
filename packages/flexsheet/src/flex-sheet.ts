@@ -386,6 +386,42 @@ export class FlexSheet {
     this.renderer.requestRedraw();
   }
 
+  /**
+   * 将选区设为单格并同步视口与编辑栏（与在表体左键点选该格一致；用于右键菜单等，不进入拖拽选区）。
+   */
+  focusCellAt(row: number, col: number): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.selection.selectCell(row, col);
+    this.afterSelectionChanged();
+  }
+
+  /**
+   * 右键行标题等：将选区设为整行并同步视口与编辑栏（与左键点行号一致）。
+   */
+  focusEntireRowForContextMenu(row: number): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.selection.selectEntireRow(row);
+    this.afterSelectionChanged();
+  }
+
+  /**
+   * 右键列标题等：将选区设为整列并同步视口与编辑栏（与左键点列标一致）。
+   */
+  focusEntireColumnForContextMenu(col: number): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.selection.selectEntireColumn(col);
+    this.afterSelectionChanged();
+  }
+
   insertRows(atRow: number, count = 1): void {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) return;

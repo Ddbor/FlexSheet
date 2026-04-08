@@ -1,11 +1,10 @@
-import type { CellStyle, CellTextOrientation, Worksheet } from "@flexsheet/core";
+import { formatCellDisplayWithStyle, type CellStyle, type CellTextOrientation, type Worksheet } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import {
   argbToCss,
   buildCellCanvasFont,
   cellStyleLogicalFontSizeBasePx,
-  formatCellDisplay,
   scaledColWidthAt,
   scaledFontSizePx,
   scaledRowHeightAt,
@@ -213,7 +212,8 @@ function paintBodyCellTexts(
     if (col < 0 || col >= sheet.colCount || row < 0 || row >= sheet.rowCount) {
       return false;
     }
-    return formatCellDisplay(sheet.getCell(row, col).value) !== "";
+    const cell = sheet.getCell(row, col);
+    return formatCellDisplayWithStyle(cell.value, cell.style) !== "";
   };
 
   const extendedTextWidth = (row: number, col: number, baseW: number): number => {
@@ -258,7 +258,7 @@ function paintBodyCellTexts(
         continue;
       }
       const cell = sheet.getCell(r, c);
-      const text = formatCellDisplay(cell.value);
+      const text = formatCellDisplayWithStyle(cell.value, cell.style);
       if (text === "") {
         continue;
       }

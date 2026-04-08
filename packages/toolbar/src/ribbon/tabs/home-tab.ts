@@ -1,6 +1,7 @@
 import {
   createToolbarButton,
   createToolbarDropdown,
+  type DropdownItem,
   type RibbonEmit,
 } from "../../toolbar/index.js";
 import {
@@ -12,19 +13,32 @@ import {
   iconAlignTop,
   iconBold,
   iconBorderAll,
+  iconCommaStyle,
   iconCopy,
   iconCut,
+  iconDecreaseDecimal,
   iconDecreaseIndent,
   iconDoubleUnderline,
   iconFillColor,
   iconFontColor,
   iconFontGrow,
   iconFontShrink,
+  iconFormatAccounting,
+  iconFormatCurrency,
+  iconFormatDate,
+  iconFormatFraction,
+  iconFormatGeneral,
+  iconFormatNumber,
   iconFormatPainter,
+  iconFormatScientific,
+  iconFormatText,
+  iconFormatTime,
+  iconIncreaseDecimal,
   iconIncreaseIndent,
   iconItalic,
   iconMerge,
   iconPaste,
+  iconPercent,
   iconRedo,
   iconTextOrientation,
   iconUnderline,
@@ -40,6 +54,28 @@ import {
 import { mountFontBorderMenu } from "../font-border-menu.js";
 import { mountRibbonColorPickerMenu } from "../ribbon-color-picker-menu.js";
 import type { RibbonHomeFontChromeState } from "../ribbon-font-chrome.js";
+import {
+  RIBBON_NUMBER_FORMAT_PRESETS,
+  type RibbonHomeNumberFormatChromeState,
+} from "../ribbon-number-format-chrome.js";
+
+/** 与 `RIBBON_NUMBER_FORMAT_PRESETS` 各项一一对应（icons.ts 数字格式图标） */
+const NUMBER_FORMAT_DROPDOWN_ICONS: Record<
+  (typeof RIBBON_NUMBER_FORMAT_PRESETS)[number]["id"],
+  () => SVGSVGElement
+> = {
+  "home.number.format.general": () => iconFormatGeneral(),
+  "home.number.format.number": () => iconFormatNumber(),
+  "home.number.format.currency": () => iconFormatCurrency(),
+  "home.number.format.accounting": () => iconFormatAccounting(),
+  "home.number.format.shortDate": () => iconFormatDate(),
+  "home.number.format.longDate": () => iconFormatDate(),
+  "home.number.format.time": () => iconFormatTime(),
+  "home.number.format.percent": () => iconPercent(),
+  "home.number.format.fraction": () => iconFormatFraction(),
+  "home.number.format.scientific": () => iconFormatScientific(),
+  "home.number.format.text": () => iconFormatText(),
+};
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { RibbonTabId } from "../ribbon-types.js";
 
@@ -49,6 +85,8 @@ export interface HomeTabHandles {
   syncUndoRedo(canUndo: boolean, canRedo: boolean): void;
   /** 与活动单元格字体样式同步（字体名、字号、加粗/斜体/下划线状态）。 */
   syncFontChrome(state: RibbonHomeFontChromeState): void;
+  /** 与活动单元格数字格式分类下拉同步。 */
+  syncNumberFormatChrome(state: RibbonHomeNumberFormatChromeState): void;
 }
 
 export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandles {
@@ -59,6 +97,7 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
   // 撤销（剪贴板左侧：后退 / 撤销堆、前进 / 重做堆）
   const undoRedo = mountUndoGroup(inner, emit);
   let syncFontChrome: HomeTabHandles["syncFontChrome"] = (): void => {};
+  let syncNumberFormatChrome: HomeTabHandles["syncNumberFormatChrome"] = (): void => {};
 
   // 剪贴板
   {
@@ -262,6 +301,95 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
     };
   }
 
+  // 数字
+  {
+    const { root, content } = createRibbonGroup("数字");
+    content.classList.add("fs-ribbon-number");
+    const stack = document.createElement("div");
+    stack.className = "fs-ribbon-stack";
+    const rowDd = document.createElement("div");
+    rowDd.className = "fs-ribbon-stack__row fs-ribbon-stack__row--gap";
+    const presetItems: readonly DropdownItem[] = RIBBON_NUMBER_FORMAT_PRESETS.map((p) => ({
+      id: p.id,
+      label: p.label,
+      icon: NUMBER_FORMAT_DROPDOWN_ICONS[p.id],
+    }));
+    const numberFormatDd = createToolbarDropdown(
+      {
+        id: "home.number.format.dropdown",
+        tab: TAB,
+        label: "常规",
+        wide: true,
+        title: "数字格式",
+        items: presetItems,
+      },
+      emit,
+    );
+    rowDd.appendChild(numberFormatDd.element);
+    stack.appendChild(rowDd);
+    const quick = document.createElement("div");
+    quick.className = "fs-ribbon-number__quick";
+    quick.appendChild(
+      createToolbarButton(
+        {
+          id: "home.number.quick.percent",
+          tab: TAB,
+          label: "",
+          icon: iconPercent(),
+          title: "百分比样式",
+        },
+        emit,
+      ).element,
+    );
+    quick.appendChild(
+      createToolbarButton(
+        {
+          id: "home.number.quick.comma",
+          tab: TAB,
+          label: "",
+          icon: iconCommaStyle(),
+          title: "千位分隔样式",
+        },
+        emit,
+      ).element,
+    );
+    const sep = document.createElement("div");
+    sep.className = "fs-ribbon-number__quick-sep";
+    sep.setAttribute("aria-hidden", "true");
+    quick.appendChild(sep);
+    quick.appendChild(
+      createToolbarButton(
+        {
+          id: "home.number.quick.increaseDecimal",
+          tab: TAB,
+          label: "",
+          icon: iconIncreaseDecimal(),
+          title: "增加小数位数",
+        },
+        emit,
+      ).element,
+    );
+    quick.appendChild(
+      createToolbarButton(
+        {
+          id: "home.number.quick.decreaseDecimal",
+          tab: TAB,
+          label: "",
+          icon: iconDecreaseDecimal(),
+          title: "减少小数位数",
+        },
+        emit,
+      ).element,
+    );
+    stack.appendChild(quick);
+    content.appendChild(stack);
+    inner.appendChild(root);
+
+    syncNumberFormatChrome = (state: RibbonHomeNumberFormatChromeState): void => {
+      numberFormatDd.setLabel(state.categoryLabel);
+    };
+  }
+
   // 对齐方式
   {
     const { root, content } = createRibbonGroup("对齐方式");
@@ -390,6 +518,7 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
   return {
     syncUndoRedo: undoRedo.syncUndoRedo,
     syncFontChrome,
+    syncNumberFormatChrome,
   };
 }
 

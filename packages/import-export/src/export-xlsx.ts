@@ -62,6 +62,9 @@ function styleSignature(st: CellStyle | null | undefined): string {
     return "";
   }
   const tor = st.textOrientation;
+  const nfRaw = st.numberFormat?.trim() ?? "";
+  const nf =
+    nfRaw === "" || nfRaw.toLowerCase() === "general" ? "" : nfRaw;
   return JSON.stringify({
     b: st.bold === true,
     i: st.italic === true,
@@ -79,6 +82,7 @@ function styleSignature(st: CellStyle | null | undefined): string {
     bl: borderSideSig(st.borderLeft),
     bb: borderSideSig(st.borderBottom),
     br: borderSideSig(st.borderRight),
+    nf,
   });
 }
 
@@ -88,6 +92,7 @@ interface StyleTable {
   readonly fillsXml: string[];
   readonly bordersXml: string[];
   readonly cellXfsXml: string[];
+  readonly numFmtsXml: string[];
 }
 
 /** `styleSignature` 与 `ensureStyle` 中 JSON 往返用的稳定形状。 */
@@ -110,6 +115,8 @@ interface StyleSignaturePayload {
   readonly bl?: string;
   readonly bb?: string;
   readonly br?: string;
+  /** Excel 数字格式码；空为常规。 */
+  readonly nf?: string;
 }
 
 const DEFAULT_FONT_NAME = "Calibri";
@@ -127,7 +134,7 @@ function minimalStyleTable(): StyleTable {
   ];
   const bordersXml: string[] = [`<border><left/><right/><top/><bottom/><diagonal/></border>`];
   const cellXfsXml: string[] = [`<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`];
-  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml };
+  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml, numFmtsXml: [] };
 }
 
 function ooxmlBorderStyle(kind: CellBorderKind): string {
@@ -139,11 +146,12 @@ function parseBorderSideToken(tok: string): CellBorderSide | undefined {
     return undefined;
   }
   const bar = tok.indexOf("|");
-  const kind = (bar >= 0 ? tok.slice(0, bar) : tok) as CellBorderKind;
-  const color = bar >= 0 ? tok.slice(bar + 1) : "";
-  if (kind === "") {
+  const rawKind = bar >= 0 ? tok.slice(0, bar) : tok;
+  if (rawKind === "") {
     return undefined;
   }
+  const kind = rawKind as CellBorderKind;
+  const color = bar >= 0 ? tok.slice(bar + 1) : "";
   return color.length > 0 ? { kind, colorArgb: color } : { kind };
 }
 
@@ -205,6 +213,9 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
   ];
   const bordersXml: string[] = [`<border><left/><right/><top/><bottom/><diagonal/></border>`];
   const cellXfsXml: string[] = [`<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`];
+  const numFmtsXml: string[] = [];
+  const formatCodeToNumFmtId = new Map<string, number>();
+  let nextCustomNumFmtId = 164;
 
   let nextFont = 1;
   let nextFill = 2;
@@ -213,11 +224,29 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
 
   const borderByKey = new Map<string, number>();
 
+  const resolveNumFmtId = (formatCode: string): number => {
+    const t = formatCode.trim();
+    if (t === "" || t.toLowerCase() === "general") {
+      return 0;
+    }
+    const hit = formatCodeToNumFmtId.get(t);
+    if (hit !== undefined) {
+      return hit;
+    }
+    const id = nextCustomNumFmtId++;
+    formatCodeToNumFmtId.set(t, id);
+    numFmtsXml.push(`<numFmt numFmtId="${id}" formatCode="${escapeXml(t)}"/>`);
+    return id;
+  };
+
   const ensureStyle = (sig: string): void => {
     if (sig === "" || xfBySig.has(sig)) {
       return;
     }
     const st = JSON.parse(sig) as StyleSignaturePayload;
+    const numFmtId = resolveNumFmtId(typeof st.nf === "string" ? st.nf : "");
+    const numFmtAttr = ` numFmtId="${numFmtId}"`;
+    const applyNumberFmt = numFmtId > 0 ? ` applyNumberFormat="1"` : "";
     const fontName = st.ff !== undefined && st.ff !== "" ? st.ff : DEFAULT_FONT_NAME;
     const fontSize = st.fs !== undefined && st.fs > 0 ? st.fs : DEFAULT_FONT_SIZE_PT;
     const needFont =
@@ -306,11 +335,11 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     const applyAlignment = alignInner !== "" ? ` applyAlignment="1"` : "";
     if (alignInner === "") {
       cellXfsXml.push(
-        `<xf numFmtId="0" fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"${applyFont}${applyFill}${applyBorder}/>`,
+        `<xf${numFmtAttr} fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"${applyFont}${applyFill}${applyBorder}${applyNumberFmt}/>`,
       );
     } else {
       cellXfsXml.push(
-        `<xf numFmtId="0" fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"${applyFont}${applyFill}${applyBorder}${applyAlignment}>${alignInner}</xf>`,
+        `<xf${numFmtAttr} fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"${applyFont}${applyFill}${applyBorder}${applyNumberFmt}${applyAlignment}>${alignInner}</xf>`,
       );
     }
     xfBySig.set(sig, nextXf++);
@@ -349,14 +378,18 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     }
   }
 
-  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml };
+  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml, numFmtsXml };
 }
 
 function buildStylesXml(table: StyleTable): string {
+  const numFmtBlock =
+    table.numFmtsXml.length === 0
+      ? `<numFmts count="0"/>`
+      : `<numFmts count="${table.numFmtsXml.length}">${table.numFmtsXml.join("")}</numFmts>`;
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<styleSheet xmlns="${SS_MAIN}">` +
-    `<numFmts count="0"/>` +
+    numFmtBlock +
     `<fonts count="${table.fontsXml.length}">${table.fontsXml.join("")}</fonts>` +
     `<fills count="${table.fillsXml.length}">${table.fillsXml.join("")}</fills>` +
     `<borders count="${table.bordersXml.length}">${table.bordersXml.join("")}</borders>` +

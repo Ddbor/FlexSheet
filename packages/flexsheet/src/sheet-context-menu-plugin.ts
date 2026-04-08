@@ -1,6 +1,54 @@
-import { PluginBase, type ContextMenuItem, type PluginContext } from "@flexsheet/core";
+import {
+  PluginBase,
+  selectionRangeContains,
+  type ContextMenuBuiltinIconId,
+  type ContextMenuEntry,
+  type ContextMenuSeparator,
+  type PluginContext,
+} from "@flexsheet/core";
+import { iconCopy, iconCut, iconPaste } from "@flexsheet/toolbar";
 
 import type { FlexSheet, FlexSheetSurfaceHit } from "./flex-sheet.js";
+
+function cloneBuiltinMenuIcon(id: ContextMenuBuiltinIconId): SVGSVGElement {
+  const el =
+    id === "cut" ? iconCut() : id === "copy" ? iconCopy() : iconPaste();
+  const node = el.cloneNode(true);
+  return node as SVGSVGElement;
+}
+
+function isContextMenuSeparator(e: ContextMenuEntry): e is ContextMenuSeparator {
+  return "kind" in e && e.kind === "separator";
+}
+
+/** 排序后去掉首尾与连续重复的分割线。 */
+function normalizeContextMenuEntries(entries: readonly ContextMenuEntry[]): ContextMenuEntry[] {
+  if (entries.length === 0) {
+    return [];
+  }
+  const sorted = [...entries].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const out: ContextMenuEntry[] = [];
+  let prevSep = false;
+  for (const e of sorted) {
+    if (isContextMenuSeparator(e)) {
+      if (out.length === 0) {
+        continue;
+      }
+      if (prevSep) {
+        continue;
+      }
+      prevSep = true;
+      out.push(e);
+    } else {
+      prevSep = false;
+      out.push(e);
+    }
+  }
+  while (out.length > 0 && isContextMenuSeparator(out[out.length - 1]!)) {
+    out.pop();
+  }
+  return out;
+}
 
 /** 右键菜单扩展 scope：内置项与 `UIRegistry.getContextMenuItems(scope)` 合并。 */
 export const CONTEXT_MENU_SCOPE = {
@@ -10,14 +58,48 @@ export const CONTEXT_MENU_SCOPE = {
   sheetCorner: "sheet.context.sheetCorner",
 } as const;
 
+function buildClipboardGroupEntries(flex: FlexSheet): readonly ContextMenuEntry[] {
+  return [
+    {
+      id: "clipboard.cut",
+      label: "剪切",
+      icon: "cut",
+      order: -30,
+      onSelect: () => {
+        void flex.clipboardCut();
+      },
+    },
+    {
+      id: "clipboard.copy",
+      label: "复制",
+      icon: "copy",
+      order: -20,
+      onSelect: () => {
+        void flex.clipboardCopy();
+      },
+    },
+    {
+      id: "clipboard.paste",
+      label: "粘贴",
+      icon: "paste",
+      order: -10,
+      onSelect: () => {
+        void flex.clipboardPaste();
+      },
+    },
+    { kind: "separator", id: "sep.afterClipboard", order: -5 },
+  ];
+}
+
 function buildBuiltinItems(
   scope: string,
   hit: FlexSheetSurfaceHit,
   flex: FlexSheet,
   openCellInsertSubmenu: () => void,
-): readonly ContextMenuItem[] {
+): readonly ContextMenuEntry[] {
   if (scope === CONTEXT_MENU_SCOPE.rowHeader && hit.kind === "rowHeader") {
     return [
+      ...buildClipboardGroupEntries(flex),
       {
         id: "insert",
         label: "插入",
@@ -31,6 +113,7 @@ function buildBuiltinItems(
   }
   if (scope === CONTEXT_MENU_SCOPE.columnHeader && hit.kind === "columnHeader") {
     return [
+      ...buildClipboardGroupEntries(flex),
       {
         id: "insert",
         label: "插入",
@@ -43,7 +126,7 @@ function buildBuiltinItems(
     ];
   }
   if (scope === CONTEXT_MENU_SCOPE.cell && hit.kind === "cell") {
-    return [{ id: "insert", label: "插入", order: 0, onSelect: openCellInsertSubmenu }];
+    return [...buildClipboardGroupEntries(flex), { id: "insert", label: "插入", order: 0, onSelect: openCellInsertSubmenu }];
   }
   return [{ id: "insert", label: "插入", order: 0, disabled: true }];
 }
@@ -54,10 +137,10 @@ function mergeContextMenuItems(
   hit: FlexSheetSurfaceHit,
   flex: FlexSheet,
   openCellInsertSubmenu: () => void,
-): ContextMenuItem[] {
+): ContextMenuEntry[] {
   const base = buildBuiltinItems(scope, hit, flex, openCellInsertSubmenu);
   const extra = ctx.ui.getContextMenuItems(scope);
-  return [...base, ...extra].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  return normalizeContextMenuEntries([...base, ...extra]);
 }
 
 export interface SheetContextMenuPluginOptions {
@@ -146,13 +229,23 @@ export class SheetContextMenuPlugin extends PluginBase {
     } else {
       scope = CONTEXT_MENU_SCOPE.cell;
     }
+    if (hit.kind === "cell") {
+      const r = flex.selection.getNormalizedRange();
+      if (!selectionRangeContains(r, hit.row, hit.col)) {
+        flex.focusCellAt(hit.row, hit.col);
+      }
+    } else if (hit.kind === "rowHeader") {
+      flex.focusEntireRowForContextMenu(hit.row);
+    } else if (hit.kind === "columnHeader") {
+      flex.focusEntireColumnForContextMenu(hit.col);
+    }
     const items = mergeContextMenuItems(scope, ctx, hit, flex, () => {
       this.openCellInsertSubmenu(flex, ev.clientX, ev.clientY);
     });
     this.showMenu(ev.clientX, ev.clientY, items);
   };
 
-  private showMenu(clientX: number, clientY: number, items: readonly ContextMenuItem[]): void {
+  private showMenu(clientX: number, clientY: number, items: readonly ContextMenuEntry[]): void {
     this.hideMenu();
     if (items.length === 0) {
       return;
@@ -173,13 +266,22 @@ export class SheetContextMenuPlugin extends PluginBase {
     root.style.fontFamily = "system-ui, -apple-system, sans-serif";
 
     for (const item of items) {
+      if (isContextMenuSeparator(item)) {
+        const sep = document.createElement("div");
+        sep.className = "fs-sheet-context-menu__sep";
+        sep.setAttribute("role", "separator");
+        sep.setAttribute("aria-orientation", "horizontal");
+        root.appendChild(sep);
+        continue;
+      }
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "fs-sheet-context-menu__item";
       btn.setAttribute("role", "menuitem");
-      btn.textContent = item.label;
       btn.disabled = item.disabled === true;
-      btn.style.display = "block";
+      btn.style.display = "flex";
+      btn.style.alignItems = "center";
+      btn.style.gap = "8px";
       btn.style.width = "100%";
       btn.style.padding = "6px 12px";
       btn.style.border = "none";
@@ -187,6 +289,22 @@ export class SheetContextMenuPlugin extends PluginBase {
       btn.style.textAlign = "left";
       btn.style.cursor = item.disabled === true ? "default" : "pointer";
       btn.style.font = "inherit";
+      const iconWrap = document.createElement("span");
+      iconWrap.className = "fs-sheet-context-menu__icon";
+      iconWrap.setAttribute("aria-hidden", "true");
+      if (item.icon !== undefined) {
+        const svg = cloneBuiltinMenuIcon(item.icon);
+        svg.style.width = "16px";
+        svg.style.height = "16px";
+        svg.style.flexShrink = "0";
+        svg.style.display = "block";
+        iconWrap.appendChild(svg);
+      }
+      btn.appendChild(iconWrap);
+      const label = document.createElement("span");
+      label.className = "fs-sheet-context-menu__label";
+      label.textContent = item.label;
+      btn.appendChild(label);
       btn.addEventListener("click", () => {
         if (item.disabled === true) {
           return;
@@ -234,7 +352,7 @@ export class SheetContextMenuPlugin extends PluginBase {
 
   private openCellInsertSubmenu(flex: FlexSheet, clientX: number, clientY: number): void {
     const { row, col } = flex.selection.getActiveCell();
-    const subItems: readonly ContextMenuItem[] = [
+    const subItems: readonly ContextMenuEntry[] = [
       {
         id: "insert.cell.shiftRight",
         label: "活动单元格右移",
@@ -277,6 +395,22 @@ export class SheetContextMenuPlugin extends PluginBase {
     }
     const style = document.createElement("style");
     style.textContent = `
+.fs-sheet-context-menu__icon {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #323130;
+}
+.fs-sheet-context-menu__sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: #c8c6c4;
+  pointer-events: none;
+}
 .fs-sheet-context-menu__item:not(:disabled):hover,
 .fs-sheet-context-menu__item:not(:disabled):focus-visible {
   background: #e8f5e9 !important;

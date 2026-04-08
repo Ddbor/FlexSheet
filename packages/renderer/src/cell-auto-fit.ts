@@ -1,8 +1,7 @@
-import type { Worksheet } from "@flexsheet/core";
+import { formatCellDisplayWithStyle, type Worksheet } from "@flexsheet/core";
 import {
   buildCellCanvasFont,
   cellStyleLogicalFontSizeBasePx,
-  formatCellDisplay,
   scaledFontSizePx,
   wrapCellLines,
 } from "./canvas-renderer-utils.js";
@@ -48,7 +47,7 @@ export function computeColumnAutoWidth(sheet: Worksheet, col: number, viewZoom: 
       continue;
     }
     const cell = sheet.getCell(r, col);
-    const text = formatCellDisplay(cell.value);
+    const text = formatCellDisplayWithStyle(cell.value, cell.style);
     if (text === "") {
       continue;
     }
@@ -83,7 +82,7 @@ export function computeRowAutoHeight(sheet: Worksheet, row: number, viewZoom: nu
       continue;
     }
     const cell = sheet.getCell(row, c);
-    const text = formatCellDisplay(cell.value);
+    const text = formatCellDisplayWithStyle(cell.value, cell.style);
     if (text === "") {
       continue;
     }

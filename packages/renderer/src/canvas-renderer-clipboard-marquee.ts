@@ -2,7 +2,7 @@ import type { SelectionRange } from "@flexsheet/core";
 import { normalizeSelectionRange } from "@flexsheet/core";
 import type { Worksheet } from "@flexsheet/core";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
-import { scaledColW, scaledRowH } from "./canvas-renderer-utils.js";
+import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
 import { collectFrozenBodyQuadrantPasses } from "./frozen-body-quadrants.js";
 import type { FrozenLayout } from "./viewport.js";
 import type { SelectionOverlayEnv } from "./canvas-renderer-selection-overlay.js";
@@ -36,8 +36,6 @@ export function drawClipboardMarqueeOverlay(
   ctx.lineJoin = "miter";
   ctx.lineCap = "square";
 
-  const colW = scaledColW(sheet, env.viewZoom);
-  const rowH = scaledRowH(sheet, env.viewZoom);
   const dash = Math.max(3, 3 * env.viewZoom);
   const period = dash * 2;
   const offset = ((phasePx % period) + period) % period;
@@ -67,8 +65,14 @@ export function drawClipboardMarqueeOverlay(
 
     const x0 = cellLeftX(sheet, layout, c0, env.viewZoom, env.scrollX);
     const y0 = cellTopY(sheet, layout, r0, env.viewZoom, env.scrollY);
-    const bw = (c1 - c0 + 1) * colW;
-    const bh = (r1 - r0 + 1) * rowH;
+    let bw = 0;
+    for (let c = c0; c <= c1; c++) {
+      bw += scaledColWidthAt(sheet, c, env.viewZoom);
+    }
+    let bh = 0;
+    for (let r = r0; r <= r1; r++) {
+      bh += scaledRowHeightAt(sheet, r, env.viewZoom);
+    }
     if (!cellIntersectsCanvas(x0, y0, bw, bh, headerW, headerH, canvasW, canvasH)) {
       continue;
     }

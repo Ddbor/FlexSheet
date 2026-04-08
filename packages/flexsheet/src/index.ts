@@ -28,7 +28,9 @@ export {
   type IPlugin,
   type PluginContext,
   type ICommand,
+  type ContextMenuEntry,
   type ContextMenuItem,
+  type ContextMenuSeparator,
   type ToolbarSlot,
   type EventHandler,
 } from "@flexsheet/core";

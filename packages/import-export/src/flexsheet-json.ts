@@ -130,6 +130,7 @@ function isCellStyle(v: unknown): v is CellStyle {
     "indentLevel",
     "wrapText",
     "textOrientation",
+    "numberFormat",
   ]);
   for (const k of keys) {
     if (!allowed.has(k)) {
@@ -199,6 +200,9 @@ function isCellStyle(v: unknown): v is CellStyle {
     if (!ok) {
       return false;
     }
+  }
+  if (v.numberFormat !== undefined && typeof v.numberFormat !== "string") {
+    return false;
   }
   return true;
 }

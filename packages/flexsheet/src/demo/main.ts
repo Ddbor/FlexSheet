@@ -2,6 +2,7 @@ import { FlexSheet, mountExcelBottomBar, mountGridVerticalScrollbar } from "../i
 import {
   applyRibbonCommandToFlexSheet,
   cellStyleToRibbonHomeFontChrome,
+  cellStyleToRibbonHomeNumberFormat,
   FlexSheetRibbon,
   ViewRibbonController,
   type HomeTabHandles,
@@ -54,7 +55,9 @@ const syncRibbonFontChrome = (): void => {
   if (homeHandles === null) {
     return;
   }
-  homeHandles.syncFontChrome(cellStyleToRibbonHomeFontChrome(flexSheet.getActiveCellStyle()));
+  const st = flexSheet.getActiveCellStyle();
+  homeHandles.syncFontChrome(cellStyleToRibbonHomeFontChrome(st));
+  homeHandles.syncNumberFormatChrome(cellStyleToRibbonHomeNumberFormat(st));
 };
 
 new FlexSheetRibbon({

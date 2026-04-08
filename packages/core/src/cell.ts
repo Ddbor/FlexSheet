@@ -76,6 +76,11 @@ export interface CellStyle {
   borderLeft?: CellBorderSide;
   borderBottom?: CellBorderSide;
   borderRight?: CellBorderSide;
+  /**
+   * Excel 兼容的数字格式码（如 `0.00%`、`#,##0.00`、`yyyy/m/d`）。
+   * 未设置或 `General` 表示常规。
+   */
+  numberFormat?: string;
 }
 
 /**
@@ -98,6 +103,7 @@ export type CellStylePatch = {
   readonly borderLeft?: CellBorderSide | null;
   readonly borderBottom?: CellBorderSide | null;
   readonly borderRight?: CellBorderSide | null;
+  readonly numberFormat?: string | null;
 };
 
 export function applyCellStylePatch(
@@ -220,6 +226,18 @@ export function applyCellStylePatch(
       delete next.borderRight;
     } else {
       next.borderRight = patch.borderRight;
+    }
+  }
+  if (patch.numberFormat !== undefined) {
+    if (patch.numberFormat === null) {
+      delete next.numberFormat;
+    } else {
+      const t = patch.numberFormat.trim();
+      if (t === "" || t.toLowerCase() === "general") {
+        delete next.numberFormat;
+      } else {
+        next.numberFormat = t;
+      }
     }
   }
   return Object.keys(next).length === 0 ? null : next;
