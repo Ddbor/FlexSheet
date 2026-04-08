@@ -12,6 +12,7 @@ import {
   snapLine,
   wrapCellLines,
 } from "./canvas-renderer-utils.js";
+import { paintBodyCellBorders } from "./canvas-renderer-body-borders.js";
 import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
 import type { FrozenLayout } from "./viewport.js";
 
@@ -40,12 +41,28 @@ function paintBodyCellFills(
 ): void {
   const { ctx } = env;
   for (let r = r0; r <= r1; r++) {
-    const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
     for (let c = c0; c <= c1; c++) {
-      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      if (sheet.isMergeCoveredCell(r, c)) {
+        continue;
+      }
+      const info = sheet.getMergedRectInfo(r, c);
+      let colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      let rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
+      let x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      let y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      if (info.rowSpan > 1 || info.colSpan > 1) {
+        colW = 0;
+        for (let cc = info.anchorCol; cc < info.anchorCol + info.colSpan; cc++) {
+          colW += scaledColWidthAt(sheet, cc, env.viewZoom);
+        }
+        rowH = 0;
+        for (let rr = info.anchorRow; rr < info.anchorRow + info.rowSpan; rr++) {
+          rowH += scaledRowHeightAt(sheet, rr, env.viewZoom);
+        }
+        x = cellLeftX(sheet, layout, info.anchorCol, env.viewZoom, env.scrollX);
+        y = cellTopY(sheet, layout, info.anchorRow, env.viewZoom, env.scrollY);
+      }
       if (colW <= 0 || rowH <= 0) continue;
-      const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
-      const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
       if (!cellIntersectsCanvas(x, y, colW, rowH, headerW, headerH, canvasW, canvasH)) {
         continue;
       }
@@ -145,6 +162,10 @@ function paintBodyCellTexts(
   };
 
   const extendedTextWidth = (row: number, col: number, baseW: number): number => {
+    const m = sheet.getMergedRectInfo(row, col);
+    if (m.colSpan > 1) {
+      return baseW;
+    }
     let w = baseW;
     for (let c = col + 1; c < sheet.colCount; c++) {
       if (hasVisibleContent(row, c)) {
@@ -156,12 +177,28 @@ function paintBodyCellTexts(
   };
 
   for (let r = r0; r <= r1; r++) {
-    const rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
     for (let c = c0; c <= c1; c++) {
-      const colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      if (sheet.isMergeCoveredCell(r, c)) {
+        continue;
+      }
+      const info = sheet.getMergedRectInfo(r, c);
+      let colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      let rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
+      let x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      let y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      if (info.rowSpan > 1 || info.colSpan > 1) {
+        colW = 0;
+        for (let cc = info.anchorCol; cc < info.anchorCol + info.colSpan; cc++) {
+          colW += scaledColWidthAt(sheet, cc, env.viewZoom);
+        }
+        rowH = 0;
+        for (let rr = info.anchorRow; rr < info.anchorRow + info.rowSpan; rr++) {
+          rowH += scaledRowHeightAt(sheet, rr, env.viewZoom);
+        }
+        x = cellLeftX(sheet, layout, info.anchorCol, env.viewZoom, env.scrollX);
+        y = cellTopY(sheet, layout, info.anchorRow, env.viewZoom, env.scrollY);
+      }
       if (colW <= 0 || rowH <= 0) continue;
-      const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
-      const y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
       if (!cellIntersectsCanvas(x, y, colW, rowH, headerW, headerH, canvasW, canvasH)) {
         continue;
       }
@@ -283,6 +320,24 @@ function paintBodyCellTexts(
   }
 }
 
+function verticalMergeEdgeHidden(sheet: Worksheet, row: number, leftCol: number): boolean {
+  if (leftCol < 0) {
+    return false;
+  }
+  const a = sheet.getMergeAnchorCell(row, leftCol);
+  const b = sheet.getMergeAnchorCell(row, leftCol + 1);
+  return a.row === b.row && a.col === b.col;
+}
+
+function horizontalMergeEdgeHidden(sheet: Worksheet, topRow: number, col: number): boolean {
+  if (topRow < 0) {
+    return false;
+  }
+  const a = sheet.getMergeAnchorCell(topRow, col);
+  const b = sheet.getMergeAnchorCell(topRow + 1, col);
+  return a.row === b.row && a.col === b.col;
+}
+
 function strokeBodyGrid(
   env: BodyPaintEnv,
   sheet: Worksheet,
@@ -305,15 +360,6 @@ function strokeBodyGrid(
   ctx.lineWidth = 1;
   ctx.beginPath();
 
-  const yTop = cellTopY(sheet, layout, r0, env.viewZoom, env.scrollY);
-  const yBottom =
-    cellTopY(sheet, layout, r1, env.viewZoom, env.scrollY) +
-    scaledRowHeightAt(sheet, r1, env.viewZoom);
-  const xLeft = cellLeftX(sheet, layout, c0, env.viewZoom, env.scrollX);
-  const xRight =
-    cellLeftX(sheet, layout, c1, env.viewZoom, env.scrollX) +
-    scaledColWidthAt(sheet, c1, env.viewZoom);
-
   for (let c = c0; c <= c1 + 1; c++) {
     const x =
       c < sheet.colCount
@@ -329,11 +375,18 @@ function strokeBodyGrid(
       continue;
     }
     const xs = snapLine(x);
-    const y1 = snapLine(Math.max(by0, yTop));
-    const y2 = snapLine(Math.min(by1, yBottom));
-    if (y2 > y1) {
-      ctx.moveTo(xs, y1);
-      ctx.lineTo(xs, y2);
+    for (let r = r0; r <= r1; r++) {
+      if (c > 0 && verticalMergeEdgeHidden(sheet, r, c - 1)) {
+        continue;
+      }
+      const y1 = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      const y2 = y1 + scaledRowHeightAt(sheet, r, env.viewZoom);
+      const segY1 = snapLine(Math.max(by0, y1));
+      const segY2 = snapLine(Math.min(by1, y2));
+      if (segY2 > segY1) {
+        ctx.moveTo(xs, segY1);
+        ctx.lineTo(xs, segY2);
+      }
     }
   }
 
@@ -352,11 +405,18 @@ function strokeBodyGrid(
       continue;
     }
     const ys = snapLine(y);
-    const x1 = snapLine(Math.max(bx0, xLeft));
-    const x2 = snapLine(Math.min(bx1, xRight));
-    if (x2 > x1) {
-      ctx.moveTo(x1, ys);
-      ctx.lineTo(x2, ys);
+    for (let c = c0; c <= c1; c++) {
+      if (r > 0 && horizontalMergeEdgeHidden(sheet, r - 1, c)) {
+        continue;
+      }
+      const x1 = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      const x2 = x1 + scaledColWidthAt(sheet, c, env.viewZoom);
+      const segX1 = snapLine(Math.max(bx0, x1));
+      const segX2 = snapLine(Math.min(bx1, x2));
+      if (segX2 > segX1) {
+        ctx.moveTo(segX1, ys);
+        ctx.lineTo(segX2, ys);
+      }
     }
   }
 
@@ -397,6 +457,7 @@ function runBodyQuadrantPass(
     strokeBodyGrid(env, sheet, layout, r0, r1, c0, c1, strokeBounds);
   }
 
+  paintBodyCellBorders(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
   paintBodyCellTexts(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
   ctx.restore();
 }

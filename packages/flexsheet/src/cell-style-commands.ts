@@ -7,6 +7,7 @@ import {
   type SelectionRange,
   type Worksheet,
 } from "@flexsheet/core";
+import { cloneCellStyle, computeBorderStyleForRibbonCommand } from "./border-ribbon-preset.js";
 
 interface CellStyleSnapshot {
   readonly row: number;
@@ -78,6 +79,74 @@ export class ApplySelectionCellStylePatchCommand implements ICommand {
   undo(): void {
     for (const s of this.snapshots) {
       this.sheet.setCellStyle(s.row, s.col, s.before === null ? null : { ...s.before });
+    }
+  }
+}
+
+const BORDER_RIBBON_IDS = new Set<string>([
+  "home.font.border",
+  "home.font.border.bottom",
+  "home.font.border.top",
+  "home.font.border.left",
+  "home.font.border.right",
+  "home.font.border.none",
+  "home.font.border.all",
+  "home.font.border.outside",
+  "home.font.border.thickBox",
+  "home.font.border.doubleBottom",
+  "home.font.border.thickBottom",
+  "home.font.border.topBottom",
+  "home.font.border.topThickBottom",
+  "home.font.border.topDoubleBottom",
+]);
+
+export function isRibbonBorderCommandId(id: string): boolean {
+  return BORDER_RIBBON_IDS.has(id);
+}
+
+/** Ribbon 边框下拉 / 主按钮：按命令 id 对选区内每个主格计算样式（可撤销）。 */
+export class ApplySelectionBorderRibbonCommand implements ICommand {
+  readonly id = "cell.applySelectionBorderRibbon";
+  readonly label = "设置边框";
+  private readonly snapshots: CellStyleSnapshot[];
+
+  constructor(
+    private readonly sheet: Worksheet,
+    range: SelectionRange,
+    readonly commandId: string,
+  ) {
+    const n = normalizeSelectionRange(range);
+    const list: CellStyleSnapshot[] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        if (this.sheet.isMergeCoveredCell(r, c)) {
+          continue;
+        }
+        const before = this.sheet.getCell(r, c).style;
+        const beforeClone = cloneCellStyle(before);
+        const after = computeBorderStyleForRibbonCommand(
+          this.sheet,
+          range,
+          r,
+          c,
+          commandId,
+          beforeClone,
+        );
+        list.push({ row: r, col: c, before: beforeClone, after });
+      }
+    }
+    this.snapshots = list;
+  }
+
+  execute(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, cloneCellStyle(s.after));
+    }
+  }
+
+  undo(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, cloneCellStyle(s.before));
     }
   }
 }

@@ -19,6 +19,16 @@ export type CellHorizontalAlign = "left" | "center" | "right";
 /** 垂直对齐（未设置视为垂直居中，与默认绘制一致）。 */
 export type CellVerticalAlign = "top" | "middle" | "bottom";
 
+/** 单元格单边边框线型（与 Ribbon 边框预设子集一致）。 */
+export type CellBorderKind = "thin" | "medium" | "thick" | "double" | "hairline";
+
+/** 单边边框（颜色缺省为黑色，由渲染层解析）。 */
+export interface CellBorderSide {
+  readonly kind: CellBorderKind;
+  /** 8 位 ARGB，如 FF000000；缺省为黑色。 */
+  readonly colorArgb?: string;
+}
+
 /** XLSX 往返用最小样式（ARGB 含 alpha，如 FFFF0000）。 */
 export interface CellStyle {
   bold?: boolean;
@@ -42,6 +52,11 @@ export interface CellStyle {
   indentLevel?: number;
   /** 自动换行（单元格内按列宽折行）。 */
   wrapText?: boolean;
+  /** 单元格上/左/下/右边框（合并格仅存于主格）。 */
+  borderTop?: CellBorderSide;
+  borderLeft?: CellBorderSide;
+  borderBottom?: CellBorderSide;
+  borderRight?: CellBorderSide;
 }
 
 /**
@@ -59,6 +74,10 @@ export type CellStylePatch = {
   readonly vAlign?: CellVerticalAlign | null;
   readonly indentLevel?: number | null;
   readonly wrapText?: boolean | null;
+  readonly borderTop?: CellBorderSide | null;
+  readonly borderLeft?: CellBorderSide | null;
+  readonly borderBottom?: CellBorderSide | null;
+  readonly borderRight?: CellBorderSide | null;
 };
 
 export function applyCellStylePatch(
@@ -146,6 +165,34 @@ export function applyCellStylePatch(
       delete next.wrapText;
     } else {
       next.wrapText = patch.wrapText;
+    }
+  }
+  if (patch.borderTop !== undefined) {
+    if (patch.borderTop === null) {
+      delete next.borderTop;
+    } else {
+      next.borderTop = patch.borderTop;
+    }
+  }
+  if (patch.borderLeft !== undefined) {
+    if (patch.borderLeft === null) {
+      delete next.borderLeft;
+    } else {
+      next.borderLeft = patch.borderLeft;
+    }
+  }
+  if (patch.borderBottom !== undefined) {
+    if (patch.borderBottom === null) {
+      delete next.borderBottom;
+    } else {
+      next.borderBottom = patch.borderBottom;
+    }
+  }
+  if (patch.borderRight !== undefined) {
+    if (patch.borderRight === null) {
+      delete next.borderRight;
+    } else {
+      next.borderRight = patch.borderRight;
     }
   }
   return Object.keys(next).length === 0 ? null : next;

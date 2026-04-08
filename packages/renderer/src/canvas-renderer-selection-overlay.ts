@@ -1,5 +1,6 @@
 import type { SelectionPaintSnapshot } from "@flexsheet/core";
 import type { Worksheet } from "@flexsheet/core";
+import { expandSelectionRangeForMergePaint } from "./canvas-renderer-selection-span.js";
 import type { SheetTheme } from "@flexsheet/theme";
 import { SELECTION_OUTLINE_VISUAL_SCALE } from "./canvas-renderer-constants.js";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
@@ -33,7 +34,9 @@ export function drawSelectionOverlay(
   if (snap === null) {
     return;
   }
-  const { range, activeRow, activeCol } = snap;
+  const { range: snapRange, activeRow, activeCol } = snap;
+  const range = expandSelectionRangeForMergePaint(sheet, snapRange);
+  const activeAnchor = sheet.getMergeAnchorCell(activeRow, activeCol);
   const { ctx } = env;
   ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = "source-over";
@@ -74,7 +77,8 @@ export function drawSelectionOverlay(
     ctx.clip();
     for (let r = r0; r <= r1; r++) {
       for (let c = c0; c <= c1; c++) {
-        if (r === activeRow && c === activeCol) {
+        const here = sheet.getMergeAnchorCell(r, c);
+        if (here.row === activeAnchor.row && here.col === activeAnchor.col) {
           continue;
         }
         const colW = scaledColWidthAt(sheet, c, env.viewZoom);

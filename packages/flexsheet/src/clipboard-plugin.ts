@@ -7,6 +7,7 @@ import {
   runClipboardCut,
   runClipboardPaste,
 } from "./clipboard/clipboard-run.js";
+import { isEditableKeydownTarget } from "./keyboard-editable-target.js";
 
 export interface ClipboardPluginOptions {
   readonly canvas: HTMLCanvasElement;
@@ -22,7 +23,7 @@ export function useClipboard(options: ClipboardPluginOptions): ClipboardPlugin {
 
 /**
  * Ctrl+C / Ctrl+X / Ctrl+V（Windows）与 Cmd+C / Cmd+X / Cmd+V（macOS）；
- * 在单元格内联编辑时交由浏览器默认行为，不拦截。
+ * 在单元格内联编辑、编辑栏或其它输入控件聚焦时交由浏览器默认行为，不拦截。
  */
 export class ClipboardPlugin extends PluginBase {
   readonly name = "flexsheet.clipboard";
@@ -54,6 +55,9 @@ export class ClipboardPlugin extends PluginBase {
   }
 
   private readonly onKeyDown = (ev: KeyboardEvent): void => {
+    if (isEditableKeydownTarget(ev)) {
+      return;
+    }
     const ctx = this.ctx;
     if (ctx === null) {
       return;

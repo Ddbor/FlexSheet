@@ -491,7 +491,7 @@
       .fs-formula-bar {
         flex-shrink: 0;
         display: flex;
-        align-items: center;
+        align-items: flex-start;
         gap: 8px;
         padding: 4px 8px;
         border-bottom: 1px solid #e1dfdd;
@@ -500,6 +500,7 @@
         min-height: 28px;
       }
       .fs-formula-bar__name {
+        align-self: center;
         min-width: 72px;
         padding: 2px 6px;
         border: 1px solid #c0c0c0;
@@ -508,6 +509,7 @@
         color: #333;
       }
       .fs-formula-bar__fx {
+        align-self: center;
         color: #605e5c;
         font-weight: 600;
         user-select: none;
@@ -515,10 +517,17 @@
       .fs-formula-bar__input {
         flex: 1;
         min-width: 0;
+        min-height: 22px;
+        max-height: 120px;
         padding: 4px 8px;
         border: 1px solid #c0c0c0;
         border-radius: 2px;
         font: inherit;
+        line-height: 1.25;
+        white-space: pre-wrap;
+        overflow-y: auto;
+        resize: vertical;
+        box-sizing: border-box;
       }
       /** Ribbon + 编辑栏 + 表格 + 底部栏共同祖先，用于统一拦截浏览器默认右键/快捷键。 */
       .fs-sheet-chrome {
@@ -537,15 +546,15 @@
       <div id="formula-bar" class="fs-formula-bar" aria-label="编辑栏">
         <span class="fs-formula-bar__name" id="formula-name-box">A1</span>
         <span class="fs-formula-bar__fx" aria-hidden="true">fx</span>
-        <input
+        <textarea
           class="fs-formula-bar__input"
           id="formula-input"
-          type="text"
+          rows="1"
           spellcheck="false"
           autocomplete="off"
           placeholder="单元格内容"
           aria-label="公式栏"
-        />
+        ></textarea>
       </div>
       <div id="app">
         <div id="grid-viewport">

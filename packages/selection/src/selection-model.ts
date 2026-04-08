@@ -59,7 +59,7 @@ export class SelectionModel {
     this.focusCol = clamp(n.endCol, 0, sheet.colCount - 1);
   }
 
-  /** 单击：单格选区，锚点与焦点合一。 */
+  /** 单击：单格选区，锚点与焦点合一（合并区域以主格为准）。 */
   selectCell(row: number, col: number): void {
     const sheet = this.getSheet();
     if (sheet === undefined) {
@@ -67,10 +67,11 @@ export class SelectionModel {
     }
     const r = clamp(row, 0, sheet.rowCount - 1);
     const c = clamp(col, 0, sheet.colCount - 1);
-    this.anchorRow = r;
-    this.anchorCol = c;
-    this.focusRow = r;
-    this.focusCol = c;
+    const a = sheet.getMergeAnchorCell(r, c);
+    this.anchorRow = a.row;
+    this.anchorCol = a.col;
+    this.focusRow = a.row;
+    this.focusCol = a.col;
   }
 
   /** 选中整列（活动格为列顶格，与 Excel 一致）。 */
@@ -148,12 +149,11 @@ export class SelectionModel {
       return;
     }
     if (!extend) {
-      const nr = clamp(this.focusRow + deltaRow, 0, sheet.rowCount - 1);
-      const nc = clamp(this.focusCol + deltaCol, 0, sheet.colCount - 1);
-      this.anchorRow = nr;
-      this.anchorCol = nc;
-      this.focusRow = nr;
-      this.focusCol = nc;
+      const next = sheet.moveFocusFrom(this.focusRow, this.focusCol, deltaRow, deltaCol);
+      this.anchorRow = next.row;
+      this.anchorCol = next.col;
+      this.focusRow = next.row;
+      this.focusCol = next.col;
       return;
     }
     this.focusRow = clamp(this.focusRow + deltaRow, 0, sheet.rowCount - 1);

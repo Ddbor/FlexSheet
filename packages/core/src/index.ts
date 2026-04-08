@@ -2,6 +2,8 @@ export {
   Cell,
   applyCellStylePatch,
   type CellAddress,
+  type CellBorderKind,
+  type CellBorderSide,
   type CellHorizontalAlign,
   type CellScalar,
   type CellStyle,

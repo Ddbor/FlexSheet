@@ -17,6 +17,7 @@ import {
   CellEditor,
   EditorPlugin,
   cellScalarToEditString,
+  parseEditString,
   type BeginEditOptions,
 } from "@flexsheet/editor";
 import { SelectionModel } from "@flexsheet/selection";
@@ -34,6 +35,7 @@ import {
 } from "@flexsheet/renderer";
 import { ScrollPlugin } from "@flexsheet/scroll";
 import { SelectionRegistryPlugin } from "@flexsheet/selection";
+import { columnIndexToLabel } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
 import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
@@ -51,10 +53,13 @@ import {
   SetRowHiddenCommand,
 } from "./sheet-structure-commands.js";
 import {
+  ApplySelectionBorderRibbonCommand,
   ApplySelectionCellStylePatchCommand,
   ApplySelectionFontSizeStepCommand,
   ApplySelectionIndentStepCommand,
+  isRibbonBorderCommandId,
 } from "./cell-style-commands.js";
+import { SelectionMergeCommand } from "./merge-commands.js";
 import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
 import { useUndoRedo } from "./undo-redo-plugin.js";
@@ -112,6 +117,9 @@ export class FlexSheet {
   private readonly cellEditor: CellEditor;
   private theme: SheetTheme;
   private readonly formulaBarEl: HTMLElement | null;
+  private readonly formulaBarNameEl: HTMLElement | null;
+  private readonly formulaBarInputEl: HTMLTextAreaElement | null;
+  private formulaBarSkipBlurCommit = false;
   private formulaBarVisible = true;
   private resizeObserver: ResizeObserver | null = null;
   private dragSelecting = false;
@@ -141,6 +149,9 @@ export class FlexSheet {
 
   constructor(options: FlexSheetOptions) {
     this.formulaBarEl = options.formulaBar ?? null;
+    this.formulaBarNameEl = this.formulaBarEl?.querySelector("#formula-name-box") ?? null;
+    this.formulaBarInputEl =
+      (this.formulaBarEl?.querySelector("#formula-input") as HTMLTextAreaElement | null) ?? null;
     this.host = options.container;
     this._workbook = options.workbook ?? createDefaultWorkbook();
     this.theme = options.theme ?? createDefaultLightTheme();
@@ -188,7 +199,13 @@ export class FlexSheet {
         this.workspace.commands.execute(cmd);
         this.autoExpandRowHeightForMultilineValue(sheet, row, col, value);
       },
+      onEditTextChange: (text: string) => {
+        if (this.formulaBarInputEl !== null && document.activeElement !== this.formulaBarInputEl) {
+          this.formulaBarInputEl.value = text;
+        }
+      },
       onEditEnd: () => {
+        this.syncFormulaBar();
         queueMicrotask(() => {
           this.canvas.focus();
         });
@@ -229,6 +246,7 @@ export class FlexSheet {
     this.bindSelectionKeyboard();
     this.attachWorkbookForDataDrive();
     this.rebindActiveSheetFormattingListener();
+    this.bindFormulaBar();
     this.syncSizeAndDraw();
   }
 
@@ -316,7 +334,8 @@ export class FlexSheet {
       return null;
     }
     const { row, col } = this.selection.getActiveCell();
-    return sheet.getCell(row, col).style;
+    const a = sheet.getMergeAnchorCell(row, col);
+    return sheet.getCell(a.row, a.col).style;
   }
 
   /**
@@ -462,6 +481,32 @@ export class FlexSheet {
     }
     const range = this.selection.getNormalizedRange();
     this.workspace.commands.execute(new ApplySelectionIndentStepCommand(sheet, range, dir));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /**
+   * Ribbon「合并后居中 / 跨越合并 / 合并单元格 / 取消合并」：对当前选区生效，可撤销。
+   */
+  applySelectionMerge(kind: "mergeCells" | "mergeAcross" | "mergeCenter" | "unmerge"): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const range = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new SelectionMergeCommand(sheet, range, kind));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** Ribbon 边框主按钮 / 下拉项（`home.font.border*`），可撤销。 */
+  applyRibbonBorderCommand(commandId: string): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined || !isRibbonBorderCommandId(commandId)) {
+      return;
+    }
+    const range = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new ApplySelectionBorderRibbonCommand(sheet, range, commandId));
     this.cellEditor.syncLayout();
     this.refresh();
   }
@@ -807,11 +852,12 @@ export class FlexSheet {
       return;
     }
     this.clearClipboardMarquee();
-    const rect = this.renderer.getCellRectInCanvasPixels(row, col);
+    const anchor = sheet.getMergeAnchorCell(row, col);
+    const rect = this.renderer.getCellRectInCanvasPixels(anchor.row, anchor.col);
     if (rect === null) {
       return;
     }
-    const cell = sheet.getCell(row, col);
+    const cell = sheet.getCell(anchor.row, anchor.col);
     const text =
       options?.initialTextOverride !== undefined
         ? options.initialTextOverride
@@ -827,7 +873,7 @@ export class FlexSheet {
           : options?.selectAll !== undefined
             ? { selectAll: options.selectAll }
             : undefined;
-    this.cellEditor.beginEdit(row, col, text, rect, editorOpts);
+    this.cellEditor.beginEdit(anchor.row, anchor.col, text, rect, editorOpts);
   }
 
   /** 双击按位置进入编辑；单击仅选格（与 Excel 一致，键入 / F2 再进编辑）。 */
@@ -1331,6 +1377,7 @@ export class FlexSheet {
     this.cellEditor.syncLayout();
     this.renderer.requestRedraw();
     this.notifyFormattingChrome();
+    this.syncFormulaBar();
   }
 
   private notifyFormattingChrome(): void {
@@ -1345,12 +1392,162 @@ export class FlexSheet {
     const sh = this.workbook.getActiveSheet();
     if (sh === undefined) {
       this.notifyFormattingChrome();
+      this.syncFormulaBar();
       return;
     }
     this.activeSheetFormattingUnsub = sh.subscribe(() => {
       this.notifyFormattingChrome();
+      this.syncFormulaBar();
     });
     this.notifyFormattingChrome();
+    this.syncFormulaBar();
+  }
+
+  private bindFormulaBar(): void {
+    if (this.formulaBarInputEl === null) {
+      return;
+    }
+    this.formulaBarInputEl.addEventListener("keydown", this.onFormulaBarKeyDown);
+    this.formulaBarInputEl.addEventListener("blur", this.onFormulaBarBlur);
+  }
+
+  private readonly onFormulaBarKeyDown = (ev: KeyboardEvent): void => {
+    if (ev.key === "Escape") {
+      if (ev.isComposing) {
+        return;
+      }
+      ev.preventDefault();
+      this.restoreFormulaBarFromActiveCell();
+      queueMicrotask(() => {
+        this.canvas.focus();
+      });
+      return;
+    }
+    if (ev.key !== "Enter" || ev.isComposing) {
+      return;
+    }
+    if (ev.ctrlKey || ev.metaKey) {
+      ev.preventDefault();
+      this.insertNewlineAtFormulaBarCaret();
+      return;
+    }
+    if (ev.altKey) {
+      return;
+    }
+    ev.preventDefault();
+    this.formulaBarSkipBlurCommit = true;
+    this.commitFormulaBarIfChanged();
+    this.formulaBarInputEl?.blur();
+    queueMicrotask(() => {
+      this.formulaBarSkipBlurCommit = false;
+      this.canvas.focus();
+    });
+  };
+
+  private readonly onFormulaBarBlur = (): void => {
+    if (this.formulaBarSkipBlurCommit) {
+      return;
+    }
+    this.commitFormulaBarIfChanged();
+  };
+
+  private insertNewlineAtFormulaBarCaret(): void {
+    const el = this.formulaBarInputEl;
+    if (el === null) {
+      return;
+    }
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    const v = el.value;
+    el.value = `${v.slice(0, start)}\n${v.slice(end)}`;
+    const pos = start + 1;
+    el.setSelectionRange(pos, pos);
+  }
+
+  /** 取消编辑栏中的修改，恢复为当前活动格内容（与单元格 Esc 一致）。 */
+  private restoreFormulaBarFromActiveCell(): void {
+    const el = this.formulaBarInputEl;
+    if (el === null) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      el.value = "";
+      return;
+    }
+    const { row, col } = this.selection.getActiveCell();
+    const a = sheet.getMergeAnchorCell(row, col);
+    const cell = sheet.getCell(a.row, a.col);
+    el.value =
+      cell.formula !== null && cell.formula.length > 0 ? cell.formula : cellScalarToEditString(cell.value);
+    el.blur();
+  }
+
+  /**
+   * 同步编辑栏名称框与输入框：活动单元格地址（合并格以锚点为准）及公式/显示文本；
+   * 内联编辑时输入框与单元格编辑器一致。
+   */
+  private syncFormulaBar(): void {
+    if (this.formulaBarNameEl === null && this.formulaBarInputEl === null) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      if (this.formulaBarNameEl !== null) {
+        this.formulaBarNameEl.textContent = "";
+      }
+      if (this.formulaBarInputEl !== null) {
+        this.formulaBarInputEl.value = "";
+      }
+      return;
+    }
+    if (document.activeElement === this.formulaBarInputEl) {
+      return;
+    }
+    const { row, col } = this.selection.getActiveCell();
+    const a = sheet.getMergeAnchorCell(row, col);
+    const addr = `${columnIndexToLabel(a.col)}${a.row + 1}`;
+    if (this.formulaBarNameEl !== null) {
+      this.formulaBarNameEl.textContent = addr;
+    }
+    if (this.formulaBarInputEl === null) {
+      return;
+    }
+    if (this.cellEditor.isEditing()) {
+      this.formulaBarInputEl.value = this.cellEditor.getEditingText();
+      return;
+    }
+    const cell = sheet.getCell(a.row, a.col);
+    const text =
+      cell.formula !== null && cell.formula.length > 0 ? cell.formula : cellScalarToEditString(cell.value);
+    this.formulaBarInputEl.value = text;
+  }
+
+  private commitFormulaBarIfChanged(): void {
+    if (this.formulaBarInputEl === null) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    if (this.cellEditor.isEditing()) {
+      return;
+    }
+    const { row, col } = this.selection.getActiveCell();
+    const a = sheet.getMergeAnchorCell(row, col);
+    const cell = sheet.getCell(a.row, a.col);
+    const current =
+      cell.formula !== null && cell.formula.length > 0 ? cell.formula : cellScalarToEditString(cell.value);
+    const raw = this.formulaBarInputEl.value;
+    if (raw === current) {
+      return;
+    }
+    const value = parseEditString(raw);
+    const cmd = new SetCellValueCommand(sheet, a.row, a.col, value);
+    this.workspace.commands.execute(cmd);
+    this.autoExpandRowHeightForMultilineValue(sheet, a.row, a.col, value);
+    this.refresh();
   }
 
   private cancelDragAutoscrollRaf(): void {

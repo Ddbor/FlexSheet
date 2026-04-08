@@ -59,6 +59,10 @@ export interface FlexSheetLike {
   applySelectionStylePatch(patch: CellStylePatch): void;
   applySelectionFontSizeStep(dir: 1 | -1): void;
   applySelectionIndentStep(dir: 1 | -1): void;
+  /** Ribbon「开始」对齐组：合并/取消合并（与 `home.align.merge*` 命令对应）。 */
+  applySelectionMerge?(kind: "mergeCells" | "mergeAcross" | "mergeCenter" | "unmerge"): void;
+  /** Ribbon「开始」字体组边框按钮及下拉（`home.font.border*`）。 */
+  applyRibbonBorderCommand?(commandId: string): void;
   /** 活动单元格样式（Ribbon 字体/颜色条同步）。 */
   getActiveCellStyle(): CellStyle | null;
   /** 存在时 Backstage 可提供 JSON 保存/导入。 */

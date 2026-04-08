@@ -1,6 +1,8 @@
 import { PluginBase, PLUGIN_SERVICE_KEYS, type PluginContext } from "@flexsheet/core";
 import type { CellEditor } from "@flexsheet/editor";
 
+import { isEditableKeydownTarget } from "./keyboard-editable-target.js";
+
 export interface UndoRedoPluginOptions {
   readonly canvas: HTMLCanvasElement;
   /** 快捷键监听目标；通常为 `chromeRoot`（含 Ribbon、画布、底部栏），否则为画布。 */
@@ -8,8 +10,8 @@ export interface UndoRedoPluginOptions {
 }
 
 /**
- * 在画布上绑定 Ctrl+Z / Ctrl+Y（及 Ctrl+Shift+Z 重做），与 `Workspace.commands` 联动。
- * 需在 `EditorPlugin` 之后注册，以便在单元格内联编辑时跳过快捷键。
+ * 在 `keyTarget` 上绑定 Ctrl+Z / Ctrl+Y（及 Ctrl+Shift+Z 重做），与 `Workspace.commands` 联动。
+ * 在单元格内联编辑、编辑栏或其它输入控件聚焦时跳过，以保留浏览器撤消/重做。
  */
 export class UndoRedoPlugin extends PluginBase {
   readonly name = "flexsheet.undoRedo";
@@ -39,6 +41,9 @@ export class UndoRedoPlugin extends PluginBase {
   }
 
   private readonly onKeyDown = (ev: KeyboardEvent): void => {
+    if (isEditableKeydownTarget(ev)) {
+      return;
+    }
     const ctx = this.ctx;
     if (ctx === null) {
       return;

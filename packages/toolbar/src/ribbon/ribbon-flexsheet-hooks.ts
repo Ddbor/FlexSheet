@@ -91,11 +91,42 @@ function readRangeWrapState(sheet: Worksheet, range: SelectionRange): boolean {
   return anyCell && allWrap;
 }
 
+const RIBBON_BORDER_COMMAND_IDS = new Set<string>([
+  "home.font.border",
+  "home.font.border.bottom",
+  "home.font.border.top",
+  "home.font.border.left",
+  "home.font.border.right",
+  "home.font.border.none",
+  "home.font.border.all",
+  "home.font.border.outside",
+  "home.font.border.thickBox",
+  "home.font.border.doubleBottom",
+  "home.font.border.thickBottom",
+  "home.font.border.topBottom",
+  "home.font.border.topThickBottom",
+  "home.font.border.topDoubleBottom",
+]);
+
+function tryApplyRibbonBorder(ev: RibbonCommandEvent, fs: FlexSheetLike): boolean {
+  if (!RIBBON_BORDER_COMMAND_IDS.has(ev.id)) {
+    return false;
+  }
+  if (fs.applyRibbonBorderCommand === undefined) {
+    return false;
+  }
+  fs.applyRibbonBorderCommand(ev.id);
+  return true;
+}
+
 /**
  * 将部分 Ribbon 命令映射到 FlexSheet（非「视图」选项卡逻辑可放此处）。
  * 「视图」选项卡由 `ViewRibbonController` 统一处理。
  */
 export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSheetLike): boolean {
+  if (tryApplyRibbonBorder(ev, fs)) {
+    return true;
+  }
   switch (ev.id) {
     case "home.undo.back":
       fs.undo();
@@ -217,6 +248,34 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       }
       const allWrap = readRangeWrapState(sheet, fs.selection.getNormalizedRange());
       fs.applySelectionStylePatch({ wrapText: !allWrap });
+      return true;
+    }
+    case "home.align.merge": {
+      if (fs.applySelectionMerge === undefined) {
+        return false;
+      }
+      fs.applySelectionMerge("mergeCenter");
+      return true;
+    }
+    case "home.align.mergeAcross": {
+      if (fs.applySelectionMerge === undefined) {
+        return false;
+      }
+      fs.applySelectionMerge("mergeAcross");
+      return true;
+    }
+    case "home.align.mergeCells": {
+      if (fs.applySelectionMerge === undefined) {
+        return false;
+      }
+      fs.applySelectionMerge("mergeCells");
+      return true;
+    }
+    case "home.align.unmerge": {
+      if (fs.applySelectionMerge === undefined) {
+        return false;
+      }
+      fs.applySelectionMerge("unmerge");
       return true;
     }
     default: {

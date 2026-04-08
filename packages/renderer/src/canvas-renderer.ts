@@ -24,7 +24,7 @@ import {
   paintAllHeaderSelectionAccents,
   type HeaderPaintEnv,
 } from "./canvas-renderer-headers.js";
-import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
+import { mergedCellCanvasRect } from "./canvas-renderer-geometry.js";
 import { drawClipboardMarqueeOverlay } from "./canvas-renderer-clipboard-marquee.js";
 import {
   drawSelectionOverlay,
@@ -340,12 +340,15 @@ export class CanvasRenderer {
     if (ctx === null) {
       return null;
     }
-    return {
-      x: cellLeftX(sheet, ctx.layout, col, this.viewZoom, this.scrollX),
-      y: cellTopY(sheet, ctx.layout, row, this.viewZoom, this.scrollY),
-      width: scaledColWidthAt(sheet, col, this.viewZoom),
-      height: scaledRowHeightAt(sheet, row, this.viewZoom),
-    };
+    return mergedCellCanvasRect(
+      sheet,
+      ctx.layout,
+      row,
+      col,
+      this.viewZoom,
+      this.scrollX,
+      this.scrollY,
+    );
   }
 
   setWorkbook(workbook: Workbook): void {

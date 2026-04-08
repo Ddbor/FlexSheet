@@ -32,6 +32,8 @@ export interface CellEditorOptions {
   readonly onCommit: (row: number, col: number, value: CellScalar) => void;
   /** 提交或取消编辑后调用（用于将焦点还给表格等）。 */
   readonly onEditEnd?: () => void;
+  /** 内联编辑中文本变化时（含 `beginEdit` 初始内容）。 */
+  readonly onEditTextChange?: (text: string) => void;
 }
 
 export interface BeginEditOptions {
@@ -55,6 +57,7 @@ export class CellEditor {
   private readonly getCellFontCss: (row: number, col: number) => string;
   private readonly onCommit: (row: number, col: number, value: CellScalar) => void;
   private readonly onEditEnd?: () => void;
+  private readonly onEditTextChange?: (text: string) => void;
 
   private readonly input: HTMLTextAreaElement;
   private readonly measureCanvas: HTMLCanvasElement;
@@ -72,6 +75,7 @@ export class CellEditor {
     this.getCellFontCss = options.getCellFontCss;
     this.onCommit = options.onCommit;
     this.onEditEnd = options.onEditEnd;
+    this.onEditTextChange = options.onEditTextChange;
 
     const cs = getComputedStyle(this.host);
     if (cs.position === "static") {
@@ -150,6 +154,12 @@ export class CellEditor {
     } else {
       this.input.select();
     }
+    this.onEditTextChange?.(this.input.value);
+  }
+
+  /** 当前内联编辑中的文本；未编辑时为空串。 */
+  getEditingText(): string {
+    return this.editing ? this.input.value : "";
   }
 
   /** 布局变化（滚动、resize）时同步 input 位置。 */
@@ -255,6 +265,7 @@ export class CellEditor {
 
   private readonly onInputValueChanged = (): void => {
     this.applyAutoSizeByContent();
+    this.onEditTextChange?.(this.input.value);
   };
 
   private readonly onInputKeyDown = (ev: KeyboardEvent): void => {
