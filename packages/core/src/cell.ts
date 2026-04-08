@@ -13,11 +13,142 @@ export interface CellAddress {
 
 export type CellScalar = string | number | boolean | null;
 
+/** 水平对齐（与 Ribbon / XLSX 常用子集一致；未设置视为左对齐）。 */
+export type CellHorizontalAlign = "left" | "center" | "right";
+
+/** 垂直对齐（未设置视为垂直居中，与默认绘制一致）。 */
+export type CellVerticalAlign = "top" | "middle" | "bottom";
+
 /** XLSX 往返用最小样式（ARGB 含 alpha，如 FFFF0000）。 */
 export interface CellStyle {
   bold?: boolean;
+  italic?: boolean;
+  /** CSS `font-family` 栈（与 Ribbon 字体列表一致）。 */
+  fontFamily?: string;
+  /** 字号，与 Excel 一致为磅（pt）。 */
+  fontSizePt?: number;
+  /** 下划线；未设置表示无下划线。 */
+  underline?: "single" | "double";
   fgArgb?: string;
   fillArgb?: string;
+  /** 文本水平对齐。 */
+  hAlign?: CellHorizontalAlign;
+  /** 文本垂直对齐。 */
+  vAlign?: CellVerticalAlign;
+  /**
+   * 左缩进等级（与 OOXML `alignment/@indent` 一致，0–255；未设置视为 0）。
+   * Ribbon 每点击一次增加/减少 1 级。
+   */
+  indentLevel?: number;
+  /** 自动换行（单元格内按列宽折行）。 */
+  wrapText?: boolean;
+}
+
+/**
+ * 选区样式补丁：`undefined` 表示不修改该项，`null` 表示清除该项（恢复默认）。
+ */
+export type CellStylePatch = {
+  readonly bold?: boolean | null;
+  readonly italic?: boolean | null;
+  readonly fontFamily?: string | null;
+  readonly fontSizePt?: number | null;
+  readonly underline?: "single" | "double" | null;
+  readonly fgArgb?: string | null;
+  readonly fillArgb?: string | null;
+  readonly hAlign?: CellHorizontalAlign | null;
+  readonly vAlign?: CellVerticalAlign | null;
+  readonly indentLevel?: number | null;
+  readonly wrapText?: boolean | null;
+};
+
+export function applyCellStylePatch(
+  prev: CellStyle | null,
+  patch: CellStylePatch,
+): CellStyle | null {
+  const next: CellStyle = { ...(prev ?? {}) };
+  if (patch.bold !== undefined) {
+    if (patch.bold === null) {
+      delete next.bold;
+    } else {
+      next.bold = patch.bold;
+    }
+  }
+  if (patch.italic !== undefined) {
+    if (patch.italic === null) {
+      delete next.italic;
+    } else {
+      next.italic = patch.italic;
+    }
+  }
+  if (patch.fontFamily !== undefined) {
+    if (patch.fontFamily === null) {
+      delete next.fontFamily;
+    } else {
+      next.fontFamily = patch.fontFamily;
+    }
+  }
+  if (patch.fontSizePt !== undefined) {
+    if (patch.fontSizePt === null) {
+      delete next.fontSizePt;
+    } else {
+      next.fontSizePt = patch.fontSizePt;
+    }
+  }
+  if (patch.underline !== undefined) {
+    if (patch.underline === null) {
+      delete next.underline;
+    } else {
+      next.underline = patch.underline;
+    }
+  }
+  if (patch.fgArgb !== undefined) {
+    if (patch.fgArgb === null) {
+      delete next.fgArgb;
+    } else {
+      next.fgArgb = patch.fgArgb;
+    }
+  }
+  if (patch.fillArgb !== undefined) {
+    if (patch.fillArgb === null) {
+      delete next.fillArgb;
+    } else {
+      next.fillArgb = patch.fillArgb;
+    }
+  }
+  if (patch.hAlign !== undefined) {
+    if (patch.hAlign === null) {
+      delete next.hAlign;
+    } else {
+      next.hAlign = patch.hAlign;
+    }
+  }
+  if (patch.vAlign !== undefined) {
+    if (patch.vAlign === null) {
+      delete next.vAlign;
+    } else {
+      next.vAlign = patch.vAlign;
+    }
+  }
+  if (patch.indentLevel !== undefined) {
+    if (patch.indentLevel === null) {
+      delete next.indentLevel;
+    } else {
+      const n = Math.round(patch.indentLevel);
+      if (!Number.isFinite(n) || n <= 0) {
+        delete next.indentLevel;
+      } else {
+        next.indentLevel = Math.min(255, n);
+      }
+    }
+  }
+  if (patch.wrapText !== undefined) {
+    if (patch.wrapText === null) {
+      delete next.wrapText;
+    } else {
+      next.wrapText = patch.wrapText;
+    }
+  }
+  return Object.keys(next).length === 0 ? null : next;
 }
 
 export class Cell implements CellAddress {

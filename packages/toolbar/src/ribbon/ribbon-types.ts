@@ -2,7 +2,7 @@
  * Ribbon 标签与对外命令事件（宿主可据此驱动 FlexSheet / CanvasRenderer）。
  */
 
-import type { SelectionRange, Workbook } from "@flexsheet/core";
+import type { CellStyle, CellStylePatch, SelectionRange, Workbook } from "@flexsheet/core";
 import type { CanvasRenderer } from "@flexsheet/renderer";
 import type { SheetTheme } from "@flexsheet/theme";
 export type RibbonTabId = "home" | "insert" | "pageLayout" | "formula" | "data" | "view";
@@ -51,6 +51,16 @@ export interface FlexSheetLike {
   canUndo(): boolean;
   canRedo(): boolean;
   subscribeUndoRedo(listener: () => void): () => void;
+  /** 与 Ribbon 剪贴板、快捷键共用实现 */
+  clipboardCopy(): Promise<void>;
+  clipboardCut(): Promise<void>;
+  clipboardPaste(): Promise<void>;
+  /** 选区字体/填充等样式（与 Ribbon「开始」字体组共用，可撤销）。 */
+  applySelectionStylePatch(patch: CellStylePatch): void;
+  applySelectionFontSizeStep(dir: 1 | -1): void;
+  applySelectionIndentStep(dir: 1 | -1): void;
+  /** 活动单元格样式（Ribbon 字体/颜色条同步）。 */
+  getActiveCellStyle(): CellStyle | null;
   /** 存在时 Backstage 可提供 JSON 保存/导入。 */
   readonly workbook?: Workbook;
   loadWorkbook?(wb: Workbook): void;

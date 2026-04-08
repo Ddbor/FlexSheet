@@ -1,4 +1,95 @@
+import { normalizeSelectionRange, type SelectionRange, type Worksheet } from "@flexsheet/core";
+import { RIBBON_FONT_FAMILY_ITEMS } from "./font-family-items.js";
+import { argb8ToCssHex6, cssHexToFillArgb } from "./ribbon-color-argb.js";
+import { showRibbonColorDialog } from "./ribbon-color-dialog.js";
 import type { FlexSheetLike, RibbonCommandEvent } from "./ribbon-types.js";
+
+const FONT_FAMILY_CSS = new Map<string, string>(
+  RIBBON_FONT_FAMILY_ITEMS.map((it) => {
+    const css =
+      it.previewFontFamily ??
+      (it.id === "home.font.family.wingdings" ? "Wingdings, fantasy" : `"${it.label}", sans-serif`);
+    return [it.id, css];
+  }),
+);
+
+function readPickHex(ev: RibbonCommandEvent): string | null {
+  const h = ev.payload?.hex;
+  if (typeof h !== "string") {
+    return null;
+  }
+  const t = h.trim();
+  if (!/^#[\dA-Fa-f]{3}$/i.test(t) && !/^#[\dA-Fa-f]{6}$/i.test(t)) {
+    return null;
+  }
+  return t;
+}
+
+async function applyMoreColor(fs: FlexSheetLike, kind: "fill" | "font"): Promise<void> {
+  const st = fs.getActiveCellStyle();
+  const argb = kind === "fill" ? st?.fillArgb : st?.fgArgb;
+  const argbTrim = typeof argb === "string" ? argb.trim() : "";
+  const initial =
+    argbTrim !== "" && /^[\dA-Fa-f]{8}$/i.test(argbTrim) ? argb8ToCssHex6(argbTrim) : "#ffffff";
+  const picked = await showRibbonColorDialog(initial);
+  if (picked === null) {
+    return;
+  }
+  if (kind === "fill") {
+    fs.applySelectionStylePatch({ fillArgb: cssHexToFillArgb(picked) });
+  } else {
+    fs.applySelectionStylePatch({ fgArgb: cssHexToFillArgb(picked) });
+  }
+}
+
+function readRangeFontState(
+  sheet: Worksheet,
+  range: SelectionRange,
+): {
+  readonly allBold: boolean;
+  readonly allItalic: boolean;
+  readonly allSingleUnderline: boolean;
+  readonly allDoubleUnderline: boolean;
+} {
+  const n = normalizeSelectionRange(range);
+  let allBold = true;
+  let allItalic = true;
+  let allSingleUnderline = true;
+  let allDoubleUnderline = true;
+  for (let r = n.startRow; r <= n.endRow; r++) {
+    for (let c = n.startCol; c <= n.endCol; c++) {
+      const st = sheet.getCell(r, c).style;
+      if (st?.bold !== true) {
+        allBold = false;
+      }
+      if (st?.italic !== true) {
+        allItalic = false;
+      }
+      if (st?.underline !== "single") {
+        allSingleUnderline = false;
+      }
+      if (st?.underline !== "double") {
+        allDoubleUnderline = false;
+      }
+    }
+  }
+  return { allBold, allItalic, allSingleUnderline, allDoubleUnderline };
+}
+
+function readRangeWrapState(sheet: Worksheet, range: SelectionRange): boolean {
+  const n = normalizeSelectionRange(range);
+  let anyCell = false;
+  let allWrap = true;
+  for (let r = n.startRow; r <= n.endRow; r++) {
+    for (let c = n.startCol; c <= n.endCol; c++) {
+      anyCell = true;
+      if (sheet.getCell(r, c).style?.wrapText !== true) {
+        allWrap = false;
+      }
+    }
+  }
+  return anyCell && allWrap;
+}
 
 /**
  * 将部分 Ribbon 命令映射到 FlexSheet（非「视图」选项卡逻辑可放此处）。
@@ -12,7 +103,137 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
     case "home.undo.forward":
       fs.redo();
       return true;
-    default:
+    case "home.clipboard.copy":
+      void fs.clipboardCopy();
+      return true;
+    case "home.clipboard.cut":
+      void fs.clipboardCut();
+      return true;
+    case "home.clipboard.paste":
+      void fs.clipboardPaste();
+      return true;
+    case "home.font.grow":
+      fs.applySelectionFontSizeStep(1);
+      return true;
+    case "home.font.shrink":
+      fs.applySelectionFontSizeStep(-1);
+      return true;
+    case "home.font.fill.pick": {
+      const hex = readPickHex(ev);
+      if (hex === null) {
+        return false;
+      }
+      fs.applySelectionStylePatch({ fillArgb: cssHexToFillArgb(hex) });
+      return true;
+    }
+    case "home.font.fill.none":
+      fs.applySelectionStylePatch({ fillArgb: null });
+      return true;
+    case "home.font.fill.more":
+      void applyMoreColor(fs, "fill");
+      return true;
+    case "home.font.color.pick": {
+      const hex = readPickHex(ev);
+      if (hex === null) {
+        return false;
+      }
+      fs.applySelectionStylePatch({ fgArgb: cssHexToFillArgb(hex) });
+      return true;
+    }
+    case "home.font.color.none":
+      fs.applySelectionStylePatch({ fgArgb: null });
+      return true;
+    case "home.font.color.more":
+      void applyMoreColor(fs, "font");
+      return true;
+    case "home.font.bold": {
+      const sheet = fs.workbook?.getActiveSheet();
+      if (sheet === undefined) {
+        return false;
+      }
+      const { allBold } = readRangeFontState(sheet, fs.selection.getNormalizedRange());
+      fs.applySelectionStylePatch({ bold: !allBold });
+      return true;
+    }
+    case "home.font.italic": {
+      const sheet = fs.workbook?.getActiveSheet();
+      if (sheet === undefined) {
+        return false;
+      }
+      const { allItalic } = readRangeFontState(sheet, fs.selection.getNormalizedRange());
+      fs.applySelectionStylePatch({ italic: !allItalic });
+      return true;
+    }
+    case "home.font.underline": {
+      const sheet = fs.workbook?.getActiveSheet();
+      if (sheet === undefined) {
+        return false;
+      }
+      const { allSingleUnderline } = readRangeFontState(sheet, fs.selection.getNormalizedRange());
+      fs.applySelectionStylePatch(
+        allSingleUnderline ? { underline: null } : { underline: "single" },
+      );
+      return true;
+    }
+    case "home.font.doubleUnderline": {
+      const sheet = fs.workbook?.getActiveSheet();
+      if (sheet === undefined) {
+        return false;
+      }
+      const { allDoubleUnderline } = readRangeFontState(sheet, fs.selection.getNormalizedRange());
+      fs.applySelectionStylePatch(
+        allDoubleUnderline ? { underline: null } : { underline: "double" },
+      );
+      return true;
+    }
+    case "home.align.top":
+      fs.applySelectionStylePatch({ vAlign: "top" });
+      return true;
+    case "home.align.middle":
+      fs.applySelectionStylePatch({ vAlign: "middle" });
+      return true;
+    case "home.align.bottom":
+      fs.applySelectionStylePatch({ vAlign: "bottom" });
+      return true;
+    case "home.align.left":
+      fs.applySelectionStylePatch({ hAlign: "left" });
+      return true;
+    case "home.align.center":
+      fs.applySelectionStylePatch({ hAlign: "center" });
+      return true;
+    case "home.align.right":
+      fs.applySelectionStylePatch({ hAlign: "right" });
+      return true;
+    case "home.align.indentIncrease":
+      fs.applySelectionIndentStep(1);
+      return true;
+    case "home.align.indentDecrease":
+      fs.applySelectionIndentStep(-1);
+      return true;
+    case "home.align.wrap": {
+      const sheet = fs.workbook?.getActiveSheet();
+      if (sheet === undefined) {
+        return false;
+      }
+      const allWrap = readRangeWrapState(sheet, fs.selection.getNormalizedRange());
+      fs.applySelectionStylePatch({ wrapText: !allWrap });
+      return true;
+    }
+    default: {
+      const fam = FONT_FAMILY_CSS.get(ev.id);
+      if (fam !== undefined) {
+        fs.applySelectionStylePatch({ fontFamily: fam });
+        return true;
+      }
+      const m = /^home\.font\.size\.(\d+)$/.exec(ev.id);
+      if (m !== null) {
+        const pt = Number(m[1]);
+        if (Number.isFinite(pt) && pt > 0 && pt <= 409) {
+          fs.applySelectionStylePatch({ fontSizePt: pt });
+          return true;
+        }
+      }
       return false;
+    }
   }
 }

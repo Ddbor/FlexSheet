@@ -1,13 +1,16 @@
-import type { Worksheet } from "@flexsheet/core";
+import type { CellStyle, Worksheet } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import {
   argbToCss,
+  buildCellCanvasFont,
+  cellStyleLogicalFontSizeBasePx,
   formatCellDisplay,
   scaledColWidthAt,
   scaledFontSizePx,
   scaledRowHeightAt,
   snapLine,
+  wrapCellLines,
 } from "./canvas-renderer-utils.js";
 import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
 import type { FrozenLayout } from "./viewport.js";
@@ -56,6 +59,68 @@ function paintBodyCellFills(
       ctx.fillRect(x, y, colW, rowH);
     }
   }
+}
+
+function strokeCellTextUnderline(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  leftX: number,
+  baselineY: number,
+  kind: "single" | "double",
+  color: string,
+  fontPx: number,
+): void {
+  const m = ctx.measureText(text);
+  const descent = m.actualBoundingBoxDescent ?? Math.max(2, fontPx * 0.22);
+  const y1 = baselineY + descent + 1;
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, fontPx / 14);
+  ctx.beginPath();
+  ctx.moveTo(leftX, y1);
+  ctx.lineTo(leftX + m.width, y1);
+  ctx.stroke();
+  if (kind === "double") {
+    const gap = Math.max(2, fontPx * 0.12);
+    const y2 = y1 + gap;
+    ctx.beginPath();
+    ctx.moveTo(leftX, y2);
+    ctx.lineTo(leftX + m.width, y2);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function resolvedHAlign(st: CellStyle | null | undefined): "left" | "center" | "right" {
+  const h = st?.hAlign;
+  return h === "center" || h === "right" ? h : "left";
+}
+
+function resolvedVAlign(st: CellStyle | null | undefined): "top" | "middle" | "bottom" {
+  const v = st?.vAlign;
+  return v === "top" || v === "bottom" ? v : "middle";
+}
+
+function clampIndentLevel(raw: number | undefined): number {
+  if (raw === undefined || !Number.isFinite(raw)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(255, Math.round(raw)));
+}
+
+function textLineLeftInBox(
+  hAlign: "left" | "center" | "right",
+  boxLeft: number,
+  innerW: number,
+  lineWidth: number,
+): number {
+  if (hAlign === "center") {
+    return boxLeft + (innerW - lineWidth) / 2;
+  }
+  if (hAlign === "right") {
+    return boxLeft + innerW - lineWidth;
+  }
+  return boxLeft;
 }
 
 function paintBodyCellTexts(
@@ -110,32 +175,108 @@ function paintBodyCellTexts(
         fgArgb !== undefined && fgArgb !== ""
           ? (argbToCss(fgArgb) ?? env.theme.cellColor)
           : env.theme.cellColor;
-      const weight = cell.style?.bold === true ? "600" : "400";
-      ctx.font = `${weight} ${scaledFontSizePx(13, env.viewZoom)}px system-ui, -apple-system, sans-serif`;
+      ctx.font = buildCellCanvasFont(cell.style, env.viewZoom);
+      const fontPx = scaledFontSizePx(cellStyleLogicalFontSizeBasePx(cell.style), env.viewZoom);
       ctx.textAlign = "left";
-      ctx.textBaseline = "top";
       const pad = 4;
-      const baseX = x + pad;
-      const multiline = text.includes("\n");
-      const drawW = multiline ? colW : extendedTextWidth(r, c, colW);
+      const hAlign = resolvedHAlign(cell.style);
+      const vAlign = resolvedVAlign(cell.style);
+      const indentLv = clampIndentLevel(cell.style?.indentLevel);
+      const indentUnit = Math.max(6, fontPx * 0.55);
+      let indentPx = indentLv * indentUnit;
+      const maxIndentPx = Math.max(0, colW - 2 * pad - 4);
+      if (indentPx > maxIndentPx) {
+        indentPx = maxIndentPx;
+      }
+      const boxLeft = x + pad + indentPx;
+      const innerW = Math.max(1, colW - 2 * pad - indentPx);
+
+      const wrap = cell.style?.wrapText === true;
+      let lines: string[];
+      if (wrap) {
+        lines = wrapCellLines(ctx, text, innerW);
+      } else if (text.includes("\n")) {
+        lines = text.split("\n");
+      } else {
+        lines = [text];
+      }
+
+      const onlySingleLineVisual = !wrap && !text.includes("\n");
+      const drawW = onlySingleLineVisual ? extendedTextWidth(r, c, colW) : colW;
+      const underlineKind = cell.style?.underline;
+      const ink = String(ctx.fillStyle);
       ctx.save();
       ctx.beginPath();
       ctx.rect(x, y, drawW, rowH);
       ctx.clip();
-      if (multiline) {
-        const lines = text.split("\n");
-        const lineH = Math.max(12, scaledFontSizePx(13, env.viewZoom) * 1.25);
-        let yy = y + 2;
-        for (const line of lines) {
+      if (!onlySingleLineVisual) {
+        const lineH = Math.max(12, fontPx * 1.25);
+        const padY = 2;
+        let fitCount = 0;
+        let acc = padY;
+        for (const _ of lines) {
+          if (acc + lineH > y + rowH - padY + 1e-6) {
+            break;
+          }
+          fitCount += 1;
+          acc += lineH;
+        }
+        const n = Math.min(lines.length, fitCount);
+        const blockH = n * lineH;
+        let yy = y + padY;
+        if (n > 0) {
+          yy =
+            vAlign === "top"
+              ? y + padY
+              : vAlign === "bottom"
+                ? y + rowH - padY - blockH
+                : y + (rowH - blockH) / 2;
+          const yyMax = y + rowH - padY - blockH;
+          const yyMin = y + padY;
+          if (yy < yyMin) {
+            yy = yyMin;
+          }
+          if (yy > yyMax) {
+            yy = yyMax;
+          }
+        }
+        for (let li = 0; li < lines.length; li++) {
+          const line = lines[li]!;
           if (yy + lineH > y + rowH + 1e-6) {
             break;
           }
-          ctx.fillText(line, baseX, yy);
+          const mLine = ctx.measureText(line);
+          const ascent = mLine.actualBoundingBoxAscent ?? fontPx * 0.72;
+          const lineW = mLine.width;
+          const lineLeft = textLineLeftInBox(hAlign, boxLeft, innerW, lineW);
+          ctx.textBaseline = "alphabetic";
+          const baselineY = yy + ascent;
+          ctx.fillText(line, lineLeft, baselineY);
+          if (underlineKind === "single" || underlineKind === "double") {
+            strokeCellTextUnderline(ctx, line, lineLeft, baselineY, underlineKind, ink, fontPx);
+          }
           yy += lineH;
         }
       } else {
-        ctx.textBaseline = "middle";
-        ctx.fillText(text, baseX, y + rowH / 2);
+        const m = ctx.measureText(text);
+        const ascent = m.actualBoundingBoxAscent ?? fontPx * 0.72;
+        const descent = m.actualBoundingBoxDescent ?? fontPx * 0.22;
+        const textLeft = textLineLeftInBox(hAlign, boxLeft, innerW, m.width);
+        let baselineY: number;
+        if (vAlign === "top") {
+          ctx.textBaseline = "alphabetic";
+          baselineY = y + pad + ascent;
+        } else if (vAlign === "bottom") {
+          ctx.textBaseline = "alphabetic";
+          baselineY = y + rowH - pad - descent;
+        } else {
+          ctx.textBaseline = "middle";
+          baselineY = y + rowH / 2;
+        }
+        ctx.fillText(text, textLeft, baselineY);
+        if (underlineKind === "single" || underlineKind === "double") {
+          strokeCellTextUnderline(ctx, text, textLeft, baselineY, underlineKind, ink, fontPx);
+        }
       }
       ctx.restore();
     }

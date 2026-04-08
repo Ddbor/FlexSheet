@@ -1,4 +1,13 @@
-export { Cell, type CellAddress, type CellScalar, type CellStyle } from "./cell.js";
+export {
+  Cell,
+  applyCellStylePatch,
+  type CellAddress,
+  type CellHorizontalAlign,
+  type CellScalar,
+  type CellStyle,
+  type CellStylePatch,
+  type CellVerticalAlign,
+} from "./cell.js";
 export { Workbook, type WorkbookChangeListener } from "./workbook.js";
 export { Worksheet, type WorksheetChangeListener } from "./worksheet.js";
 export {

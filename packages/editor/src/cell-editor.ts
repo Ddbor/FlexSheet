@@ -3,6 +3,18 @@ import type { SheetTheme } from "@flexsheet/theme";
 import { caretOffsetFromClientX } from "./caret-measure.js";
 import { parseEditString } from "./cell-edit-format.js";
 
+const CELL_EDITOR_SCROLLBAR_HIDE_ID = "fs-cell-editor-scrollbar-hide";
+
+function ensureCellEditorScrollbarHideStyle(): void {
+  if (typeof document === "undefined" || document.getElementById(CELL_EDITOR_SCROLLBAR_HIDE_ID) !== null) {
+    return;
+  }
+  const st = document.createElement("style");
+  st.id = CELL_EDITOR_SCROLLBAR_HIDE_ID;
+  st.textContent = `.fs-cell-editor-textarea::-webkit-scrollbar{display:none;width:0;height:0}`;
+  document.head.appendChild(st);
+}
+
 export interface CellRectCanvas {
   readonly x: number;
   readonly y: number;
@@ -66,7 +78,9 @@ export class CellEditor {
       this.host.style.position = "relative";
     }
 
+    ensureCellEditorScrollbarHideStyle();
     this.input = document.createElement("textarea");
+    this.input.className = "fs-cell-editor-textarea";
     this.input.autocomplete = "off";
     this.input.spellcheck = false;
     this.input.style.position = "absolute";
@@ -79,8 +93,9 @@ export class CellEditor {
     this.input.style.paddingBottom = "0";
     this.input.style.font = "13px system-ui, -apple-system, sans-serif";
     this.input.style.borderRadius = "0";
-    this.input.style.whiteSpace = "pre";
+    this.input.style.whiteSpace = "pre-wrap";
     this.input.style.overflow = "hidden";
+    this.input.style.scrollbarWidth = "none";
     this.input.style.resize = "none";
     this.input.style.display = "none";
     this.applyTheme(this.getTheme());
@@ -203,13 +218,10 @@ export class CellEditor {
     this.input.style.left = `${left}px`;
     this.input.style.top = `${top}px`;
     this.input.style.width = `${rect.width}px`;
-    this.input.style.height = `${rect.height}px`;
     this.input.style.minWidth = `${rect.width}px`;
     this.input.style.minHeight = `${rect.height}px`;
-    const borderTotal = 4;
-    const innerH = Math.max(0, rect.height - borderTotal);
-    this.input.style.lineHeight = `${Math.max(16, innerH)}px`;
-    this.applyAutoWidthByContent();
+    this.input.style.lineHeight = "1.25";
+    this.applyAutoSizeByContent();
   }
 
   private getTextStartScreenX(): number {
@@ -242,12 +254,21 @@ export class CellEditor {
   };
 
   private readonly onInputValueChanged = (): void => {
-    this.applyAutoWidthByContent();
+    this.applyAutoSizeByContent();
   };
 
   private readonly onInputKeyDown = (ev: KeyboardEvent): void => {
-    if (ev.key === "Enter" && !ev.altKey) {
+    if (ev.key === "Enter") {
       if (ev.isComposing) {
+        return;
+      }
+      if (ev.ctrlKey || ev.metaKey) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.insertNewlineAtCaret();
+        return;
+      }
+      if (ev.altKey) {
         return;
       }
       ev.preventDefault();
@@ -269,6 +290,17 @@ export class CellEditor {
       this.cancelWithoutCommit();
     }
   };
+
+  private insertNewlineAtCaret(): void {
+    const el = this.input;
+    const start = el.selectionStart ?? 0;
+    const end = el.selectionEnd ?? 0;
+    const v = el.value;
+    el.value = `${v.slice(0, start)}\n${v.slice(end)}`;
+    const pos = start + 1;
+    el.setSelectionRange(pos, pos);
+    this.applyAutoSizeByContent();
+  }
 
   private readonly onInputBlur = (): void => {
     if (this.skipBlurCommit) {
@@ -293,7 +325,7 @@ export class CellEditor {
     this.onEditEnd?.();
   }
 
-  private applyAutoWidthByContent(): void {
+  private applyAutoSizeByContent(): void {
     if (!this.editing) {
       return;
     }
@@ -314,6 +346,14 @@ export class CellEditor {
     }
     const pad = 10;
     const desired = Math.ceil(maxLineW + pad);
-    this.input.style.width = `${Math.max(rect.width, desired)}px`;
+    const el = this.input;
+    el.style.width = `${Math.max(rect.width, desired)}px`;
+    el.style.minHeight = `${rect.height}px`;
+    el.style.height = "auto";
+    const contentH = el.scrollHeight;
+    const minH = rect.height;
+    const targetH = Math.max(minH, contentH);
+    el.style.height = `${targetH}px`;
+    el.style.overflow = "hidden";
   }
 }

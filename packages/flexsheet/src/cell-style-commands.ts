@@ -1,0 +1,163 @@
+import {
+  applyCellStylePatch,
+  normalizeSelectionRange,
+  type CellStyle,
+  type CellStylePatch,
+  type ICommand,
+  type SelectionRange,
+  type Worksheet,
+} from "@flexsheet/core";
+
+interface CellStyleSnapshot {
+  readonly row: number;
+  readonly col: number;
+  readonly before: CellStyle | null;
+  readonly after: CellStyle | null;
+}
+
+const FONT_SIZE_STEPS = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 26, 28, 36, 48, 72] as const;
+
+function nearestFontStepIndex(pt: number): number {
+  if (pt <= FONT_SIZE_STEPS[0]) {
+    return 0;
+  }
+  const last = FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
+  if (pt >= last) {
+    return FONT_SIZE_STEPS.length - 1;
+  }
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < FONT_SIZE_STEPS.length; i++) {
+    const d = Math.abs(FONT_SIZE_STEPS[i] - pt);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
+function steppedFontSizePt(fromPt: number, dir: 1 | -1): number {
+  const i = nearestFontStepIndex(fromPt);
+  const j = dir === 1 ? Math.min(FONT_SIZE_STEPS.length - 1, i + 1) : Math.max(0, i - 1);
+  return FONT_SIZE_STEPS[j];
+}
+
+const MAX_INDENT_LEVEL = 255;
+
+/** 对规范化选区内每个单元格合并样式补丁（支持撤销/重做）。 */
+export class ApplySelectionCellStylePatchCommand implements ICommand {
+  readonly id = "cell.applySelectionStylePatch";
+  readonly label = "设置单元格样式";
+  private readonly snapshots: CellStyleSnapshot[];
+
+  constructor(
+    private readonly sheet: Worksheet,
+    range: SelectionRange,
+    patch: CellStylePatch,
+  ) {
+    const n = normalizeSelectionRange(range);
+    const list: CellStyleSnapshot[] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        const before = sheet.getCell(r, c).style;
+        const beforeClone = before === null ? null : { ...before };
+        const after = applyCellStylePatch(beforeClone, patch);
+        list.push({ row: r, col: c, before: beforeClone, after });
+      }
+    }
+    this.snapshots = list;
+  }
+
+  execute(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.after === null ? null : { ...s.after });
+    }
+  }
+
+  undo(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.before === null ? null : { ...s.before });
+    }
+  }
+}
+
+/** 选区内按 Ribbon 字号阶梯逐格增大或减小字号（每单元格独立参考当前字号，可撤销）。 */
+export class ApplySelectionFontSizeStepCommand implements ICommand {
+  readonly id = "cell.applySelectionFontSizeStep";
+  readonly label = "调整字号";
+  private readonly snapshots: CellStyleSnapshot[];
+
+  constructor(
+    private readonly sheet: Worksheet,
+    range: SelectionRange,
+    dir: 1 | -1,
+  ) {
+    const n = normalizeSelectionRange(range);
+    const list: CellStyleSnapshot[] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        const before = sheet.getCell(r, c).style;
+        const beforeClone = before === null ? null : { ...before };
+        const curPt = beforeClone?.fontSizePt ?? 11;
+        const nextPt = steppedFontSizePt(curPt, dir);
+        const after = applyCellStylePatch(beforeClone, { fontSizePt: nextPt });
+        list.push({ row: r, col: c, before: beforeClone, after });
+      }
+    }
+    this.snapshots = list;
+  }
+
+  execute(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.after === null ? null : { ...s.after });
+    }
+  }
+
+  undo(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.before === null ? null : { ...s.before });
+    }
+  }
+}
+
+/** 选区内逐格增加或减少缩进等级（每单元格独立参考当前等级，可撤销）。 */
+export class ApplySelectionIndentStepCommand implements ICommand {
+  readonly id = "cell.applySelectionIndentStep";
+  readonly label = "调整缩进";
+  private readonly snapshots: CellStyleSnapshot[];
+
+  constructor(
+    private readonly sheet: Worksheet,
+    range: SelectionRange,
+    dir: 1 | -1,
+  ) {
+    const n = normalizeSelectionRange(range);
+    const list: CellStyleSnapshot[] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        const before = sheet.getCell(r, c).style;
+        const beforeClone = before === null ? null : { ...before };
+        const cur = beforeClone?.indentLevel ?? 0;
+        const nextLv = Math.max(0, Math.min(MAX_INDENT_LEVEL, cur + dir));
+        const after = applyCellStylePatch(beforeClone, {
+          indentLevel: nextLv === 0 ? null : nextLv,
+        });
+        list.push({ row: r, col: c, before: beforeClone, after });
+      }
+    }
+    this.snapshots = list;
+  }
+
+  execute(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.after === null ? null : { ...s.after });
+    }
+  }
+
+  undo(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.before === null ? null : { ...s.before });
+    }
+  }
+}

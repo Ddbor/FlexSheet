@@ -26,16 +26,23 @@ import {
 } from "./canvas-renderer-headers.js";
 import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import { drawClipboardMarqueeOverlay } from "./canvas-renderer-clipboard-marquee.js";
-import { drawSelectionOverlay, type SelectionOverlayEnv } from "./canvas-renderer-selection-overlay.js";
+import {
+  drawSelectionOverlay,
+  type SelectionOverlayEnv,
+} from "./canvas-renderer-selection-overlay.js";
 import type {
   CanvasRendererOptions,
   HorizontalScrollMetrics,
   VerticalScrollMetrics,
 } from "./canvas-renderer-types.js";
-export type { CanvasRendererOptions, HorizontalScrollMetrics, VerticalScrollMetrics } from "./canvas-renderer-types.js";
+export type {
+  CanvasRendererOptions,
+  HorizontalScrollMetrics,
+  VerticalScrollMetrics,
+} from "./canvas-renderer-types.js";
 import {
+  buildCellCanvasFont,
   scaledColWidthAt,
-  scaledFontSizePx,
   scaledRowHeightAt,
 } from "./canvas-renderer-utils.js";
 import { buildFrozenLayout, clampScroll, computeScrollLimits } from "./viewport.js";
@@ -307,14 +314,8 @@ export class CanvasRenderer {
 
   getCellEditorFontCss(row: number, col: number): string {
     const sheet = this.workbook.getActiveSheet();
-    let weight = "400";
-    if (sheet !== undefined) {
-      const c = sheet.getCell(row, col);
-      if (c.style?.bold === true) {
-        weight = "600";
-      }
-    }
-    return `${weight} ${scaledFontSizePx(13, this.viewZoom)}px system-ui, -apple-system, sans-serif`;
+    const style = sheet !== undefined ? sheet.getCell(row, col).style : null;
+    return buildCellCanvasFont(style, this.viewZoom);
   }
 
   getCellRectInCanvasPixels(

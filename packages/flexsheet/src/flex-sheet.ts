@@ -4,9 +4,15 @@ import {
   Workbook,
   Workspace,
   Worksheet,
+  type CellStyle,
+  type CellStylePatch,
   type SelectionRange,
 } from "@flexsheet/core";
-import { ClearRegionContentsCommand, recalcWorksheet, SetCellValueCommand } from "@flexsheet/formula";
+import {
+  ClearRegionContentsCommand,
+  recalcWorksheet,
+  SetCellValueCommand,
+} from "@flexsheet/formula";
 import {
   CellEditor,
   EditorPlugin,
@@ -20,18 +26,17 @@ import {
   hitTestCell,
   hitTestHeadingPointer,
   buildFrozenLayout,
+  computeColumnAutoWidth,
+  computeRowAutoHeight,
   computeScrollLimits,
   type CanvasRenderer,
   type HeadingHit,
 } from "@flexsheet/renderer";
 import { ScrollPlugin } from "@flexsheet/scroll";
 import { SelectionRegistryPlugin } from "@flexsheet/selection";
-import {
-  createDefaultDarkTheme,
-  createDefaultLightTheme,
-  type SheetTheme,
-} from "@flexsheet/theme";
+import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
+import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
 import { useClipboard } from "./clipboard-plugin.js";
 import {
   DeleteColsCommand,
@@ -45,6 +50,11 @@ import {
   SetRowHeightCommand,
   SetRowHiddenCommand,
 } from "./sheet-structure-commands.js";
+import {
+  ApplySelectionCellStylePatchCommand,
+  ApplySelectionFontSizeStepCommand,
+  ApplySelectionIndentStepCommand,
+} from "./cell-style-commands.js";
 import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
 import { useUndoRedo } from "./undo-redo-plugin.js";
@@ -122,8 +132,12 @@ export class FlexSheet {
   private dragAutoscrollPrevNow = 0;
   private workbookUnsub: (() => void) | null = null;
   private lastWorkbookActiveIndex = 0;
+  private activeSheetFormattingUnsub: (() => void) | null = null;
+  private readonly formattingChromeListeners = new Set<() => void>();
   /** 复制/剪切后的走马灯虚线框范围（与当前选区独立）。 */
   private clipboardMarqueeRange: SelectionRange | null = null;
+  /** 延迟剪切：已写入剪贴板但源格尚未清空，粘贴匹配内部载荷后再清源区（与 Excel 一致）。 */
+  private pendingClipboardCut: { sheet: Worksheet; range: SelectionRange } | null = null;
 
   constructor(options: FlexSheetOptions) {
     this.formulaBarEl = options.formulaBar ?? null;
@@ -214,6 +228,7 @@ export class FlexSheet {
     this.bindSelectionPointer();
     this.bindSelectionKeyboard();
     this.attachWorkbookForDataDrive();
+    this.rebindActiveSheetFormattingListener();
     this.syncSizeAndDraw();
   }
 
@@ -225,12 +240,14 @@ export class FlexSheet {
       if (cur !== this.lastWorkbookActiveIndex) {
         this.lastWorkbookActiveIndex = cur;
         this.clipboardMarqueeRange = null;
+        this.pendingClipboardCut = null;
         if (this.cellEditor.isEditing()) {
           this.cellEditor.cancelWithoutCommit();
         }
         this.selection.syncWithSheet();
         this.renderer.ensureScrollClamped();
         this.cellEditor.syncLayout();
+        this.rebindActiveSheetFormattingListener();
       }
       this.renderer.requestRedraw();
     });
@@ -240,6 +257,7 @@ export class FlexSheet {
     this.workbookUnsub?.();
     this._workbook = wb;
     this.clipboardMarqueeRange = null;
+    this.pendingClipboardCut = null;
     this.workspace.commands.clear();
     this.attachWorkbookForDataDrive();
     if (wb.sheetCount > 0) {
@@ -255,6 +273,7 @@ export class FlexSheet {
         recalcWorksheet(sh);
       }
     }
+    this.rebindActiveSheetFormattingListener();
     this.renderer.requestRedraw();
   }
 
@@ -288,6 +307,28 @@ export class FlexSheet {
 
   getRenderer(): CanvasRenderer {
     return this.renderer;
+  }
+
+  /** 活动单元格当前样式（无表或越界时为 `null`）。 */
+  getActiveCellStyle(): CellStyle | null {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return null;
+    }
+    const { row, col } = this.selection.getActiveCell();
+    return sheet.getCell(row, col).style;
+  }
+
+  /**
+   * 选区变化、活动表切换、当前表数据变更时会通知（用于 Ribbon 字体组等与活动格样式同步）。
+   * 注册后会立即回调一次。
+   */
+  subscribeFormattingChrome(listener: () => void): () => void {
+    this.formattingChromeListeners.add(listener);
+    listener();
+    return () => {
+      this.formattingChromeListeners.delete(listener);
+    };
   }
 
   /** 是否处于单元格内联编辑态（供右键菜单等扩展判断）。 */
@@ -343,14 +384,18 @@ export class FlexSheet {
   insertCellsShiftRight(row: number, col: number, count = 1): void {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) return;
-    this.workspace.commands.execute(new InsertCellsShiftRightCommand(sheet, this.selection, row, col, count));
+    this.workspace.commands.execute(
+      new InsertCellsShiftRightCommand(sheet, this.selection, row, col, count),
+    );
     this.refresh();
   }
 
   insertCellsShiftDown(row: number, col: number, count = 1): void {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) return;
-    this.workspace.commands.execute(new InsertCellsShiftDownCommand(sheet, this.selection, row, col, count));
+    this.workspace.commands.execute(
+      new InsertCellsShiftDownCommand(sheet, this.selection, row, col, count),
+    );
     this.refresh();
   }
 
@@ -379,6 +424,45 @@ export class FlexSheet {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) return;
     this.workspace.commands.execute(new SetColHiddenCommand(sheet, col, hidden));
+    this.refresh();
+  }
+
+  /**
+   * 对当前选区合并单元格样式补丁（可撤销）。
+   * `CellStylePatch` 中字段为 `null` 时表示清除该项。
+   */
+  applySelectionStylePatch(patch: CellStylePatch): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const range = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new ApplySelectionCellStylePatchCommand(sheet, range, patch));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** 选区内按字号阶梯增大（`1`）或减小（`-1`）字号，每格相对当前字号，可撤销。 */
+  applySelectionFontSizeStep(dir: 1 | -1): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const range = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new ApplySelectionFontSizeStepCommand(sheet, range, dir));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** 选区内逐格增加（`1`）或减少（`-1`）缩进等级，可撤销。 */
+  applySelectionIndentStep(dir: 1 | -1): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const range = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new ApplySelectionIndentStepCommand(sheet, range, dir));
+    this.cellEditor.syncLayout();
     this.refresh();
   }
 
@@ -431,21 +515,79 @@ export class FlexSheet {
    * 不改变选区模型，仅叠加绘制。
    */
   setClipboardMarquee(range: SelectionRange | null): void {
-    const next = range === null ? null : normalizeSelectionRange(range);
-    this.clipboardMarqueeRange = next;
+    if (range === null) {
+      this.clipboardMarqueeRange = null;
+      this.pendingClipboardCut = null;
+      this.renderer.requestRedraw();
+      return;
+    }
+    this.clipboardMarqueeRange = normalizeSelectionRange(range);
     this.renderer.requestRedraw();
   }
 
   /**
-   * 关闭走马灯（若有）；返回是否此前正在显示（便于 Esc 时决定是否 `preventDefault`）。
+   * 关闭走马灯并取消延迟剪切（若有）；返回是否此前存在走马灯或待完成剪切（便于 Esc 时 `preventDefault`）。
    */
   clearClipboardMarquee(): boolean {
-    if (this.clipboardMarqueeRange === null) {
+    const had = this.clipboardMarqueeRange !== null || this.pendingClipboardCut !== null;
+    if (!had) {
       return false;
     }
     this.clipboardMarqueeRange = null;
+    this.pendingClipboardCut = null;
     this.renderer.requestRedraw();
     return true;
+  }
+
+  setPendingClipboardCut(sheet: Worksheet, range: SelectionRange): void {
+    this.pendingClipboardCut = { sheet, range: normalizeSelectionRange(range) };
+  }
+
+  clearPendingClipboardCut(): void {
+    this.pendingClipboardCut = null;
+  }
+
+  getPendingClipboardCut(): { sheet: Worksheet; range: SelectionRange } | null {
+    return this.pendingClipboardCut;
+  }
+
+  /** 复制当前选区（与 Ctrl/Cmd+C 一致）；单元格内联编辑时不执行。 */
+  async clipboardCopy(): Promise<void> {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    await runClipboardCopy(this, sheet);
+  }
+
+  /**
+   * 延迟剪切（与 Excel / Ctrl+X 一致）：写入剪贴板并显示走马灯，源单元格在成功「完成移动」粘贴前仍保留；
+   * 复制、Esc、换表、进入编辑等会取消待剪切；内联编辑时不执行。
+   */
+  async clipboardCut(): Promise<void> {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    await runClipboardCut(this, sheet);
+  }
+
+  /** 粘贴到以活动单元格为左上角（与 Ctrl/Cmd+V 一致）；内联编辑时不执行。 */
+  async clipboardPaste(): Promise<void> {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    await runClipboardPaste(this, sheet);
   }
 
   destroy(): void {
@@ -453,6 +595,9 @@ export class FlexSheet {
     this.detachDocumentDragListeners();
     this.renderer.cancelPendingRedraw();
     this.hideResizePreviewLine();
+    this.activeSheetFormattingUnsub?.();
+    this.activeSheetFormattingUnsub = null;
+    this.formattingChromeListeners.clear();
     this.workbookUnsub?.();
     this.workbookUnsub = null;
     this.canvas.removeEventListener("pointerdown", this.onPointerDown);
@@ -535,13 +680,16 @@ export class FlexSheet {
         this.hideResizePreviewLine();
         this.dragPointerId = null;
         this.detachDocumentDragListeners();
-        this.applyPointerCursor("default");
+        this.clearResizeDragBodyCursor();
         if (ev !== undefined) {
+          this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
           try {
             this.canvas.releasePointerCapture(ev.pointerId);
           } catch {
             /* ignore */
           }
+        } else {
+          this.applyPointerCursor("default");
         }
         this.selection.syncWithSheet();
         this.afterSelectionChanged();
@@ -577,13 +725,18 @@ export class FlexSheet {
     if (this.resizing || this.dragSelecting) {
       return;
     }
-    const headingHit = this.hitTestHeadingFromClient(ev.clientX, ev.clientY);
+    this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
+  };
+
+  /** 行列标题区：与悬停一致（分割线 col-resize / row-resize，其余 default）。 */
+  private syncHeadingCursorFromClient(clientX: number, clientY: number): void {
+    const headingHit = this.hitTestHeadingFromClient(clientX, clientY);
     if (headingHit === null) {
       this.hoverResizeKind = null;
       this.applyPointerCursor("default");
       return;
     }
-    const resizeHit = this.tryHitResizeHandle(headingHit, ev.clientX, ev.clientY);
+    const resizeHit = this.tryHitResizeHandle(headingHit, clientX, clientY);
     this.hoverResizeKind = resizeHit?.kind ?? null;
     if (this.hoverResizeKind === "col") {
       this.applyPointerCursor("col-resize");
@@ -592,7 +745,7 @@ export class FlexSheet {
     } else {
       this.applyPointerCursor("default");
     }
-  };
+  }
 
   private readonly onCanvasPointerLeave = (): void => {
     if (this.resizing || this.dragSelecting) {
@@ -683,6 +836,31 @@ export class FlexSheet {
     if (this.cellEditor.isEditing()) {
       return;
     }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+
+    const headingHit = this.hitTestHeadingFromClient(ev.clientX, ev.clientY);
+    if (headingHit !== null) {
+      const resizeHit = this.tryHitResizeHandle(headingHit, ev.clientX, ev.clientY);
+      if (resizeHit !== null) {
+        const z = this.renderer.getViewZoom();
+        if (resizeHit.kind === "col") {
+          const w = computeColumnAutoWidth(sheet, resizeHit.index, z);
+          this.workspace.commands.execute(new SetColWidthCommand(sheet, resizeHit.index, w));
+        } else {
+          const h = computeRowAutoHeight(sheet, resizeHit.index, z);
+          this.workspace.commands.execute(new SetRowHeightCommand(sheet, resizeHit.index, h));
+        }
+        this.refresh();
+        this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
+        return;
+      }
+      this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
+      return;
+    }
+
     const hit = this.hitTestClient(ev.clientX, ev.clientY);
     if (hit === null) {
       return;
@@ -718,6 +896,7 @@ export class FlexSheet {
       const expand = ev.shiftKey || ev.ctrlKey || ev.metaKey;
       this.applyHeadingHitSelection(headingHit, sheet, expand);
       this.afterSelectionChanged();
+      this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
       return;
     }
 
@@ -787,7 +966,9 @@ export class FlexSheet {
     this.resizingOriginSize = kind === "col" ? sheet.getColWidth(index) : sheet.getRowHeight(index);
     this.resizingCurrentSize = this.resizingOriginSize;
     this.updateResizePreviewLine(kind, index, this.resizingCurrentSize);
-    this.applyPointerCursor(kind === "col" ? "ew-resize" : "ns-resize");
+    const resizeCursor = kind === "col" ? "col-resize" : "row-resize";
+    this.applyPointerCursor(resizeCursor);
+    this.setResizeDragBodyCursor(kind);
     this.dragPointerId = ev.pointerId;
     this.attachDocumentDragListeners();
     try {
@@ -799,6 +980,18 @@ export class FlexSheet {
 
   private applyPointerCursor(cursor: string): void {
     this.canvas.style.cursor = cursor;
+  }
+
+  private setResizeDragBodyCursor(kind: "col" | "row"): void {
+    if (typeof document !== "undefined") {
+      document.body.style.cursor = kind === "col" ? "col-resize" : "row-resize";
+    }
+  }
+
+  private clearResizeDragBodyCursor(): void {
+    if (typeof document !== "undefined") {
+      document.body.style.removeProperty("cursor");
+    }
   }
 
   private ensureResizePreviewLine(): HTMLDivElement {
@@ -879,6 +1072,12 @@ export class FlexSheet {
       this.resizingCurrentSize = next;
     }
     this.updateResizePreviewLine(this.resizingKind, this.resizingIndex, this.resizingCurrentSize);
+    const k = this.resizingKind;
+    if (k === "col") {
+      this.applyPointerCursor("col-resize");
+    } else if (k === "row") {
+      this.applyPointerCursor("row-resize");
+    }
   }
 
   private readonly onKeyDown = (ev: KeyboardEvent): void => {
@@ -1131,6 +1330,27 @@ export class FlexSheet {
     }
     this.cellEditor.syncLayout();
     this.renderer.requestRedraw();
+    this.notifyFormattingChrome();
+  }
+
+  private notifyFormattingChrome(): void {
+    for (const fn of this.formattingChromeListeners) {
+      fn();
+    }
+  }
+
+  private rebindActiveSheetFormattingListener(): void {
+    this.activeSheetFormattingUnsub?.();
+    this.activeSheetFormattingUnsub = null;
+    const sh = this.workbook.getActiveSheet();
+    if (sh === undefined) {
+      this.notifyFormattingChrome();
+      return;
+    }
+    this.activeSheetFormattingUnsub = sh.subscribe(() => {
+      this.notifyFormattingChrome();
+    });
+    this.notifyFormattingChrome();
   }
 
   private cancelDragAutoscrollRaf(): void {
@@ -1153,7 +1373,10 @@ export class FlexSheet {
   /**
    * 边沿自动滚动：速度随进入条带的深度线性增加，抵住滚动极限时速度为 0（停止续帧）。
    */
-  private computeDragAutoscrollPixelsPerSec(clientX: number, clientY: number): {
+  private computeDragAutoscrollPixelsPerSec(
+    clientX: number,
+    clientY: number,
+  ): {
     sx: number;
     sy: number;
   } {

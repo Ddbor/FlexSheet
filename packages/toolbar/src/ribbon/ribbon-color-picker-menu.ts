@@ -245,8 +245,10 @@ export function mountRibbonColorPickerMenu(
   moreBtn.appendChild(moreLab);
   moreBtn.addEventListener("click", (ev) => {
     ev.stopPropagation();
-    emit(ids.more, tab);
     closeMenu();
+    queueMicrotask(() => {
+      emit(ids.more, tab);
+    });
   });
   menu.appendChild(moreBtn);
 

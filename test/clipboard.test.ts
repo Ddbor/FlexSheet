@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { Worksheet } from "@flexsheet/core";
 import { recalcWorksheet } from "@flexsheet/formula";
 
-import { CutClearRegionCommand, PasteRegionCommand } from "flexsheet";
+import {
+  CutClearRegionCommand,
+  CutRangeExceptRectCommand,
+  PasteRegionCommand,
+} from "flexsheet";
 import { parseTsv, serializeTsv } from "../packages/flexsheet/src/clipboard/tsv-io.js";
 
 describe("clipboard TSV", () => {
@@ -55,6 +59,33 @@ describe("PasteRegionCommand + internal styles", () => {
     const cmd = new PasteRegionCommand(sheet, 0, 0, [["x"]], styles);
     cmd.execute();
     expect(sheet.getCell(0, 0).style).toEqual({ bold: true, fgArgb: "FFFF0000" });
+  });
+});
+
+describe("CutRangeExceptRectCommand", () => {
+  it("clears cut cells outside paste rectangle only", () => {
+    const sheet = new Worksheet("s", 3, 3);
+    sheet.setCellValue(0, 0, "a");
+    sheet.setCellValue(0, 1, "b");
+    sheet.setCellValue(1, 0, "c");
+    sheet.setCellValue(1, 1, "d");
+    recalcWorksheet(sheet);
+    const cmd = new CutRangeExceptRectCommand(
+      sheet,
+      { startRow: 0, startCol: 0, endRow: 1, endCol: 1 },
+      1,
+      1,
+      1,
+      1,
+    );
+    cmd.execute();
+    expect(sheet.getCell(0, 0).value).toBeNull();
+    expect(sheet.getCell(0, 1).value).toBeNull();
+    expect(sheet.getCell(1, 0).value).toBeNull();
+    expect(sheet.getCell(1, 1).value).toBe("d");
+    cmd.undo();
+    expect(sheet.getCell(0, 0).value).toBe("a");
+    expect(sheet.getCell(1, 1).value).toBe("d");
   });
 });
 

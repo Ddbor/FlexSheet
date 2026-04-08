@@ -39,6 +39,7 @@ import {
 } from "../font-family-items.js";
 import { mountFontBorderMenu } from "../font-border-menu.js";
 import { mountRibbonColorPickerMenu } from "../ribbon-color-picker-menu.js";
+import type { RibbonHomeFontChromeState } from "../ribbon-font-chrome.js";
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { RibbonTabId } from "../ribbon-types.js";
 
@@ -46,6 +47,8 @@ const TAB: RibbonTabId = "home";
 
 export interface HomeTabHandles {
   syncUndoRedo(canUndo: boolean, canRedo: boolean): void;
+  /** 与活动单元格字体样式同步（字体名、字号、加粗/斜体/下划线状态）。 */
+  syncFontChrome(state: RibbonHomeFontChromeState): void;
 }
 
 export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandles {
@@ -55,6 +58,7 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
 
   // 撤销（剪贴板左侧：后退 / 撤销堆、前进 / 重做堆）
   const undoRedo = mountUndoGroup(inner, emit);
+  let syncFontChrome: HomeTabHandles["syncFontChrome"] = (): void => {};
 
   // 剪贴板
   {
@@ -107,47 +111,45 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
     content.classList.add("fs-ribbon-font");
     const rowTop = document.createElement("div");
     rowTop.className = "fs-ribbon-stack__row fs-ribbon-stack__row--gap";
-    rowTop.appendChild(
-      createToolbarDropdown(
-        {
-          id: "home.font.family",
-          tab: TAB,
-          label: "微软雅黑",
-          wide: true,
-          menuClassName: "fs-dd__menu--font-list",
-          initialLabelFontFamily: RIBBON_FONT_FAMILY_DEFAULT_PREVIEW,
-          items: RIBBON_FONT_FAMILY_ITEMS,
-        },
-        emit,
-      ).element,
+    const fontFamilyDd = createToolbarDropdown(
+      {
+        id: "home.font.family",
+        tab: TAB,
+        label: "微软雅黑",
+        wide: true,
+        menuClassName: "fs-dd__menu--font-list",
+        initialLabelFontFamily: RIBBON_FONT_FAMILY_DEFAULT_PREVIEW,
+        items: RIBBON_FONT_FAMILY_ITEMS,
+      },
+      emit,
     );
-    rowTop.appendChild(
-      createToolbarDropdown(
-        {
-          id: "home.font.size",
-          tab: TAB,
-          label: "11",
-          items: [
-            { id: "home.font.size.8", label: "8" },
-            { id: "home.font.size.9", label: "9" },
-            { id: "home.font.size.10", label: "10" },
-            { id: "home.font.size.11", label: "11" },
-            { id: "home.font.size.12", label: "12" },
-            { id: "home.font.size.14", label: "14" },
-            { id: "home.font.size.16", label: "16" },
-            { id: "home.font.size.18", label: "18" },
-            { id: "home.font.size.20", label: "20" },
-            { id: "home.font.size.24", label: "24" },
-            { id: "home.font.size.26", label: "26" },
-            { id: "home.font.size.28", label: "28" },
-            { id: "home.font.size.36", label: "36" },
-            { id: "home.font.size.48", label: "48" },
-            { id: "home.font.size.72", label: "72" },
-          ],
-        },
-        emit,
-      ).element,
+    rowTop.appendChild(fontFamilyDd.element);
+    const fontSizeDd = createToolbarDropdown(
+      {
+        id: "home.font.size",
+        tab: TAB,
+        label: "11",
+        items: [
+          { id: "home.font.size.8", label: "8" },
+          { id: "home.font.size.9", label: "9" },
+          { id: "home.font.size.10", label: "10" },
+          { id: "home.font.size.11", label: "11" },
+          { id: "home.font.size.12", label: "12" },
+          { id: "home.font.size.14", label: "14" },
+          { id: "home.font.size.16", label: "16" },
+          { id: "home.font.size.18", label: "18" },
+          { id: "home.font.size.20", label: "20" },
+          { id: "home.font.size.24", label: "24" },
+          { id: "home.font.size.26", label: "26" },
+          { id: "home.font.size.28", label: "28" },
+          { id: "home.font.size.36", label: "36" },
+          { id: "home.font.size.48", label: "48" },
+          { id: "home.font.size.72", label: "72" },
+        ],
+      },
+      emit,
     );
+    rowTop.appendChild(fontSizeDd.element);
     rowTop.appendChild(
       createToolbarButton(
         { id: "home.font.grow", tab: TAB, label: "", icon: iconFontGrow(), title: "增大字号" },
@@ -162,25 +164,41 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
     );
     const rowActions = document.createElement("div");
     rowActions.className = "fs-ribbon-font__grid";
-    rowActions.appendChild(createToolbarButton({ id: "home.font.bold", tab: TAB, label: "", icon: iconBold() }, emit).element);
-    rowActions.appendChild(createToolbarButton({ id: "home.font.italic", tab: TAB, label: "", icon: iconItalic() }, emit).element);
-    rowActions.appendChild(
-      createToolbarButton({ id: "home.font.underline", tab: TAB, label: "", icon: iconUnderline() }, emit).element,
+    const boldBtn = createToolbarButton(
+      { id: "home.font.bold", tab: TAB, label: "", icon: iconBold() },
+      emit,
     );
-    rowActions.appendChild(
-      createToolbarButton(
-        {
-          id: "home.font.doubleUnderline",
-          tab: TAB,
-          label: "",
-          icon: iconDoubleUnderline(),
-          title: "双下划线",
-        },
-        emit,
-      ).element,
+    const italicBtn = createToolbarButton(
+      { id: "home.font.italic", tab: TAB, label: "", icon: iconItalic() },
+      emit,
     );
+    const underlineBtn = createToolbarButton(
+      { id: "home.font.underline", tab: TAB, label: "", icon: iconUnderline() },
+      emit,
+    );
+    const doubleUnderlineBtn = createToolbarButton(
+      {
+        id: "home.font.doubleUnderline",
+        tab: TAB,
+        label: "",
+        icon: iconDoubleUnderline(),
+        title: "双下划线",
+      },
+      emit,
+    );
+    rowActions.appendChild(boldBtn.element);
+    rowActions.appendChild(italicBtn.element);
+    rowActions.appendChild(underlineBtn.element);
+    rowActions.appendChild(doubleUnderlineBtn.element);
     const border = createToolbarButton(
-      { id: "home.font.border", tab: TAB, label: "", icon: iconBorderAll(), splitDropdown: true, title: "边框" },
+      {
+        id: "home.font.border",
+        tab: TAB,
+        label: "",
+        icon: iconBorderAll(),
+        splitDropdown: true,
+        title: "边框",
+      },
       emit,
     );
     border.element.id = "fs-ribbon-home-font-border";
@@ -198,7 +216,11 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
       emit,
     );
     fill.element.id = "fs-ribbon-home-font-fill";
+    fill.element.classList.add("fs-tb-btn--colorbar");
     mountRibbonColorPickerMenu(fill.element, emit, TAB, "fill");
+    const fillColorBar = document.createElement("span");
+    fillColorBar.className = "fs-tb-btn__colorbar";
+    fill.element.appendChild(fillColorBar);
     rowActions.appendChild(fill.element);
     const fontColor = createToolbarButton(
       {
@@ -212,7 +234,11 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
       emit,
     );
     fontColor.element.id = "fs-ribbon-home-font-color";
+    fontColor.element.classList.add("fs-tb-btn--colorbar");
     mountRibbonColorPickerMenu(fontColor.element, emit, TAB, "font");
+    const fontColorBar = document.createElement("span");
+    fontColorBar.className = "fs-tb-btn__colorbar";
+    fontColor.element.appendChild(fontColorBar);
     rowActions.appendChild(fontColor.element);
     const stack = document.createElement("div");
     stack.className = "fs-ribbon-stack";
@@ -220,6 +246,20 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
     stack.appendChild(rowActions);
     content.appendChild(stack);
     inner.appendChild(root);
+
+    syncFontChrome = (state: RibbonHomeFontChromeState): void => {
+      fontFamilyDd.setLabel(state.fontLabel, state.fontPreviewCss);
+      fontSizeDd.setLabel(state.sizeLabel);
+      boldBtn.setPressed(state.boldPressed);
+      italicBtn.setPressed(state.italicPressed);
+      underlineBtn.setPressed(state.underlinePressed);
+      doubleUnderlineBtn.setPressed(state.doubleUnderlinePressed);
+      const emptyFill = state.fillStripeCss === null;
+      fillColorBar.classList.toggle("fs-tb-btn__colorbar--empty", emptyFill);
+      fillColorBar.style.backgroundColor = emptyFill ? "" : state.fillStripeCss;
+      fontColorBar.classList.remove("fs-tb-btn__colorbar--empty");
+      fontColorBar.style.backgroundColor = state.fontStripeCss;
+    };
   }
 
   // 对齐方式
@@ -232,19 +272,41 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
 
     const leftGrid = document.createElement("div");
     leftGrid.className = "fs-ribbon-align__grid";
-    leftGrid.appendChild(createToolbarButton({ id: "home.align.top", tab: TAB, label: "", icon: iconAlignTop() }, emit).element);
     leftGrid.appendChild(
-      createToolbarButton({ id: "home.align.middle", tab: TAB, label: "", icon: iconAlignMiddle() }, emit).element,
+      createToolbarButton(
+        { id: "home.align.top", tab: TAB, label: "", icon: iconAlignTop(), title: "顶端对齐" },
+        emit,
+      ).element,
     );
     leftGrid.appendChild(
-      createToolbarButton({ id: "home.align.bottom", tab: TAB, label: "", icon: iconAlignBottom() }, emit).element,
+      createToolbarButton(
+        { id: "home.align.middle", tab: TAB, label: "", icon: iconAlignMiddle(), title: "垂直居中" },
+        emit,
+      ).element,
     );
-    leftGrid.appendChild(createToolbarButton({ id: "home.align.left", tab: TAB, label: "", icon: iconAlignLeft() }, emit).element);
     leftGrid.appendChild(
-      createToolbarButton({ id: "home.align.center", tab: TAB, label: "", icon: iconAlignCenter() }, emit).element,
+      createToolbarButton(
+        { id: "home.align.bottom", tab: TAB, label: "", icon: iconAlignBottom(), title: "底端对齐" },
+        emit,
+      ).element,
     );
     leftGrid.appendChild(
-      createToolbarButton({ id: "home.align.right", tab: TAB, label: "", icon: iconAlignRight() }, emit).element,
+      createToolbarButton(
+        { id: "home.align.left", tab: TAB, label: "", icon: iconAlignLeft(), title: "左对齐" },
+        emit,
+      ).element,
+    );
+    leftGrid.appendChild(
+      createToolbarButton(
+        { id: "home.align.center", tab: TAB, label: "", icon: iconAlignCenter(), title: "居中" },
+        emit,
+      ).element,
+    );
+    leftGrid.appendChild(
+      createToolbarButton(
+        { id: "home.align.right", tab: TAB, label: "", icon: iconAlignRight(), title: "右对齐" },
+        emit,
+      ).element,
     );
     leftCol.appendChild(leftGrid);
 
@@ -279,7 +341,16 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
     const rightStack = document.createElement("div");
     rightStack.className = "fs-ribbon-align__right";
     rightStack.appendChild(
-      createToolbarButton({ id: "home.align.wrap", tab: TAB, label: "自动换行", icon: iconWrapText() }, emit).element,
+      createToolbarButton(
+        {
+          id: "home.align.wrap",
+          tab: TAB,
+          label: "自动换行",
+          icon: iconWrapText(),
+          title: "自动换行",
+        },
+        emit,
+      ).element,
     );
     const merge = createToolbarButton(
       {
@@ -316,10 +387,16 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
     inner.appendChild(root);
   }
 
-  return undoRedo;
+  return {
+    syncUndoRedo: undoRedo.syncUndoRedo,
+    syncFontChrome,
+  };
 }
 
-function mountUndoGroup(inner: HTMLElement, emit: RibbonEmit): HomeTabHandles {
+function mountUndoGroup(
+  inner: HTMLElement,
+  emit: RibbonEmit,
+): Pick<HomeTabHandles, "syncUndoRedo"> {
   const { root, content } = createRibbonGroup("撤销");
   content.classList.add("fs-ribbon-undo");
   const back = createToolbarButton(

@@ -26,7 +26,11 @@ export interface RibbonEmit {
 export function createToolbarButton(
   options: ToolbarButtonOptions,
   emit: RibbonEmit,
-): { readonly element: HTMLButtonElement; setDisabled(v: boolean): void } {
+): {
+  readonly element: HTMLButtonElement;
+  setDisabled(v: boolean): void;
+  setPressed(pressed: boolean): void;
+} {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className =
@@ -93,6 +97,14 @@ export function createToolbarButton(
     element: btn,
     setDisabled(v: boolean): void {
       btn.disabled = v;
+    },
+    /** 用于加粗/斜体等切换按钮，与 `.fs-tb-btn[aria-pressed="true"]` 样式一致。 */
+    setPressed(pressed: boolean): void {
+      if (pressed) {
+        btn.setAttribute("aria-pressed", "true");
+      } else {
+        btn.removeAttribute("aria-pressed");
+      }
     },
   };
 }

@@ -21,3 +21,4 @@ export {
   type ViewportScrollLimits,
   type VisibleScrollRange,
 } from "./viewport.js";
+export { computeColumnAutoWidth, computeRowAutoHeight } from "./cell-auto-fit.js";

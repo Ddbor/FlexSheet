@@ -29,6 +29,10 @@ function styleSignature(st: CellStyle | null | undefined): string {
     b: st.bold === true,
     fg: st.fgArgb ?? "",
     fill: st.fillArgb ?? "",
+    ha: st.hAlign ?? "",
+    va: st.vAlign ?? "",
+    ind: st.indentLevel ?? 0,
+    wx: st.wrapText === true,
   });
 }
 
@@ -44,6 +48,10 @@ interface StyleSignaturePayload {
   readonly b: boolean;
   readonly fg: string;
   readonly fill: string;
+  readonly ha: string;
+  readonly va: string;
+  readonly ind?: number;
+  readonly wx?: boolean;
 }
 
 function minimalStyleTable(): StyleTable {
@@ -107,9 +115,36 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
 
     const applyFont = needFont ? ` applyFont="1"` : "";
     const applyFill = st.fill !== "" ? ` applyFill="1"` : "";
-    cellXfsXml.push(
-      `<xf numFmtId="0" fontId="${fontId}" fillId="${fillId}" borderId="0" xfId="0"${applyFont}${applyFill}/>`,
-    );
+    const alignAttrs: string[] = [];
+    if (st.ha === "left" || st.ha === "center" || st.ha === "right") {
+      alignAttrs.push(`horizontal="${st.ha}"`);
+    }
+    if (st.va === "top") {
+      alignAttrs.push(`vertical="top"`);
+    } else if (st.va === "middle") {
+      alignAttrs.push(`vertical="center"`);
+    } else     if (st.va === "bottom") {
+      alignAttrs.push(`vertical="bottom"`);
+    }
+    const ind = st.ind ?? 0;
+    if (ind > 0) {
+      alignAttrs.push(`indent="${Math.min(255, Math.round(ind))}"`);
+    }
+    if (st.wx === true) {
+      alignAttrs.push(`wrapText="1"`);
+    }
+    const alignInner =
+      alignAttrs.length > 0 ? `<alignment ${alignAttrs.join(" ")}/>` : "";
+    const applyAlignment = alignInner !== "" ? ` applyAlignment="1"` : "";
+    if (alignInner === "") {
+      cellXfsXml.push(
+        `<xf numFmtId="0" fontId="${fontId}" fillId="${fillId}" borderId="0" xfId="0"${applyFont}${applyFill}/>`,
+      );
+    } else {
+      cellXfsXml.push(
+        `<xf numFmtId="0" fontId="${fontId}" fillId="${fillId}" borderId="0" xfId="0"${applyFont}${applyFill}${applyAlignment}>${alignInner}</xf>`,
+      );
+    }
     xfBySig.set(sig, nextXf++);
   };
 

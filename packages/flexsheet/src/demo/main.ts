@@ -1,6 +1,7 @@
 import { FlexSheet, mountExcelBottomBar, mountGridVerticalScrollbar } from "../index.js";
 import {
   applyRibbonCommandToFlexSheet,
+  cellStyleToRibbonHomeFontChrome,
   FlexSheetRibbon,
   ViewRibbonController,
   type HomeTabHandles,
@@ -49,6 +50,13 @@ const syncRibbonUndoRedo = (): void => {
   homeHandles?.syncUndoRedo(flexSheet.canUndo(), flexSheet.canRedo());
 };
 
+const syncRibbonFontChrome = (): void => {
+  if (homeHandles === null) {
+    return;
+  }
+  homeHandles.syncFontChrome(cellStyleToRibbonHomeFontChrome(flexSheet.getActiveCellStyle()));
+};
+
 new FlexSheetRibbon({
   container: toolbar,
   backstageCoverRoot: chromeRoot,
@@ -79,3 +87,4 @@ new FlexSheetRibbon({
 });
 
 flexSheet.subscribeUndoRedo(syncRibbonUndoRedo);
+flexSheet.subscribeFormattingChrome(syncRibbonFontChrome);

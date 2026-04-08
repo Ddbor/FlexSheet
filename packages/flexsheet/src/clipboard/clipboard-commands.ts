@@ -45,6 +45,21 @@ function normalizePasteRows(values: readonly (readonly string[])[]): string[][] 
   });
 }
 
+/** 与 `PasteRegionCommand` 一致：按表边界裁剪后的粘贴占用行/列数。 */
+export function getPasteClippedRect(
+  sheet: Worksheet,
+  startRow: number,
+  startCol: number,
+  values: readonly (readonly string[])[],
+): { h: number; w: number } {
+  const grid = normalizePasteRows(values);
+  const pasteRows = grid.length;
+  const pasteCols = pasteRows > 0 ? grid[0]!.length : 0;
+  const h = Math.min(pasteRows, Math.max(0, sheet.rowCount - startRow));
+  const w = Math.min(pasteCols, Math.max(0, sheet.colCount - startCol));
+  return { h, w };
+}
+
 /**
  * 从活动格左上角粘贴矩形；execute 前根据表边界裁剪行列。
  */
@@ -72,14 +87,16 @@ export class PasteRegionCommand implements ICommand {
     this.startRow = startRow;
     this.startCol = startCol;
     this.values = normalizePasteRows(values);
-    const pasteRows = this.values.length;
-    const pasteCols = pasteRows > 0 ? this.values[0]!.length : 0;
-    this.h = Math.min(pasteRows, Math.max(0, sheet.rowCount - startRow));
-    this.w = Math.min(pasteCols, Math.max(0, sheet.colCount - startCol));
+    const dim = getPasteClippedRect(sheet, startRow, startCol, values);
+    this.h = dim.h;
+    this.w = dim.w;
 
     let styleGrid: readonly (readonly (CellStyle | null)[])[] | null = styles;
     if (styleGrid !== null) {
-      if (styleGrid.length !== pasteRows || styleGrid.some((r, ri) => r.length !== this.values[ri]!.length)) {
+      if (
+        styleGrid.length !== this.values.length ||
+        styleGrid.some((r, ri) => r.length !== this.values[ri]!.length)
+      ) {
         styleGrid = null;
       }
     }
@@ -126,7 +143,68 @@ export class PasteRegionCommand implements ICommand {
   }
 }
 
-/** 剪切：清空选区内单元格的值与样式（先复制再执行本命令）。 */
+/**
+ * 延迟剪切完成后：清空「剪切源」矩形内、且落在粘贴占用矩形之外的单元格
+ * （避免与 `PasteRegionCommand` 重叠区域被误清空）。
+ */
+export class CutRangeExceptRectCommand implements ICommand {
+  readonly id = "clipboard.cutDeferredClear";
+  readonly label = "剪切后清空源区";
+
+  private readonly sheet: Worksheet;
+  private readonly before: CellFullSnapshot[];
+
+  constructor(
+    sheet: Worksheet,
+    cutRange: SelectionRange,
+    pasteTop: number,
+    pasteLeft: number,
+    pasteH: number,
+    pasteW: number,
+  ) {
+    this.sheet = sheet;
+    const n = normalizeSelectionRange(cutRange);
+    const pr1 = pasteTop + pasteH - 1;
+    const pc1 = pasteLeft + pasteW - 1;
+    const snaps: CellFullSnapshot[] = [];
+    const hasPaste = pasteH > 0 && pasteW > 0;
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        const insidePaste =
+          hasPaste && r >= pasteTop && r <= pr1 && c >= pasteLeft && c <= pc1;
+        if (!insidePaste) {
+          snaps.push(takeSnapshot(sheet, r, c));
+        }
+      }
+    }
+    this.before = snaps;
+  }
+
+  execute(): void {
+    if (this.before.length === 0) {
+      return;
+    }
+    const sheet = this.sheet;
+    sheet.batch(() => {
+      for (const s of this.before) {
+        sheet.setCellValue(s.row, s.col, null);
+        sheet.setCellStyle(s.row, s.col, null);
+      }
+    });
+    recalcWorksheet(sheet);
+  }
+
+  undo(): void {
+    this.sheet.batch(() => {
+      for (const s of this.before) {
+        applySnapshot(this.sheet, s);
+      }
+    });
+    recalcWorksheet(this.sheet);
+  }
+}
+
+/** 剪切：立即清空选区内单元格的值与样式（仍可用于右键等需即时清空的场景）。 */
 export class CutClearRegionCommand implements ICommand {
   readonly id = "clipboard.cut";
   readonly label = "剪切";

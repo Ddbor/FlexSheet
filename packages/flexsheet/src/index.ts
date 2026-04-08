@@ -8,11 +8,13 @@ export {
   Cell,
   Workbook,
   Worksheet,
+  applyCellStylePatch,
   normalizeSelectionRange,
   selectionRangeContains,
   type CellAddress,
   type CellScalar,
   type CellStyle,
+  type CellStylePatch,
   type SelectionPaintSnapshot,
   type SelectionRange,
   type WorkbookChangeListener,
@@ -79,13 +81,14 @@ export {
   type SheetChromeGuardPluginOptions,
 } from "./sheet-chrome-guard-plugin.js";
 
-export {
-  ClipboardPlugin,
-  useClipboard,
-  type ClipboardPluginOptions,
-} from "./clipboard-plugin.js";
+export { ClipboardPlugin, useClipboard, type ClipboardPluginOptions } from "./clipboard-plugin.js";
 
-export { CutClearRegionCommand, PasteRegionCommand } from "./clipboard/clipboard-commands.js";
+export {
+  CutClearRegionCommand,
+  CutRangeExceptRectCommand,
+  PasteRegionCommand,
+  getPasteClippedRect,
+} from "./clipboard/clipboard-commands.js";
 export {
   DeleteColsCommand,
   DeleteRowsCommand,
@@ -96,6 +99,12 @@ export {
   SetRowHeightCommand,
   SetRowHiddenCommand,
 } from "./sheet-structure-commands.js";
+
+export {
+  ApplySelectionCellStylePatchCommand,
+  ApplySelectionFontSizeStepCommand,
+  ApplySelectionIndentStepCommand,
+} from "./cell-style-commands.js";
 
 export {
   createDefaultDarkTheme,
@@ -172,8 +181,13 @@ export {
   FlexSheetRibbon,
   ViewRibbonController,
   applyRibbonCommandToFlexSheet,
+  argb8ToCssHex6,
+  argb8ToStripeCss,
+  cellStyleToRibbonHomeFontChrome,
+  cssHexToFillArgb,
   type FlexSheetRibbonOptions,
   type RibbonCommandEvent,
+  type RibbonHomeFontChromeState,
   type RibbonTabId,
   type FlexSheetLike,
   type HomeTabHandles,

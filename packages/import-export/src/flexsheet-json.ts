@@ -117,7 +117,19 @@ function isCellStyle(v: unknown): v is CellStyle {
     return false;
   }
   const keys = Object.keys(v);
-  const allowed = new Set(["bold", "fgArgb", "fillArgb"]);
+  const allowed = new Set([
+    "bold",
+    "italic",
+    "fontFamily",
+    "fontSizePt",
+    "underline",
+    "fgArgb",
+    "fillArgb",
+    "hAlign",
+    "vAlign",
+    "indentLevel",
+    "wrapText",
+  ]);
   for (const k of keys) {
     if (!allowed.has(k)) {
       return false;
@@ -126,10 +138,53 @@ function isCellStyle(v: unknown): v is CellStyle {
   if (v.bold !== undefined && typeof v.bold !== "boolean") {
     return false;
   }
+  if (v.italic !== undefined && typeof v.italic !== "boolean") {
+    return false;
+  }
+  if (v.fontFamily !== undefined && typeof v.fontFamily !== "string") {
+    return false;
+  }
+  if (
+    v.fontSizePt !== undefined &&
+    (typeof v.fontSizePt !== "number" || !Number.isFinite(v.fontSizePt) || v.fontSizePt <= 0)
+  ) {
+    return false;
+  }
+  if (v.underline !== undefined && v.underline !== "single" && v.underline !== "double") {
+    return false;
+  }
   if (v.fgArgb !== undefined && typeof v.fgArgb !== "string") {
     return false;
   }
   if (v.fillArgb !== undefined && typeof v.fillArgb !== "string") {
+    return false;
+  }
+  if (
+    v.hAlign !== undefined &&
+    v.hAlign !== "left" &&
+    v.hAlign !== "center" &&
+    v.hAlign !== "right"
+  ) {
+    return false;
+  }
+  if (
+    v.vAlign !== undefined &&
+    v.vAlign !== "top" &&
+    v.vAlign !== "middle" &&
+    v.vAlign !== "bottom"
+  ) {
+    return false;
+  }
+  if (
+    v.indentLevel !== undefined &&
+    (typeof v.indentLevel !== "number" ||
+      !Number.isFinite(v.indentLevel) ||
+      v.indentLevel < 0 ||
+      v.indentLevel > 255)
+  ) {
+    return false;
+  }
+  if (v.wrapText !== undefined && typeof v.wrapText !== "boolean") {
     return false;
   }
   return true;
@@ -153,7 +208,10 @@ export function parseFlexSheetJson(text: string): FlexSheetJsonParseResult {
     return { ok: false, error: "缺少或错误的 format 字段，不是 FlexSheet 工作簿 JSON。" };
   }
   if (root.formatVersion !== FLEXSHEET_JSON_FORMAT_VERSION) {
-    return { ok: false, error: `不支持的 formatVersion（仅支持 ${String(FLEXSHEET_JSON_FORMAT_VERSION)}）。` };
+    return {
+      ok: false,
+      error: `不支持的 formatVersion（仅支持 ${String(FLEXSHEET_JSON_FORMAT_VERSION)}）。`,
+    };
   }
   const gen = root.generator;
   if (!isPlainObject(gen) || gen.app !== FLEXSHEET_JSON_GENERATOR_APP) {
@@ -270,7 +328,12 @@ export function parseFlexSheetJson(text: string): FlexSheetJsonParseResult {
     if (Array.isArray(sh.rowHeights)) {
       const pairs: [number, number][] = [];
       for (const p of sh.rowHeights) {
-        if (Array.isArray(p) && p.length === 2 && typeof p[0] === "number" && typeof p[1] === "number") {
+        if (
+          Array.isArray(p) &&
+          p.length === 2 &&
+          typeof p[0] === "number" &&
+          typeof p[1] === "number"
+        ) {
           pairs.push([Math.trunc(p[0]), Math.max(2, Math.trunc(p[1]))]);
         }
       }
@@ -281,7 +344,12 @@ export function parseFlexSheetJson(text: string): FlexSheetJsonParseResult {
     if (Array.isArray(sh.colWidths)) {
       const pairs: [number, number][] = [];
       for (const p of sh.colWidths) {
-        if (Array.isArray(p) && p.length === 2 && typeof p[0] === "number" && typeof p[1] === "number") {
+        if (
+          Array.isArray(p) &&
+          p.length === 2 &&
+          typeof p[0] === "number" &&
+          typeof p[1] === "number"
+        ) {
           pairs.push([Math.trunc(p[0]), Math.max(2, Math.trunc(p[1]))]);
         }
       }
@@ -290,13 +358,17 @@ export function parseFlexSheetJson(text: string): FlexSheetJsonParseResult {
       }
     }
     if (Array.isArray(sh.hiddenRows)) {
-      const hr = sh.hiddenRows.filter((x): x is number => typeof x === "number").map((x) => Math.trunc(x));
+      const hr = sh.hiddenRows
+        .filter((x): x is number => typeof x === "number")
+        .map((x) => Math.trunc(x));
       if (hr.length > 0) {
         Object.assign(sheet, { hiddenRows: hr });
       }
     }
     if (Array.isArray(sh.hiddenCols)) {
-      const hc = sh.hiddenCols.filter((x): x is number => typeof x === "number").map((x) => Math.trunc(x));
+      const hc = sh.hiddenCols
+        .filter((x): x is number => typeof x === "number")
+        .map((x) => Math.trunc(x));
       if (hc.length > 0) {
         Object.assign(sheet, { hiddenCols: hc });
       }
@@ -397,10 +469,7 @@ export function workbookFromFlexSheetJsonDocument(
   return wb;
 }
 
-function shouldExportCell(
-  cell: Cell,
-  opt: FlexSheetJsonExportOptions,
-): boolean {
+function shouldExportCell(cell: Cell, opt: FlexSheetJsonExportOptions): boolean {
   const hasFormula = cell.formula !== null && cell.formula.length > 0;
   const hasValue = cell.value !== null && cell.value !== "";
   const hasStyle = cell.style !== null && Object.keys(cell.style).length > 0;
@@ -510,11 +579,12 @@ export function serializeWorkbookToJsonDocument(
   }
 
   const workbookPayload: FlexSheetJsonWorkbookPayload = {
-    activeSheetIndex: Math.max(0, Math.min(workbook.activeSheetIndex, Math.max(0, sheets.length - 1))),
+    activeSheetIndex: Math.max(
+      0,
+      Math.min(workbook.activeSheetIndex, Math.max(0, sheets.length - 1)),
+    ),
     sheets,
-    ...(options.saveByView && meta?.viewState !== undefined
-      ? { view: { ...meta.viewState } }
-      : {}),
+    ...(options.saveByView && meta?.viewState !== undefined ? { view: { ...meta.viewState } } : {}),
   };
 
   return {

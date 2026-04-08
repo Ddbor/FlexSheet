@@ -54,6 +54,40 @@ function parseFontStyle(fontEl: Element): Partial<CellStyle> {
   return st;
 }
 
+function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
+  const align = firstLocal(xf, "alignment");
+  if (align === undefined) {
+    return {};
+  }
+  const out: Partial<CellStyle> = {};
+  const h = align.getAttribute("horizontal");
+  if (h === "left" || h === "center" || h === "right") {
+    out.hAlign = h;
+  }
+  const v = align.getAttribute("vertical");
+  if (v === "top") {
+    out.vAlign = "top";
+  } else if (v === "center") {
+    out.vAlign = "middle";
+  } else if (v === "bottom") {
+    out.vAlign = "bottom";
+  }
+  const ind = align.getAttribute("indent");
+  if (ind !== null && ind !== "") {
+    const n = Number(ind);
+    if (Number.isFinite(n) && n >= 0 && n <= 255) {
+      const rounded = Math.round(n);
+      if (rounded > 0) {
+        out.indentLevel = rounded;
+      }
+    }
+  }
+  if (align.getAttribute("wrapText") === "1") {
+    out.wrapText = true;
+  }
+  return out;
+}
+
 function parseFillStyle(fillEl: Element): Partial<CellStyle> {
   const pf = firstLocal(fillEl, "patternFill");
   if (pf === undefined) {
@@ -101,6 +135,7 @@ function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
     if (applyFill && fillParts[fillId] !== undefined) {
       Object.assign(st, fillParts[fillId]);
     }
+    Object.assign(st, parseAlignmentFromXf(xf));
     table.push(Object.keys(st).length > 0 ? st : null);
   }
   return table;
