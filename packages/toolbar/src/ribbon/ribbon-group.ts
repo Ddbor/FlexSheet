@@ -1,5 +1,5 @@
 /**
- * Ribbon 分组容器：底栏标题 + 顶区工具。
+ * Ribbon 分组容器：顶区工具；底栏分组名节点保留但不展示（见 FlexSheetRibbon.css）。
  */
 
 export function createRibbonGroup(label: string): {

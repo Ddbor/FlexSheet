@@ -80,7 +80,9 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.12s ease, color 0.12s ease;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .fs-ribbon__tab:hover {
@@ -127,8 +129,8 @@
   box-sizing: border-box;
   height: 100%;
   padding: 4px 10px;
-  overflow-x: auto;
-  overflow-y: hidden;
+  /* 竖向不裁切：下拉菜单用 fixed 定位，此处仍避免误伤其它层 */
+  overflow: visible;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -144,6 +146,9 @@
   gap: 2px;
   height: 100%;
   min-height: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 /* 分组 */
@@ -153,13 +158,20 @@
   justify-content: space-between;
   height: 100%;
   min-width: 80px;
-  padding: 2px 10px 1px;
+  padding: 2px 6px;
   border-right: 1px solid var(--fs-ribbon-border);
   flex: 0 0 auto;
 }
 
 .fs-ribbon-group:last-child {
   border-right: none;
+}
+
+/* 「撤销」仅两枚小图标，不必占满通用分组 80px 最小幅宽 */
+.fs-ribbon-group:has(> .fs-ribbon-undo) {
+  min-width: 0;
+  padding-left: 6px;
+  padding-right: 6px;
 }
 
 .fs-ribbon-group__content {
@@ -171,12 +183,7 @@
 }
 
 .fs-ribbon-group__label {
-  text-align: center;
-  font-size: 10px;
-  line-height: 1.2;
-  color: var(--fs-ribbon-group-label);
-  margin-top: 2px;
-  white-space: nowrap;
+  display: none;
 }
 
 .fs-ribbon-stack {
@@ -199,21 +206,45 @@
 
 /* 开始 -> 撤销：纵向 后退 / 前进，底栏标题「撤销」 */
 .fs-ribbon-undo {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  align-items: center;
+  /* 覆盖 .fs-ribbon-group__content 的 flex-start，在 Ribbon 条带内垂直居中 */
+  justify-content: center;
 }
 
 .fs-ribbon-undo__stack {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 1px;
-  min-width: 52px;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-width: 0;
 }
 
 .fs-ribbon-undo__stack .fs-tb-btn {
-  justify-content: flex-start;
-  min-height: 24px;
-  padding: 2px 4px;
+  box-sizing: border-box;
+  justify-content: center;
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  padding: 4px 6px;
+}
+
+.fs-ribbon-undo__stack .fs-tb-btn--default .fs-tb-btn__row {
+  justify-content: center;
+  align-items: center;
+  width: auto;
+  min-height: 0;
+}
+
+.fs-ribbon-undo__stack .fs-tb-btn__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
 }
 
 .fs-ribbon-undo__stack .fs-tb-btn__label:empty {
@@ -228,7 +259,7 @@
 }
 
 .fs-ribbon-clipboard > .fs-tb-btn--large {
-  min-width: 62px;
+  min-width: 45px;
   padding: 4px 6px;
 }
 
@@ -236,17 +267,20 @@
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  min-width: 50px;
+  align-items: center;
+  min-width: 28px;
   gap: 1px;
 }
 
 .fs-ribbon-clipboard__item {
-  justify-content: flex-start;
-  padding-left: 3px;
+  justify-content: center;
+  align-items: center;
+  padding-left: 0;
+  padding-right: 0;
 }
 
-.fs-ribbon-clipboard__item .fs-tb-btn__label {
-  min-width: 22px;
+.fs-ribbon-clipboard__item .fs-tb-btn__label:empty {
+  display: none;
 }
 
 /* 开始 -> 字体分组布局（底行图标区与「对齐方式」同款：固定行高、grid、border-box、均分填充） */
@@ -254,21 +288,50 @@
   width: 100%;
   min-width: 0;
   height: 100%;
-  justify-content: space-between;
-  gap: 2px;
+  justify-content: flex-start;
+  /* 与底行同宽，避免上一行随内容缩进、下一行 max-content 造成左右不齐 */
+  align-items: stretch;
+  gap: 6px;
 }
 
+/* 第一排：字体 + 字号靠左；从第 3 个子项起 margin-left:auto，增大/减小字号贴右，与第二排右缘对齐 */
 .fs-ribbon-font .fs-ribbon-stack__row--gap {
-  gap: 3px;
+  box-sizing: border-box;
+  display: flex;
   flex-wrap: nowrap;
+  align-items: center;
+  gap: 3px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.fs-ribbon-font .fs-ribbon-stack__row--gap > :nth-child(3) {
+  margin-left: auto;
 }
 
 .fs-ribbon-font .fs-dd--wide {
   min-width: 108px;
 }
 
+/* 与同行增大/减小字号按钮（26px）等高，避免字体名下拉与字号下拉高度不齐 */
+.fs-ribbon-font .fs-ribbon-stack__row--gap > .fs-dd {
+  align-self: center;
+}
+
 .fs-ribbon-font .fs-dd__trigger {
-  padding: 2px 7px;
+  box-sizing: border-box;
+  height: 26px;
+  min-height: 26px;
+  padding: 0 7px;
+}
+
+.fs-ribbon-font .fs-dd__trigger .fs-dd__label {
+  flex: 1 1 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fs-ribbon-font .fs-ribbon-stack__row--gap > .fs-tb-btn {
@@ -280,25 +343,35 @@
   justify-content: center;
 }
 
+.fs-ribbon-font .fs-ribbon-stack__row--gap > .fs-tb-btn .fs-tb-btn__label:empty {
+  display: none;
+}
+
+/* 第二排：与第一排同宽，首尾贴齐，中间空隙均分（两端对齐观感） */
 .fs-ribbon-font__grid {
   --fs-ribbon-font-row: 26px;
+  box-sizing: border-box;
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
   grid-template-rows: var(--fs-ribbon-font-row);
-  gap: 2px;
+  column-gap: 2px;
+  row-gap: 0;
   align-items: stretch;
-  justify-items: stretch;
+  justify-content: space-between;
+  justify-items: center;
   width: 100%;
+  max-width: 100%;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 .fs-ribbon-font__grid .fs-tb-btn,
 .fs-ribbon-font__grid .fs-tb-btn--split {
   box-sizing: border-box;
-  width: 100%;
+  width: auto;
+  min-width: 24px;
   height: 100%;
-  min-width: 0;
   min-height: 0;
   margin: 0;
   padding: 0;
@@ -311,6 +384,7 @@
 }
 
 .fs-ribbon-font__grid .fs-tb-btn--split {
+  min-width: 34px;
   flex-wrap: nowrap;
   align-items: stretch;
   padding: 0;
@@ -361,6 +435,14 @@
   box-sizing: border-box;
 }
 
+/* 左侧：2×3 对齐网格 + 其下缩进行 */
+.fs-ribbon-align__left-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+
 .fs-ribbon-align__grid {
   --fs-ribbon-align-row: 26px;
   display: grid;
@@ -387,17 +469,17 @@
   display: none;
 }
 
-.fs-ribbon-align__mid {
+.fs-ribbon-align__indent-row {
   --fs-ribbon-align-row: 26px;
   display: grid;
-  grid-template-rows: var(--fs-ribbon-align-row) var(--fs-ribbon-align-row);
+  grid-template-columns: repeat(3, 28px);
+  grid-template-rows: var(--fs-ribbon-align-row);
   gap: 2px;
   align-items: stretch;
-  align-content: start;
-  min-width: 36px;
+  justify-items: stretch;
 }
 
-.fs-ribbon-align__mid .fs-tb-btn {
+.fs-ribbon-align__indent-row .fs-tb-btn {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
@@ -409,46 +491,18 @@
   justify-content: center;
 }
 
-.fs-ribbon-align__mid .fs-tb-btn__label {
+.fs-ribbon-align__indent-row .fs-tb-btn__label {
   display: none;
-}
-
-.fs-ribbon-align__mid .fs-tb-btn--split {
-  flex-wrap: nowrap;
-  align-items: stretch;
-  padding: 0;
-}
-
-.fs-ribbon-align__mid .fs-tb-btn--split > .fs-tb-btn__row {
-  box-sizing: border-box;
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-  padding: 0 2px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.fs-ribbon-align__mid .fs-tb-btn--split .fs-tb-btn__split {
-  box-sizing: border-box;
-  flex: 0 0 auto;
-  padding: 0 2px;
-  min-width: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  align-self: stretch;
 }
 
 .fs-ribbon-align__right {
   --fs-ribbon-align-row: 26px;
   display: grid;
-  grid-template-rows: var(--fs-ribbon-align-row) var(--fs-ribbon-align-row);
+  grid-auto-rows: var(--fs-ribbon-align-row);
   gap: 2px;
   align-items: stretch;
   align-content: start;
-  min-width: 96px;
+  min-width: 120px;
 }
 
 .fs-ribbon-align__right .fs-tb-btn {
@@ -462,6 +516,14 @@
   justify-content: flex-start;
   align-items: center;
   gap: 4px;
+}
+
+/* 分割按钮主区：图标与「合并后居中」等文案横排（覆盖全局 split 的纵向 .fs-tb-btn__row） */
+.fs-ribbon-align__right .fs-tb-btn--split > .fs-tb-btn__row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
 }
 
 .fs-ribbon-align .fs-tb-btn__icon {
@@ -486,7 +548,10 @@
   font-size: 11px;
   line-height: 1.1;
   cursor: pointer;
-  transition: background 0.1s ease, box-shadow 0.1s ease, transform 0.06s ease;
+  transition:
+    background 0.1s ease,
+    box-shadow 0.1s ease,
+    transform 0.06s ease;
 }
 
 .fs-tb-btn:hover:not(:disabled) {
@@ -566,7 +631,6 @@
 }
 
 .fs-tb-btn--split > .fs-tb-btn__row {
-  padding: 6px 8px;
   flex: 1;
   flex-direction: column;
   align-items: center;
@@ -576,7 +640,7 @@
 .fs-tb-btn--split .fs-tb-btn__split {
   display: flex;
   align-items: center;
-  padding: 0 4px;
+  padding: 4px;
   border-left: 1px solid var(--fs-ribbon-border);
   cursor: pointer;
 }
@@ -586,8 +650,18 @@
 }
 
 .fs-tb-btn__chev {
-  width: 12px;
-  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.fs-tb-btn__chev svg {
+  width: 8px;
+  height: 8px;
+  display: block;
 }
 
 /* 下拉 */
@@ -617,7 +691,9 @@
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.1s ease, border-color 0.1s ease;
+  transition:
+    background 0.1s ease,
+    border-color 0.1s ease;
 }
 
 .fs-dd__trigger:hover {
@@ -625,8 +701,19 @@
 }
 
 .fs-dd__chev {
-  font-size: 10px;
-  opacity: 0.8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  opacity: 0.85;
+}
+
+.fs-dd__chev svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .fs-dd__menu {
@@ -634,7 +721,9 @@
   top: calc(100% + 2px);
   left: 0;
   z-index: 4000;
-  min-width: 100%;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 12px);
   padding: 4px 0;
   margin: 0;
   background: var(--fs-ribbon-panel-bg);
@@ -646,7 +735,8 @@
 .fs-dd__item {
   display: block;
   width: 100%;
-  min-width: 140px;
+  box-sizing: border-box;
+  min-width: 0;
   padding: 6px 12px;
   border: none;
   background: transparent;
@@ -664,6 +754,230 @@
 .fs-dd__item:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+/* 字体名称列表：固定高度 + 纵向滚动，与 Excel 字体下拉类似 */
+.fs-dd__menu--font-list {
+  max-height: 280px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px 0;
+  scrollbar-width: thin;
+}
+
+.fs-dd__menu--font-list .fs-dd__item {
+  white-space: nowrap;
+}
+
+.fs-dd__menu--font-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.fs-dd__menu--font-list::-webkit-scrollbar-thumb {
+  background: var(--fs-ribbon-border, #d2d0ce);
+  border-radius: 4px;
+}
+
+.fs-dd__menu--font-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 字体 -> 边框：浮动菜单（左图标 + 文案，分段线）
+ * 须挂在 .fs-ribbon 下以继承 --fs-ribbon-panel-bg 等变量；fallback 防止变量未解析时透底 */
+.fs-bd-menu {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  background-color: #ffffff;
+  background-color: var(--fs-ribbon-panel-bg, #ffffff);
+  border: 1px solid var(--fs-ribbon-border, #e1dfdd);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px var(--fs-ribbon-btn-shadow, rgba(0, 0, 0, 0.08));
+  color: var(--fs-ribbon-chrome-text, #323130);
+  width: max-content;
+  max-width: calc(100vw - 12px);
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+
+.fs-bd-menu__sep {
+  height: 1px;
+  margin: 4px 8px;
+  background: var(--fs-ribbon-border, #e1dfdd);
+  border: none;
+  padding: 0;
+  pointer-events: none;
+}
+
+.fs-bd-menu__item {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  color: var(--fs-ribbon-chrome-text, #323130);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fs-bd-menu__item:hover:not(:disabled) {
+  background: var(--fs-ribbon-hover, #edebe9);
+}
+
+.fs-bd-menu__icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.fs-bd-menu__icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.fs-bd-menu__label {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.3;
+}
+
+/* 填充色 / 字体颜色面板 */
+.fs-color-menu {
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 12px);
+  padding: 8px;
+  background-color: #ffffff;
+  background-color: var(--fs-ribbon-panel-bg, #ffffff);
+  border: 1px solid var(--fs-ribbon-border, #e1dfdd);
+  border-radius: 2px;
+  box-shadow: 0 4px 12px var(--fs-ribbon-btn-shadow, rgba(0, 0, 0, 0.08));
+  color: var(--fs-ribbon-chrome-text, #323130);
+  max-height: min(75vh, 560px);
+  overflow-y: auto;
+}
+
+.fs-color-menu__heading {
+  margin: 8px 0 6px;
+  font-size: 11px;
+  color: var(--fs-ribbon-group-label, #605e5c);
+}
+
+.fs-color-menu__heading:first-child {
+  margin-top: 0;
+}
+
+.fs-color-menu__row {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.fs-color-menu__row--top {
+  grid-template-columns: repeat(9, 1fr);
+}
+
+.fs-color-menu__row--standard {
+  grid-template-columns: repeat(10, 1fr);
+}
+
+.fs-color-menu__grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.fs-color-menu__swatch {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 14px;
+  max-height: 18px;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 1px;
+  cursor: pointer;
+}
+
+.fs-color-menu__swatch:hover {
+  z-index: 1;
+  outline: 1px solid var(--fs-ribbon-accent, #217346);
+  outline-offset: 1px;
+}
+
+.fs-color-menu__swatch:focus-visible {
+  outline: 2px solid var(--fs-ribbon-accent, #217346);
+  outline-offset: 1px;
+}
+
+.fs-color-menu__row-btn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 2px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fs-color-menu__row-btn:hover {
+  background: var(--fs-ribbon-hover, #edebe9);
+}
+
+.fs-color-menu__none-icon {
+  box-sizing: border-box;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--fs-ribbon-border, #c8c6c4);
+  border-radius: 1px;
+  background: #ffffff;
+}
+
+.fs-color-menu__palette-icon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+}
+
+.fs-color-menu__palette-icon svg {
+  display: block;
+}
+
+.fs-color-menu__row-btn-label {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.35;
+}
+
+.fs-color-menu__sep {
+  height: 1px;
+  margin: 6px 0;
+  background: var(--fs-ribbon-border, #e1dfdd);
 }
 
 .fs-dd--open .fs-dd__trigger {

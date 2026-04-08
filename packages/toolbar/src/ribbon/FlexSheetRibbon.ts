@@ -14,6 +14,7 @@ import type {
   RibbonTabId,
 } from "./ribbon-types.js";
 import type { RibbonEmit } from "../toolbar/toolbar-button.js";
+import { closeAllRibbonPopups } from "../toolbar/toolbar-dropdown.js";
 import { createRibbonBackstage, type RibbonBackstageHandles } from "./ribbon-backstage.js";
 
 import "./FlexSheetRibbon.css";
@@ -143,6 +144,9 @@ export class FlexSheetRibbon {
       if (t !== null && t.closest(".fs-dd") !== null) {
         return;
       }
+      if (t !== null && t.closest("[data-fs-floating-menu]") !== null) {
+        return;
+      }
       this.closeAllDropdowns();
     };
     document.addEventListener("pointerdown", this.onDocPointerDown, true);
@@ -193,13 +197,7 @@ export class FlexSheetRibbon {
   }
 
   private closeAllDropdowns(): void {
-    this.root.querySelectorAll(".fs-dd.fs-dd--open").forEach((el) => {
-      el.classList.remove("fs-dd--open");
-      const m = el.querySelector(".fs-dd__menu");
-      if (m instanceof HTMLElement) {
-        m.hidden = true;
-      }
-    });
+    closeAllRibbonPopups();
   }
 
   private openBackstage(): void {

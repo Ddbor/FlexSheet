@@ -10,6 +10,8 @@ export interface ToolbarButtonOptions {
   readonly icon?: SVGSVGElement;
   /** 带下拉箭头，点击箭头展开菜单（需配合 onOpenDropdown） */
   readonly splitDropdown?: boolean;
+  /** 点击仅触发展开颜色面板（`fs-color-picker-toggle`），不发送 commandId */
+  readonly colorPickerToggle?: boolean;
   readonly title?: string;
   readonly disabled?: boolean;
 }
@@ -69,6 +71,11 @@ export function createToolbarButton(
 
   btn.addEventListener("click", (ev) => {
     if (btn.disabled) {
+      return;
+    }
+    if (options.colorPickerToggle === true) {
+      ev.stopPropagation();
+      btn.dispatchEvent(new CustomEvent("fs-color-picker-toggle", { bubbles: true }));
       return;
     }
     if (options.splitDropdown === true) {
