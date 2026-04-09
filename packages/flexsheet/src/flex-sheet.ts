@@ -25,6 +25,8 @@ import {
   RendererPlugin,
   scrollToRevealCell,
   hitTestCell,
+  hitTestBodyCellAutoFilterButton,
+  hitTestColumnHeaderFilterButton,
   hitTestHeadingPointer,
   buildFrozenLayout,
   computeColumnAutoWidth,
@@ -35,7 +37,7 @@ import {
 } from "@flexsheet/renderer";
 import { ScrollPlugin } from "@flexsheet/scroll";
 import { SelectionRegistryPlugin } from "@flexsheet/selection";
-import { columnIndexToLabel } from "@flexsheet/shared";
+import { columnIndexToLabel, columnLabelToIndex } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
 import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
@@ -65,6 +67,8 @@ import {
 } from "./cell-style-commands.js";
 import { SelectionMergeCommand } from "./merge-commands.js";
 import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
+import { openColumnFilterPanel } from "./column-filter-panel.js";
+import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
 import { useUndoRedo } from "./undo-redo-plugin.js";
 
@@ -158,6 +162,10 @@ export class FlexSheet {
   private clipboardMarqueeRange: SelectionRange | null = null;
   /** 延迟剪切：已写入剪贴板但源格尚未清空，粘贴匹配内部载荷后再清源区（与 Excel 一致）。 */
   private pendingClipboardCut: { sheet: Worksheet; range: SelectionRange } | null = null;
+  /** 「自定义排序」对话框根节点（打开时独占，关闭时移除）。 */
+  private customSortOverlay: HTMLDivElement | null = null;
+  /** 卸载 `chromeRoot` 上 ⇧⌘R 捕获监听。 */
+  private chromeRootSortShortcutCleanup: (() => void) | null = null;
 
   constructor(options: FlexSheetOptions) {
     this.formulaBarEl = options.formulaBar ?? null;
@@ -248,7 +256,30 @@ export class FlexSheet {
     );
 
     if (options.chromeRoot !== undefined) {
-      this.workspace.use(useSheetChromeGuard({ chromeRoot: options.chromeRoot }));
+      const chromeRoot = options.chromeRoot;
+      this.workspace.use(useSheetChromeGuard({ chromeRoot }));
+      const onCustomSortShortcut = (ev: KeyboardEvent): void => {
+        if (!ev.shiftKey || !(ev.metaKey || ev.ctrlKey) || (ev.key !== "r" && ev.key !== "R")) {
+          return;
+        }
+        if (this.cellEditor.isEditing()) {
+          return;
+        }
+        const rawT = ev.target;
+        if (rawT instanceof HTMLElement) {
+          const host = rawT.closest("input, textarea, select, [contenteditable='true']");
+          if (host !== null) {
+            return;
+          }
+        }
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.openCustomSortDialog();
+      };
+      chromeRoot.addEventListener("keydown", onCustomSortShortcut, true);
+      this.chromeRootSortShortcutCleanup = () => {
+        chromeRoot.removeEventListener("keydown", onCustomSortShortcut, true);
+      };
     }
 
     this.workspace.pluginContext.register(PLUGIN_SERVICE_KEYS.flexSheet, this);
@@ -816,6 +847,244 @@ export class FlexSheet {
     this.renderer.requestRedraw();
   }
 
+  /**
+   * 按当前选区的行范围排序，排序关键字列为 `sortCol`（通常为右键列或活动列）。
+   * 与 Excel 右键「排序」子菜单行为一致。
+   */
+  sortSelectionRowsByKeyColumn(
+    sortCol: number,
+    kind:
+      | { readonly type: "value"; readonly direction: "asc" | "desc" }
+      | {
+          readonly type: "fontColorOnTop";
+          readonly styleAnchorRow: number;
+          readonly styleAnchorCol: number;
+        }
+      | {
+          readonly type: "fillColorOnTop";
+          readonly styleAnchorRow: number;
+          readonly styleAnchorCol: number;
+        },
+  ): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    if (!Number.isInteger(sortCol) || sortCol < 0 || sortCol >= sheet.colCount) {
+      return;
+    }
+    const range = normalizeSelectionRange(this.selection.getNormalizedRange());
+    const rowStart = range.startRow;
+    const rowEnd = range.endRow;
+    if (kind.type === "value") {
+      sheet.sortRowsInRangeByColumn(rowStart, rowEnd, sortCol, kind.direction);
+    } else if (kind.type === "fontColorOnTop") {
+      const ap = sheet.getMergeAnchorCell(kind.styleAnchorRow, kind.styleAnchorCol);
+      const fg = sheet.getCell(ap.row, ap.col).style?.fgArgb;
+      const target = fg !== undefined && fg !== "" ? fg.toUpperCase() : null;
+      sheet.sortRowsInRangeByColumnFontColor(rowStart, rowEnd, sortCol, target, "asc");
+    } else {
+      const ap = sheet.getMergeAnchorCell(kind.styleAnchorRow, kind.styleAnchorCol);
+      const fill = sheet.getCell(ap.row, ap.col).style?.fillArgb;
+      const target = fill !== undefined && fill !== "" ? fill.toUpperCase() : null;
+      sheet.sortRowsInRangeByColumnFillColor(rowStart, rowEnd, sortCol, target, "asc");
+    }
+    recalcWorksheet(sheet);
+    this.refresh();
+  }
+
+  /** 简单「自定义排序」：指定列标与升/降序，在选区行范围内按值排序。 */
+  openCustomSortDialog(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    ensureFsSheetPromptStyles();
+    this.closeCustomSortDialog();
+
+    const ac = this.selection.getActiveCell();
+    const defaultLabel = columnIndexToLabel(ac.col);
+
+    const overlay = document.createElement("div");
+    overlay.className = "fs-sheet-prompt-overlay";
+    overlay.setAttribute("role", "presentation");
+
+    const panel = document.createElement("div");
+    panel.className = "fs-sheet-prompt";
+    panel.style.width = "min(340px, calc(100vw - 32px))";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-labelledby", "fs-custom-sort-title");
+
+    const header = document.createElement("div");
+    header.className = "fs-sheet-prompt__header";
+    const titleEl = document.createElement("div");
+    titleEl.id = "fs-custom-sort-title";
+    titleEl.className = "fs-sheet-prompt__title";
+    titleEl.textContent = "自定义排序";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "fs-sheet-prompt__close";
+    closeBtn.setAttribute("aria-label", "关闭");
+    closeBtn.textContent = "×";
+    header.appendChild(titleEl);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement("div");
+    body.className = "fs-sheet-prompt__body";
+
+    const rowCol = document.createElement("label");
+    rowCol.className = "fs-sheet-prompt__label";
+    const colSpan = document.createElement("span");
+    colSpan.textContent = "列标";
+    const colInput = document.createElement("input");
+    colInput.type = "text";
+    colInput.className = "fs-sheet-prompt__input";
+    colInput.value = defaultLabel;
+    colInput.setAttribute("autocomplete", "off");
+    colInput.setAttribute("spellcheck", "false");
+    rowCol.appendChild(colSpan);
+    rowCol.appendChild(colInput);
+
+    const rowOrder = document.createElement("label");
+    rowOrder.className = "fs-sheet-prompt__label";
+    const orderSpan = document.createElement("span");
+    orderSpan.textContent = "次序";
+    const orderSel = document.createElement("select");
+    orderSel.className = "fs-sheet-prompt__select";
+    const optAsc = document.createElement("option");
+    optAsc.value = "asc";
+    optAsc.textContent = "升序";
+    const optDesc = document.createElement("option");
+    optDesc.value = "desc";
+    optDesc.textContent = "降序";
+    orderSel.appendChild(optAsc);
+    orderSel.appendChild(optDesc);
+    rowOrder.appendChild(orderSpan);
+    rowOrder.appendChild(orderSel);
+
+    body.appendChild(rowCol);
+    body.appendChild(rowOrder);
+
+    const footer = document.createElement("div");
+    footer.className = "fs-sheet-prompt__footer";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--primary";
+    okBtn.textContent = "确定";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--secondary";
+    cancelBtn.textContent = "取消";
+    footer.appendChild(cancelBtn);
+    footer.appendChild(okBtn);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    panel.appendChild(footer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    this.customSortOverlay = overlay;
+
+    const close = (): void => {
+      this.closeCustomSortDialog();
+    };
+
+    const tryConfirm = (): void => {
+      const colIdx = columnLabelToIndex(colInput.value);
+      if (colIdx === null || colIdx < 0 || colIdx >= sheet.colCount) {
+        colInput.focus();
+        colInput.select();
+        return;
+      }
+      const direction = orderSel.value === "desc" ? "desc" : "asc";
+      const range = normalizeSelectionRange(this.selection.getNormalizedRange());
+      sheet.sortRowsInRangeByColumn(range.startRow, range.endRow, colIdx, direction);
+      recalcWorksheet(sheet);
+      this.refresh();
+      close();
+    };
+
+    const onOverlayPointerDown = (ev: PointerEvent): void => {
+      if (ev.target === overlay) {
+        close();
+      }
+    };
+    overlay.addEventListener("pointerdown", onOverlayPointerDown);
+    closeBtn.addEventListener("click", close);
+    cancelBtn.addEventListener("click", close);
+    okBtn.addEventListener("click", tryConfirm);
+    colInput.addEventListener("keydown", (kev) => {
+      if (kev.key === "Enter") {
+        kev.preventDefault();
+        tryConfirm();
+      }
+    });
+
+    requestAnimationFrame(() => {
+      colInput.focus();
+      colInput.select();
+    });
+  }
+
+  private closeCustomSortDialog(): void {
+    if (this.customSortOverlay !== null) {
+      this.customSortOverlay.remove();
+      this.customSortOverlay = null;
+    }
+  }
+
+  /** 在列筛选作用行范围内按该列升序/降序排序并重算公式。 */
+  sortActiveSheetByColumn(col: number, direction: "asc" | "desc"): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const meta = sheet.getColumnAutoFilterMeta(col);
+    if (meta === undefined) {
+      return;
+    }
+    sheet.sortRowsInRangeByColumn(meta.rowStart, meta.rowEnd, col, direction);
+    recalcWorksheet(sheet);
+    this.refresh();
+  }
+
+  /** 在列筛选作用行范围内按字体颜色排序；`targetArgb` 为 `null` 时表示「自动」优先。 */
+  sortActiveSheetByColumnFontColor(
+    col: number,
+    targetArgb: string | null,
+    direction: "asc" | "desc",
+  ): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const meta = sheet.getColumnAutoFilterMeta(col);
+    if (meta === undefined) {
+      return;
+    }
+    sheet.sortRowsInRangeByColumnFontColor(
+      meta.rowStart,
+      meta.rowEnd,
+      col,
+      targetArgb,
+      direction,
+    );
+    recalcWorksheet(sheet);
+    this.refresh();
+  }
+
+  /** 打开列筛选面板（`col` 须已启用自动筛选）。 */
+  openColumnFilterUi(col: number, clientX: number, clientY: number): void {
+    openColumnFilterPanel({ flex: this, col, clientX, clientY });
+  }
+
   destroy(): void {
     this.cancelDragAutoscrollRaf();
     this.headingDrag = null;
@@ -834,12 +1103,17 @@ export class FlexSheet {
     this.canvas.removeEventListener("lostpointercapture", this.onLostPointerCapture);
     this.detachDocumentDragListeners();
     this.canvas.removeEventListener("keydown", this.onKeyDown);
+    if (this.chromeRootSortShortcutCleanup !== null) {
+      this.chromeRootSortShortcutCleanup();
+      this.chromeRootSortShortcutCleanup = null;
+    }
     if (this.resizeObserver !== null) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
     } else {
       window.removeEventListener("resize", this.onWindowResize);
     }
+    this.closeCustomSortDialog();
     this.workspace.destroy();
   }
 
@@ -1124,6 +1398,12 @@ export class FlexSheet {
       return;
     }
 
+    const bodyFilterCol = this.tryHitBodyAutoFilterFromClient(ev.clientX, ev.clientY);
+    if (bodyFilterCol !== null) {
+      this.openColumnFilterUi(bodyFilterCol, ev.clientX, ev.clientY);
+      return;
+    }
+
     const hit = this.hitTestClient(ev.clientX, ev.clientY);
     if (hit === null) {
       return;
@@ -1152,6 +1432,39 @@ export class FlexSheet {
         this.beginResizing(resizeHit.kind, resizeHit.index, ev);
         return;
       }
+      if (headingHit.kind === "columnHeader") {
+        const w = this.canvas.clientWidth;
+        const h = this.canvas.clientHeight;
+        const corner = this.renderer.getCornerSize();
+        const layout = buildFrozenLayout(
+          sheet,
+          corner.width,
+          corner.height,
+          w,
+          h,
+          this.renderer.frozenRows,
+          this.renderer.frozenCols,
+          this.renderer.viewZoom,
+        );
+        const { x, y } = this.clientToCanvasXY(ev.clientX, ev.clientY);
+        const filterCol = hitTestColumnHeaderFilterButton(
+          x,
+          y,
+          sheet,
+          layout,
+          this.renderer.scrollX,
+          this.renderer.scrollY,
+          this.renderer.viewZoom,
+        );
+        if (filterCol !== null) {
+          ev.preventDefault();
+          if (this.cellEditor.isEditing()) {
+            this.cellEditor.cancelWithoutCommit();
+          }
+          this.openColumnFilterUi(filterCol, ev.clientX, ev.clientY);
+          return;
+        }
+      }
       ev.preventDefault();
       if (this.cellEditor.isEditing()) {
         this.cellEditor.cancelWithoutCommit();
@@ -1175,6 +1488,16 @@ export class FlexSheet {
         }
       }
       this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
+      return;
+    }
+
+    const bodyFilterCol = this.tryHitBodyAutoFilterFromClient(ev.clientX, ev.clientY);
+    if (bodyFilterCol !== null) {
+      ev.preventDefault();
+      if (this.cellEditor.isEditing()) {
+        this.cellEditor.cancelWithoutCommit();
+      }
+      this.openColumnFilterUi(bodyFilterCol, ev.clientX, ev.clientY);
       return;
     }
 
@@ -1366,6 +1689,12 @@ export class FlexSheet {
       return;
     }
 
+    if (ev.shiftKey && (ev.metaKey || ev.ctrlKey) && (ev.key === "r" || ev.key === "R")) {
+      ev.preventDefault();
+      this.openCustomSortDialog();
+      return;
+    }
+
     if (ev.ctrlKey || ev.metaKey || ev.altKey) {
       return;
     }
@@ -1465,6 +1794,37 @@ export class FlexSheet {
       this.renderer.viewZoom,
     );
     return hitTestHeadingPointer(
+      x,
+      y,
+      sheet,
+      layout,
+      this.renderer.scrollX,
+      this.renderer.scrollY,
+      this.renderer.viewZoom,
+    );
+  }
+
+  /** 命中表体内列筛选锚点按钮时返回列号，否则 `null`。 */
+  private tryHitBodyAutoFilterFromClient(clientX: number, clientY: number): number | null {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return null;
+    }
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const corner = this.renderer.getCornerSize();
+    const layout = buildFrozenLayout(
+      sheet,
+      corner.width,
+      corner.height,
+      w,
+      h,
+      this.renderer.frozenRows,
+      this.renderer.frozenCols,
+      this.renderer.viewZoom,
+    );
+    return hitTestBodyCellAutoFilterButton(
       x,
       y,
       sheet,

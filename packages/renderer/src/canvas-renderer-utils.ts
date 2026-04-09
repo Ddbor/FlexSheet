@@ -160,3 +160,132 @@ export function wrapCellLines(ctx: CanvasRenderingContext2D, text: string, maxW:
   }
   return out;
 }
+
+/** 与 `Worksheet.getColumnAutoFilterSortHint` 一致：`null` 表示无排序箭头。 */
+export type AutoFilterGlyphSortHint = "asc" | "desc" | null;
+
+const AUTO_FILTER_TRI_BLUE = "#185abd";
+const AUTO_FILTER_FUNNEL = "#323130";
+
+function drawFilledChevronDown(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  halfW: number,
+  halfH: number,
+  fill: string,
+): void {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.moveTo(cx - halfW, cy - halfH);
+  ctx.lineTo(cx + halfW, cy - halfH);
+  ctx.lineTo(cx, cy + halfH);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawSortArrow(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  midY: number,
+  direction: "asc" | "desc",
+  color: string,
+): void {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.35;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "miter";
+  const stem = 5.2;
+  const head = 2.4;
+  if (direction === "asc") {
+    const y0 = midY + stem * 0.35;
+    const y1 = midY - stem * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(cx, y0);
+    ctx.lineTo(cx, y1);
+    ctx.moveTo(cx - head, y1 + head * 0.9);
+    ctx.lineTo(cx, y1);
+    ctx.lineTo(cx + head, y1 + head * 0.9);
+    ctx.stroke();
+  } else {
+    const y0 = midY - stem * 0.35;
+    const y1 = midY + stem * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(cx, y0);
+    ctx.lineTo(cx, y1);
+    ctx.moveTo(cx - head, y1 - head * 0.9);
+    ctx.lineTo(cx, y1);
+    ctx.lineTo(cx + head, y1 - head * 0.9);
+    ctx.stroke();
+  }
+}
+
+function drawFunnel(ctx: CanvasRenderingContext2D, cx: number, midY: number, fill: string): void {
+  ctx.fillStyle = fill;
+  const topW = 7;
+  const botW = 4.2;
+  const h = 4.2;
+  const y0 = midY - h * 0.35;
+  const y1 = midY + h * 0.45;
+  ctx.beginPath();
+  ctx.moveTo(cx - topW / 2, y0);
+  ctx.lineTo(cx + topW / 2, y0);
+  ctx.lineTo(cx + botW / 2, y1);
+  ctx.lineTo(cx - botW / 2, y1);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(cx - 0.75, y1, 1.5, 3.2);
+}
+
+export interface AutoFilterGlyphPaintOptions {
+  readonly narrowed: boolean;
+  readonly sortHint: AutoFilterGlyphSortHint;
+  readonly borderColor: string;
+}
+
+/**
+ * 列筛选按钮四态：1 默认（实心下拉）2 升序（下拉+上箭头）3 降序（下拉+下箭头）4 筛选（漏斗，可叠加排序箭头）。
+ */
+export function paintAutoFilterDropdownGlyph(
+  ctx: CanvasRenderingContext2D,
+  bx: number,
+  by: number,
+  innerW: number,
+  innerH: number,
+  options: AutoFilterGlyphPaintOptions,
+): void {
+  const bxs = snapLine(bx);
+  const bys = snapLine(by);
+  const { narrowed, sortHint, borderColor } = options;
+  const midY = bys + innerH / 2;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(Math.floor(bxs), Math.floor(bys), Math.ceil(innerW), Math.ceil(innerH));
+  ctx.strokeStyle = borderColor;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bxs, bys, innerW, innerH);
+
+  const showSortArrow = sortHint === "asc" || sortHint === "desc";
+  const arrowX = bxs + innerW - 4.2;
+
+  if (narrowed) {
+    const funnelX = showSortArrow ? bxs + innerW * 0.34 : bxs + innerW / 2;
+    drawFunnel(ctx, funnelX, midY, AUTO_FILTER_FUNNEL);
+    if (sortHint === "asc") {
+      drawSortArrow(ctx, arrowX, midY, "asc", AUTO_FILTER_TRI_BLUE);
+    } else if (sortHint === "desc") {
+      drawSortArrow(ctx, arrowX, midY, "desc", AUTO_FILTER_TRI_BLUE);
+    }
+    return;
+  }
+
+  const triX = showSortArrow ? bxs + innerW * 0.3 : bxs + innerW / 2;
+  const triY = midY + 0.8;
+  drawFilledChevronDown(ctx, triX, triY, 3.6, 2.8, AUTO_FILTER_TRI_BLUE);
+
+  if (sortHint === "asc") {
+    drawSortArrow(ctx, arrowX, midY, "asc", AUTO_FILTER_TRI_BLUE);
+  } else if (sortHint === "desc") {
+    drawSortArrow(ctx, arrowX, midY, "desc", AUTO_FILTER_TRI_BLUE);
+  }
+}

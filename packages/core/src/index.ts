@@ -18,8 +18,18 @@ export {
   formatCellDisplayWithStyle,
   formatNumberWithExcelCode,
 } from "./excel-number-format.js";
+export {
+  AUTO_FILTER_BLANK_KEY,
+  cellToAutoFilterDisplayKey,
+  compareAutoFilterDisplayKeys,
+} from "./column-auto-filter-keys.js";
 export { Workbook, type WorkbookChangeListener } from "./workbook.js";
-export { Worksheet, type WorksheetChangeListener } from "./worksheet.js";
+export {
+  Worksheet,
+  type ColumnAutoFilterSortHint,
+  type ColumnAutoFilterUiKind,
+  type WorksheetChangeListener,
+} from "./worksheet.js";
 export {
   normalizeSelectionRange,
   selectionRangeContains,
@@ -35,6 +45,7 @@ export {
   type ContextMenuEntry,
   type ContextMenuItem,
   type ContextMenuSeparator,
+  type ContextMenuSubItem,
   type ToolbarSlot,
 } from "./ui-registry.js";
 export { PLUGIN_SERVICE_KEYS, type PluginServiceKey } from "./plugin-keys.js";

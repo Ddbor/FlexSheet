@@ -1,1 +1,1 @@
-export { columnIndexToLabel } from "./grid.js";
+export { columnIndexToLabel, columnLabelToIndex } from "./grid.js";

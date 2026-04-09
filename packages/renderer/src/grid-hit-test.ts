@@ -1,7 +1,11 @@
 import type { Worksheet } from "@flexsheet/core";
+import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
 import type { FrozenLayout } from "./viewport.js";
 import { clampScroll, type ViewportScrollLimits } from "./viewport.js";
+
+/** 列标题右侧筛选按钮占用宽度（与 `paintColumnHeaderCell` 一致，画布 CSS 像素）。 */
+export const COLUMN_HEADER_FILTER_BUTTON_CSS_PX = 20;
 
 /** 行列标题区命中（不含表体单元格）。 */
 export type HeadingHit =
@@ -46,6 +50,85 @@ export function hitTestHeadingPointer(
     return { kind: "rowHeader", row };
   }
 
+  return null;
+}
+
+/**
+ * 命中列标题上的筛选下拉按钮时返回列索引；否则返回 null（与绘制区域一致）。
+ */
+export function hitTestColumnHeaderFilterButton(
+  canvasX: number,
+  canvasY: number,
+  sheet: Worksheet,
+  layout: FrozenLayout,
+  scrollX: number,
+  _scrollY: number,
+  scale = 1,
+): number | null {
+  const { headerW, headerH } = layout;
+  if (canvasX < headerW || canvasY < 0 || canvasY > headerH + 0.5) {
+    return null;
+  }
+  const gx = canvasX - headerW;
+  const col = columnIndexFromGx(gx, sheet, layout, scrollX, scale);
+  if (col === null || !sheet.hasColumnAutoFilter(col)) {
+    return null;
+  }
+  const headerMeta = sheet.getColumnAutoFilterMeta(col);
+  if (headerMeta?.uiKind !== "header") {
+    return null;
+  }
+  const x0 = cellLeftX(sheet, layout, col, scale, scrollX);
+  const colW = scaledColWidthAt(sheet, col, scale);
+  const pad = 2;
+  const btnW = COLUMN_HEADER_FILTER_BUTTON_CSS_PX + pad;
+  const rel = canvasX - x0;
+  if (rel >= colW - btnW && rel <= colW) {
+    return col;
+  }
+  return null;
+}
+
+/**
+ * 命中表体内「列筛选」锚点格上的下拉按钮时返回列索引（与 `paintBodyAutoFilterAnchors` 一致）。
+ */
+export function hitTestBodyCellAutoFilterButton(
+  canvasX: number,
+  canvasY: number,
+  sheet: Worksheet,
+  layout: FrozenLayout,
+  scrollX: number,
+  scrollY: number,
+  scale = 1,
+): number | null {
+  const { headerW, headerH } = layout;
+  if (canvasX < headerW || canvasY < headerH) {
+    return null;
+  }
+  const cellHit = hitTestCell(canvasX, canvasY, sheet, layout, scrollX, scrollY, scale);
+  if (cellHit === null) {
+    return null;
+  }
+  const meta = sheet.getColumnAutoFilterMeta(cellHit.col);
+  if (meta?.uiKind !== "body" || meta.bodyAnchorRow !== cellHit.row) {
+    return null;
+  }
+  const anchor = sheet.getMergeAnchorCell(cellHit.row, cellHit.col);
+  if (anchor.row !== cellHit.row || anchor.col !== cellHit.col) {
+    return null;
+  }
+  const x0 = cellLeftX(sheet, layout, cellHit.col, scale, scrollX);
+  const y0 = cellTopY(sheet, layout, cellHit.row, scale, scrollY);
+  const colW = scaledColWidthAt(sheet, cellHit.col, scale);
+  const rowH = scaledRowHeightAt(sheet, cellHit.row, scale);
+  const pad = 2;
+  const btnW = COLUMN_HEADER_FILTER_BUTTON_CSS_PX + pad;
+  const relX = canvasX - x0;
+  const relY = canvasY - y0;
+  const bandH = Math.min(rowH, 22);
+  if (relX >= colW - btnW && relX <= colW && relY >= 0 && relY <= bandH) {
+    return cellHit.col;
+  }
   return null;
 }
 

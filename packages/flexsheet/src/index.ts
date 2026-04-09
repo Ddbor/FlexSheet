@@ -31,6 +31,7 @@ export {
   type ContextMenuEntry,
   type ContextMenuItem,
   type ContextMenuSeparator,
+  type ContextMenuSubItem,
   type ToolbarSlot,
   type EventHandler,
 } from "@flexsheet/core";

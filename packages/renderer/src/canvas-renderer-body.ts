@@ -1,10 +1,16 @@
-import { formatCellDisplayWithStyle, type CellStyle, type CellTextOrientation, type Worksheet } from "@flexsheet/core";
+import {
+  formatCellDisplayWithStyle,
+  type CellStyle,
+  type CellTextOrientation,
+  type Worksheet,
+} from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import {
   argbToCss,
   buildCellCanvasFont,
   cellStyleLogicalFontSizeBasePx,
+  paintAutoFilterDropdownGlyph,
   scaledColWidthAt,
   scaledFontSizePx,
   scaledRowHeightAt,
@@ -13,6 +19,7 @@ import {
 } from "./canvas-renderer-utils.js";
 import { paintBodyCellBorders } from "./canvas-renderer-body-borders.js";
 import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
+import { COLUMN_HEADER_FILTER_BUTTON_CSS_PX } from "./grid-hit-test.js";
 import type { FrozenLayout } from "./viewport.js";
 
 export interface BodyPaintEnv {
@@ -288,7 +295,7 @@ function paintBodyCellTexts(
       const orientActive = orient !== "horizontal";
       let lines: string[];
       if (orientActive) {
-        const raw = text.includes("\n") ? text.split("\n")[0] ?? "" : text;
+        const raw = text.includes("\n") ? (text.split("\n")[0] ?? "") : text;
         lines = [raw];
       } else if (wrap) {
         lines = wrapCellLines(ctx, text, innerW);
@@ -381,6 +388,70 @@ function paintBodyCellTexts(
         }
       }
       ctx.restore();
+    }
+  }
+}
+
+function paintBodyAutoFilterAnchors(
+  env: BodyPaintEnv,
+  sheet: Worksheet,
+  layout: FrozenLayout,
+  headerW: number,
+  headerH: number,
+  canvasW: number,
+  canvasH: number,
+  r0: number,
+  r1: number,
+  c0: number,
+  c1: number,
+): void {
+  const { ctx } = env;
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (sheet.isMergeCoveredCell(r, c)) {
+        continue;
+      }
+      const meta = sheet.getColumnAutoFilterMeta(c);
+      if (meta?.uiKind !== "body" || meta.bodyAnchorRow !== r) {
+        continue;
+      }
+      const anchor = sheet.getMergeAnchorCell(r, c);
+      if (anchor.row !== r || anchor.col !== c) {
+        continue;
+      }
+      const info = sheet.getMergedRectInfo(r, c);
+      let colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      let rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
+      let x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      let y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      if (info.rowSpan > 1 || info.colSpan > 1) {
+        colW = 0;
+        for (let cc = info.anchorCol; cc < info.anchorCol + info.colSpan; cc++) {
+          colW += scaledColWidthAt(sheet, cc, env.viewZoom);
+        }
+        rowH = 0;
+        for (let rr = info.anchorRow; rr < info.anchorRow + info.rowSpan; rr++) {
+          rowH += scaledRowHeightAt(sheet, rr, env.viewZoom);
+        }
+        x = cellLeftX(sheet, layout, info.anchorCol, env.viewZoom, env.scrollX);
+        y = cellTopY(sheet, layout, info.anchorRow, env.viewZoom, env.scrollY);
+      }
+      if (colW <= 0 || rowH <= 0) {
+        continue;
+      }
+      if (!cellIntersectsCanvas(x, y, colW, rowH, headerW, headerH, canvasW, canvasH)) {
+        continue;
+      }
+      const pad = 2;
+      const innerW = COLUMN_HEADER_FILTER_BUTTON_CSS_PX - 4;
+      const innerH = 14;
+      const bx = x + colW - COLUMN_HEADER_FILTER_BUTTON_CSS_PX - pad;
+      const by = y + Math.max(1, (Math.min(rowH, 22) - innerH) / 2);
+      paintAutoFilterDropdownGlyph(ctx, bx, by, innerW, innerH, {
+        narrowed: sheet.isColumnAutoFilterNarrowed(c),
+        sortHint: sheet.getColumnAutoFilterSortHint(c) ?? null,
+        borderColor: env.theme.gridLineColor,
+      });
     }
   }
 }
@@ -524,6 +595,19 @@ function runBodyQuadrantPass(
 
   paintBodyCellBorders(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
   paintBodyCellTexts(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
+  paintBodyAutoFilterAnchors(
+    env,
+    sheet,
+    layout,
+    headerW,
+    headerH,
+    canvasW,
+    canvasH,
+    r0,
+    r1,
+    c0,
+    c1,
+  );
   ctx.restore();
 }
 

@@ -5,6 +5,17 @@
 /** 内置右键菜单图标键（由宿主将对应 SVG 画在菜单项左侧）。 */
 export type ContextMenuBuiltinIconId = "cut" | "copy" | "paste";
 
+/** 子菜单项（不支持再嵌套子菜单）。 */
+export interface ContextMenuSubItem {
+  readonly id: string;
+  readonly label: string;
+  readonly order?: number;
+  readonly disabled?: boolean;
+  /** 仅展示用快捷键提示（如 ⇧⌘R），不由菜单处理按键。 */
+  readonly shortcutHint?: string;
+  readonly onSelect?: () => void;
+}
+
 export interface ContextMenuItem {
   readonly id: string;
   readonly label: string;
@@ -12,6 +23,8 @@ export interface ContextMenuItem {
   readonly disabled?: boolean;
   /** 可选：与 `@flexsheet/toolbar` 中剪贴板图标一致的内置图标。 */
   readonly icon?: ContextMenuBuiltinIconId;
+  /** 有子菜单时，悬停展开；父项 `onSelect` 通常省略。 */
+  readonly submenu?: readonly ContextMenuSubItem[];
   readonly onSelect?: () => void;
 }
 

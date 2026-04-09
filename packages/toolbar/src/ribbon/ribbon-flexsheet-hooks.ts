@@ -325,6 +325,25 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
     case "home.align.textDirection.rotateDown":
       fs.applySelectionStylePatch({ textOrientation: "rotateDown90" });
       return true;
+    case "data.sort.asc":
+    case "data.sort.desc": {
+      if (fs.sortSelectionRowsByKeyColumn === undefined) {
+        return false;
+      }
+      const ac = fs.selection.getActiveCell();
+      fs.sortSelectionRowsByKeyColumn(ac.col, {
+        type: "value",
+        direction: ev.id === "data.sort.asc" ? "asc" : "desc",
+      });
+      return true;
+    }
+    case "data.sort.custom": {
+      if (fs.openCustomSortDialog === undefined) {
+        return false;
+      }
+      fs.openCustomSortDialog();
+      return true;
+    }
     default: {
       const fam = FONT_FAMILY_CSS.get(ev.id);
       if (fam !== undefined) {

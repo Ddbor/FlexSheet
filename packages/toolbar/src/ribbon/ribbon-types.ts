@@ -68,6 +68,24 @@ export interface FlexSheetLike {
   /** 存在时 Backstage 可提供 JSON 保存/导入。 */
   readonly workbook?: Workbook;
   loadWorkbook?(wb: Workbook): void;
+  /** 数据选项卡：按活动列对选区行排序。 */
+  sortSelectionRowsByKeyColumn?(
+    sortCol: number,
+    kind:
+      | { readonly type: "value"; readonly direction: "asc" | "desc" }
+      | {
+          readonly type: "fontColorOnTop";
+          readonly styleAnchorRow: number;
+          readonly styleAnchorCol: number;
+        }
+      | {
+          readonly type: "fillColorOnTop";
+          readonly styleAnchorRow: number;
+          readonly styleAnchorCol: number;
+        },
+  ): void;
+  /** 打开简单自定义排序对话框（列标 + 升/降序）。 */
+  openCustomSortDialog?(): void;
 }
 
 export type { ViewTabHandles } from "./tabs/view-tab.js";

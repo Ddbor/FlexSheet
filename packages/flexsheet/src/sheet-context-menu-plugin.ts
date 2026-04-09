@@ -3,7 +3,9 @@ import {
   selectionRangeContains,
   type ContextMenuBuiltinIconId,
   type ContextMenuEntry,
+  type ContextMenuItem,
   type ContextMenuSeparator,
+  type ContextMenuSubItem,
   type PluginContext,
   type SelectionRange,
   type Worksheet,
@@ -11,6 +13,7 @@ import {
 import { iconCopy, iconCut, iconPaste } from "@flexsheet/toolbar";
 
 import type { FlexSheet, FlexSheetSurfaceHit, SelectionCellDeleteMode } from "./flex-sheet.js";
+import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 
 /** 选区为整表宽的连续行块，且命中行落在该块内（行标题拖动多选后右键应保留选区）。 */
 function isRowHeaderHitInsideEntireRowBlockSelection(
@@ -51,6 +54,16 @@ function cloneBuiltinMenuIcon(id: ContextMenuBuiltinIconId): SVGSVGElement {
 
 function isContextMenuSeparator(e: ContextMenuEntry): e is ContextMenuSeparator {
   return "kind" in e && e.kind === "separator";
+}
+
+function contextMenuItemHasSubmenu(
+  e: ContextMenuEntry,
+): e is ContextMenuItem & { readonly submenu: readonly ContextMenuSubItem[] } {
+  return (
+    !isContextMenuSeparator(e) &&
+    Array.isArray((e as ContextMenuItem).submenu) &&
+    (e as ContextMenuItem).submenu!.length > 0
+  );
 }
 
 /** 排序后去掉首尾与连续重复的分割线。 */
@@ -136,6 +149,51 @@ interface BuiltinMenuActions {
   readonly openCellDeleteDialog: () => void;
   readonly openRowHeightPrompt: () => void;
   readonly openColWidthPrompt: () => void;
+  readonly openColumnFilterFromCell?: () => void;
+}
+
+function buildCellSortSubmenu(
+  flex: FlexSheet,
+  hit: { readonly row: number; readonly col: number },
+): readonly ContextMenuSubItem[] {
+  return [
+    {
+      id: "cell.sort.asc",
+      label: "升序",
+      onSelect: () => {
+        flex.sortSelectionRowsByKeyColumn(hit.col, { type: "value", direction: "asc" });
+      },
+    },
+    {
+      id: "cell.sort.desc",
+      label: "降序",
+      onSelect: () => {
+        flex.sortSelectionRowsByKeyColumn(hit.col, { type: "value", direction: "desc" });
+      },
+    },
+    {
+      id: "cell.sort.fillOnTop",
+      label: "将所选单元格颜色放在最前面",
+      onSelect: () => {
+        flex.sortSelectionRowsByKeyColumn(hit.col, {
+          type: "fillColorOnTop",
+          styleAnchorRow: hit.row,
+          styleAnchorCol: hit.col,
+        });
+      },
+    },
+    {
+      id: "cell.sort.fontOnTop",
+      label: "将所选字体颜色放在最前面",
+      onSelect: () => {
+        flex.sortSelectionRowsByKeyColumn(hit.col, {
+          type: "fontColorOnTop",
+          styleAnchorRow: hit.row,
+          styleAnchorCol: hit.col,
+        });
+      },
+    },
+  ];
 }
 
 function buildBuiltinItems(
@@ -209,6 +267,17 @@ function buildBuiltinItems(
     ];
   }
   if (scope === CONTEXT_MENU_SCOPE.cell && hit.kind === "cell") {
+    const cellExtras: ContextMenuEntry[] =
+      actions.openColumnFilterFromCell !== undefined
+        ? [
+            {
+              id: "data.filter",
+              label: "筛选",
+              order: 3,
+              onSelect: actions.openColumnFilterFromCell,
+            },
+          ]
+        : [];
     return [
       ...buildClipboardGroupEntries(flex),
       { id: "insert", label: "插入", order: 0, onSelect: actions.openCellInsertSubmenu },
@@ -218,6 +287,14 @@ function buildBuiltinItems(
         order: 2,
         onSelect: actions.openCellDeleteDialog,
       },
+      { kind: "separator", id: "sep.beforeSortFilter", order: 2.35 },
+      {
+        id: "cell.sort",
+        label: "排序",
+        order: 2.5,
+        submenu: buildCellSortSubmenu(flex, hit),
+      },
+      ...cellExtras,
     ];
   }
   return [{ id: "insert", label: "插入", order: 0, disabled: true }];
@@ -255,12 +332,18 @@ export class SheetContextMenuPlugin extends PluginBase {
   private readonly canvas: HTMLCanvasElement;
   private readonly getFlexSheet: () => FlexSheet;
   private menuEl: HTMLDivElement | null = null;
+  private contextSubmenuFlyoutEl: HTMLDivElement | null = null;
+  private contextSubmenuHideTimer: number | undefined;
   private promptRoot: HTMLDivElement | null = null;
   private readonly onDocPointerDown = (ev: PointerEvent): void => {
     if (this.promptRoot !== null && this.promptRoot.contains(ev.target as Node)) {
       return;
     }
-    if (this.menuEl !== null && !this.menuEl.contains(ev.target as Node)) {
+    const t = ev.target as Node;
+    const inRoot = this.menuEl !== null && this.menuEl.contains(t);
+    const inFlyout =
+      this.contextSubmenuFlyoutEl !== null && this.contextSubmenuFlyoutEl.contains(t);
+    if (this.menuEl !== null && !inRoot && !inFlyout) {
       this.hideMenu();
     }
   };
@@ -373,6 +456,21 @@ export class SheetContextMenuPlugin extends PluginBase {
       openColWidthPrompt: () => {
         this.openColWidthPrompt(flex);
       },
+      openColumnFilterFromCell:
+        hit.kind === "cell"
+          ? () => {
+              const sh = flex.workbook.getActiveSheet();
+              if (sh === undefined) {
+                return;
+              }
+              sh.enableColumnAutoFilterFromSelection(
+                hit.row,
+                hit.col,
+                flex.selection.getNormalizedRange(),
+              );
+              flex.refresh();
+            }
+          : undefined,
     });
     this.showMenu(ev.clientX, ev.clientY, items);
   };
@@ -397,6 +495,88 @@ export class SheetContextMenuPlugin extends PluginBase {
     root.style.fontSize = "12px";
     root.style.fontFamily = "system-ui, -apple-system, sans-serif";
 
+    const pad = 4;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    const openSubmenuFlyout = (hostBtn: HTMLButtonElement, subs: readonly ContextMenuSubItem[]): void => {
+      this.cancelContextSubmenuHide();
+      if (this.contextSubmenuFlyoutEl !== null) {
+        this.contextSubmenuFlyoutEl.remove();
+        this.contextSubmenuFlyoutEl = null;
+      }
+      const fly = document.createElement("div");
+      fly.className = "fs-sheet-context-menu fs-sheet-context-menu--flyout";
+      fly.setAttribute("role", "menu");
+      for (const sub of subs) {
+        const subBtn = document.createElement("button");
+        subBtn.type = "button";
+        subBtn.className = "fs-sheet-context-menu__item";
+        subBtn.setAttribute("role", "menuitem");
+        subBtn.disabled = sub.disabled === true;
+        subBtn.style.display = "flex";
+        subBtn.style.alignItems = "center";
+        subBtn.style.gap = "8px";
+        subBtn.style.width = "100%";
+        subBtn.style.padding = "6px 12px";
+        subBtn.style.border = "none";
+        subBtn.style.background = "#fff";
+        subBtn.style.textAlign = "left";
+        subBtn.style.cursor = sub.disabled === true ? "default" : "pointer";
+        subBtn.style.font = "inherit";
+        const subLabel = document.createElement("span");
+        subLabel.className = "fs-sheet-context-menu__label";
+        subLabel.textContent = sub.label;
+        subBtn.appendChild(subLabel);
+        if (sub.shortcutHint !== undefined) {
+          const sc = document.createElement("span");
+          sc.className = "fs-sheet-context-menu__shortcut";
+          sc.textContent = sub.shortcutHint;
+          subBtn.appendChild(sc);
+        }
+        subBtn.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+        });
+        subBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          if (sub.disabled === true) {
+            return;
+          }
+          sub.onSelect?.();
+          this.hideMenu();
+        });
+        fly.appendChild(subBtn);
+      }
+      document.body.appendChild(fly);
+      this.contextSubmenuFlyoutEl = fly;
+      const br = hostBtn.getBoundingClientRect();
+      let fl = br.right - 6;
+      let ft = br.top;
+      fly.style.left = `${fl}px`;
+      fly.style.top = `${ft}px`;
+      requestAnimationFrame(() => {
+        if (this.contextSubmenuFlyoutEl !== fly) {
+          return;
+        }
+        const fw = fly.offsetWidth;
+        const fh = fly.offsetHeight;
+        if (fl + fw + pad > vw) {
+          fl = Math.max(pad, br.left - fw + 6);
+          fly.style.left = `${fl}px`;
+        }
+        if (ft + fh + pad > vh) {
+          ft = Math.max(pad, vh - fh - pad);
+          fly.style.top = `${ft}px`;
+        }
+      });
+      fly.addEventListener("mouseenter", () => {
+        this.cancelContextSubmenuHide();
+      });
+      fly.addEventListener("mouseleave", () => {
+        this.scheduleContextSubmenuHide();
+      });
+    };
+
     for (const item of items) {
       if (isContextMenuSeparator(item)) {
         const sep = document.createElement("div");
@@ -404,6 +584,67 @@ export class SheetContextMenuPlugin extends PluginBase {
         sep.setAttribute("role", "separator");
         sep.setAttribute("aria-orientation", "horizontal");
         root.appendChild(sep);
+        continue;
+      }
+      if (contextMenuItemHasSubmenu(item)) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "fs-sheet-context-menu__item fs-sheet-context-menu__item--submenu";
+        btn.setAttribute("role", "menuitem");
+        btn.setAttribute("aria-haspopup", "menu");
+        btn.setAttribute("aria-expanded", "false");
+        btn.disabled = item.disabled === true;
+        btn.style.display = "flex";
+        btn.style.alignItems = "center";
+        btn.style.gap = "8px";
+        btn.style.width = "100%";
+        btn.style.padding = "6px 12px";
+        btn.style.border = "none";
+        btn.style.background = "#fff";
+        btn.style.textAlign = "left";
+        btn.style.cursor = item.disabled === true ? "default" : "pointer";
+        btn.style.font = "inherit";
+        const iconWrap = document.createElement("span");
+        iconWrap.className = "fs-sheet-context-menu__icon";
+        iconWrap.setAttribute("aria-hidden", "true");
+        if (item.icon !== undefined) {
+          const svg = cloneBuiltinMenuIcon(item.icon);
+          svg.style.width = "16px";
+          svg.style.height = "16px";
+          svg.style.flexShrink = "0";
+          svg.style.display = "block";
+          iconWrap.appendChild(svg);
+        }
+        btn.appendChild(iconWrap);
+        const label = document.createElement("span");
+        label.className = "fs-sheet-context-menu__label";
+        label.textContent = item.label;
+        btn.appendChild(label);
+        const chevron = document.createElement("span");
+        chevron.className = "fs-sheet-context-menu__submenu-chevron";
+        chevron.textContent = "▸";
+        chevron.setAttribute("aria-hidden", "true");
+        btn.appendChild(chevron);
+        btn.addEventListener("mouseenter", () => {
+          if (btn.disabled) {
+            return;
+          }
+          openSubmenuFlyout(btn, item.submenu);
+          btn.setAttribute("aria-expanded", "true");
+        });
+        btn.addEventListener("mouseleave", () => {
+          this.scheduleContextSubmenuHide();
+        });
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (btn.disabled) {
+            return;
+          }
+          openSubmenuFlyout(btn, item.submenu);
+          btn.setAttribute("aria-expanded", "true");
+        });
+        root.appendChild(btn);
         continue;
       }
       const btn = document.createElement("button");
@@ -453,11 +694,8 @@ export class SheetContextMenuPlugin extends PluginBase {
     document.body.appendChild(root);
     this.menuEl = root;
 
-    const pad = 4;
     let left = clientX;
     let top = clientY;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
     requestAnimationFrame(() => {
       if (this.menuEl === null) {
         return;
@@ -476,9 +714,41 @@ export class SheetContextMenuPlugin extends PluginBase {
   }
 
   private hideMenu(): void {
+    this.clearContextSubmenuFlyout();
     if (this.menuEl !== null) {
       this.menuEl.remove();
       this.menuEl = null;
+    }
+  }
+
+  private clearContextSubmenuFlyout(): void {
+    if (this.contextSubmenuHideTimer !== undefined) {
+      window.clearTimeout(this.contextSubmenuHideTimer);
+      this.contextSubmenuHideTimer = undefined;
+    }
+    if (this.contextSubmenuFlyoutEl !== null) {
+      this.contextSubmenuFlyoutEl.remove();
+      this.contextSubmenuFlyoutEl = null;
+    }
+  }
+
+  private scheduleContextSubmenuHide(): void {
+    if (this.contextSubmenuHideTimer !== undefined) {
+      window.clearTimeout(this.contextSubmenuHideTimer);
+    }
+    this.contextSubmenuHideTimer = window.setTimeout(() => {
+      this.contextSubmenuHideTimer = undefined;
+      if (this.contextSubmenuFlyoutEl !== null) {
+        this.contextSubmenuFlyoutEl.remove();
+        this.contextSubmenuFlyoutEl = null;
+      }
+    }, 220);
+  }
+
+  private cancelContextSubmenuHide(): void {
+    if (this.contextSubmenuHideTimer !== undefined) {
+      window.clearTimeout(this.contextSubmenuHideTimer);
+      this.contextSubmenuHideTimer = undefined;
     }
   }
 
@@ -805,6 +1075,7 @@ export class SheetContextMenuPlugin extends PluginBase {
   }
 
   private ensureMenuStyles(): void {
+    ensureFsSheetPromptStyles();
     if (SheetContextMenuPlugin.styleInjected) {
       return;
     }
@@ -814,11 +1085,17 @@ export class SheetContextMenuPlugin extends PluginBase {
   box-sizing: border-box;
   flex-shrink: 0;
   width: 16px;
+  min-width: 16px;
   height: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: #323130;
+}
+.fs-sheet-context-menu__label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
 }
 .fs-sheet-context-menu__sep {
   height: 1px;
@@ -831,24 +1108,42 @@ export class SheetContextMenuPlugin extends PluginBase {
   background: #e8f5e9 !important;
   outline: none;
 }
-.fs-sheet-prompt-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 10002;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+.fs-sheet-context-menu__item--submenu,
+.fs-sheet-context-menu__submenu-flyout .fs-sheet-context-menu__item:not(:disabled):hover,
+.fs-sheet-context-menu__submenu-flyout .fs-sheet-context-menu__item:not(:disabled):focus-visible {
+  background: #e8f5e9 !important;
+  outline: none;
 }
-.fs-sheet-prompt {
-  width: min(268px, calc(100vw - 32px));
-  max-width: 100%;
-  box-sizing: border-box;
+.fs-sheet-context-menu__item--submenu {
+  justify-content: flex-start;
+}
+.fs-sheet-context-menu__submenu-chevron {
+  margin-left: auto;
+  padding-left: 8px;
+  flex-shrink: 0;
+  opacity: 0.55;
+  font-size: 11px;
+}
+.fs-sheet-context-menu--flyout {
+  position: fixed;
+  z-index: 10003;
+  min-width: 200px;
+  padding: 4px 0;
+  margin: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 2px;
   background: #fff;
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+.fs-sheet-context-menu--flyout .fs-sheet-context-menu__shortcut {
+  margin-left: auto;
+  padding-left: 16px;
+  flex-shrink: 0;
+  opacity: 0.55;
+  font-size: 11px;
+  white-space: nowrap;
 }
 .fs-sheet-prompt--delete {
   width: min(340px, calc(100vw - 32px));
@@ -883,95 +1178,6 @@ export class SheetContextMenuPlugin extends PluginBase {
 .fs-sheet-prompt__radio-row:has(input:disabled) {
   cursor: default;
   color: #a19f9d;
-}
-.fs-sheet-prompt__header {
-  position: relative;
-  padding: 14px 40px 8px 14px;
-  border-bottom: 1px solid #edebe9;
-}
-.fs-sheet-prompt__title {
-  font-size: 15px;
-  font-weight: 600;
-  color: #323130;
-  text-align: center;
-}
-.fs-sheet-prompt__close {
-  position: absolute;
-  right: 8px;
-  top: 8px;
-  width: 32px;
-  height: 32px;
-  border: none;
-  background: transparent;
-  font-size: 20px;
-  line-height: 1;
-  color: #605e5c;
-  cursor: pointer;
-  border-radius: 4px;
-}
-.fs-sheet-prompt__close:hover {
-  background: #f3f2f1;
-  color: #323130;
-}
-.fs-sheet-prompt__body {
-  padding: 16px 16px 6px 16px;
-}
-.fs-sheet-prompt__label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  color: #323130;
-}
-.fs-sheet-prompt__label span {
-  flex-shrink: 0;
-  min-width: 42px;
-}
-.fs-sheet-prompt__input {
-  flex: 1;
-  min-width: 0;
-  padding: 7px 10px;
-  font-size: 14px;
-  border: 1px solid #c8c6c4;
-  border-radius: 4px;
-  outline: none;
-  box-sizing: border-box;
-}
-.fs-sheet-prompt__input:focus {
-  border-color: #217346;
-  box-shadow: 0 0 0 1px #217346 inset;
-}
-.fs-sheet-prompt__footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 16px 16px 16px;
-}
-.fs-sheet-prompt__btn {
-  min-width: 72px;
-  padding: 7px 14px;
-  font-size: 13px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.fs-sheet-prompt__btn--primary {
-  border: none;
-  background: #217346;
-  color: #fff;
-  font-weight: 500;
-}
-.fs-sheet-prompt__btn--primary:hover {
-  background: #1a5c38;
-}
-.fs-sheet-prompt__btn--secondary {
-  border: 1px solid #c8c6c4;
-  background: #fff;
-  color: #323130;
-}
-.fs-sheet-prompt__btn--secondary:hover {
-  background: #f3f2f1;
 }
 `;
     document.head.appendChild(style);

@@ -4,7 +4,9 @@ import { columnIndexToLabel } from "@flexsheet/shared";
 import type { SheetTheme } from "@flexsheet/theme";
 import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import { getClampedSelectionSpan } from "./canvas-renderer-selection-span.js";
+import { COLUMN_HEADER_FILTER_BUTTON_CSS_PX } from "./grid-hit-test.js";
 import {
+  paintAutoFilterDropdownGlyph,
   scaledColW,
   scaledColWidthAt,
   scaledFontSizePx,
@@ -118,14 +120,32 @@ function paintColumnHeaderCell(
   colW: number,
   headerH: number,
   isSelectionColumn: boolean,
+  sheet: Worksheet,
 ): void {
   ctx.fillStyle = isSelectionColumn ? theme.headerActiveBg : theme.headerBg;
   ctx.fillRect(x, 0, colW, headerH);
   ctx.fillStyle = isSelectionColumn ? theme.activeCellBorderColor : theme.headerColor;
   ctx.font = `${isSelectionColumn ? "bold " : ""}${scaledFontSizePx(12, viewZoom)}px system-ui, -apple-system, sans-serif`;
-  ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(columnIndexToLabel(c), x + colW / 2, headerH / 2);
+  const meta = sheet.getColumnAutoFilterMeta(c);
+  const showFilter = meta?.uiKind === "header";
+  const reserve = showFilter ? COLUMN_HEADER_FILTER_BUTTON_CSS_PX + 4 : 0;
+  const labelW = Math.max(8, colW - reserve);
+  ctx.textAlign = "center";
+  ctx.fillText(columnIndexToLabel(c), x + labelW / 2, headerH / 2);
+  if (showFilter) {
+    const pad = 2;
+    const innerW = COLUMN_HEADER_FILTER_BUTTON_CSS_PX - 4;
+    const innerH = 14;
+    const bx = x + colW - COLUMN_HEADER_FILTER_BUTTON_CSS_PX - pad;
+    const by = (headerH - innerH) / 2;
+    const borderColor = isSelectionColumn ? theme.activeCellBorderColor : theme.headerColor;
+    paintAutoFilterDropdownGlyph(ctx, bx, by, innerW, innerH, {
+      narrowed: sheet.isColumnAutoFilterNarrowed(c),
+      sortHint: sheet.getColumnAutoFilterSortHint(c) ?? null,
+      borderColor,
+    });
+  }
 }
 
 function paintRowHeaderCell(
@@ -246,6 +266,7 @@ export function drawAllColumnHeaders(
         colW,
         headerH,
         columnInSelection(c),
+        sheet,
       );
     }
     strokeColumnHeaderGrid(scrollCols, sx0);
@@ -270,6 +291,7 @@ export function drawAllColumnHeaders(
         colW,
         headerH,
         columnInSelection(c),
+        sheet,
       );
     }
     strokeColumnHeaderGrid(frozenColsList, headerW);
