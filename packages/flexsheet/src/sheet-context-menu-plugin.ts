@@ -5,10 +5,42 @@ import {
   type ContextMenuEntry,
   type ContextMenuSeparator,
   type PluginContext,
+  type SelectionRange,
+  type Worksheet,
 } from "@flexsheet/core";
 import { iconCopy, iconCut, iconPaste } from "@flexsheet/toolbar";
 
-import type { FlexSheet, FlexSheetSurfaceHit } from "./flex-sheet.js";
+import type { FlexSheet, FlexSheetSurfaceHit, SelectionCellDeleteMode } from "./flex-sheet.js";
+
+/** 选区为整表宽的连续行块，且命中行落在该块内（行标题拖动多选后右键应保留选区）。 */
+function isRowHeaderHitInsideEntireRowBlockSelection(
+  sheet: Worksheet,
+  range: SelectionRange,
+  hitRow: number,
+): boolean {
+  const lastC = Math.max(0, sheet.colCount - 1);
+  return (
+    range.startCol === 0 &&
+    range.endCol === lastC &&
+    hitRow >= range.startRow &&
+    hitRow <= range.endRow
+  );
+}
+
+/** 选区为整表高的连续列块，且命中列落在该块内（列标题拖动多选后右键应保留选区）。 */
+function isColumnHeaderHitInsideEntireColBlockSelection(
+  sheet: Worksheet,
+  range: SelectionRange,
+  hitCol: number,
+): boolean {
+  const lastR = Math.max(0, sheet.rowCount - 1);
+  return (
+    range.startRow === 0 &&
+    range.endRow === lastR &&
+    hitCol >= range.startCol &&
+    hitCol <= range.endCol
+  );
+}
 
 function cloneBuiltinMenuIcon(id: ContextMenuBuiltinIconId): SVGSVGElement {
   const el =
@@ -88,16 +120,33 @@ function buildClipboardGroupEntries(flex: FlexSheet): readonly ContextMenuEntry[
       },
     },
     { kind: "separator", id: "sep.afterClipboard", order: -5 },
+    {
+      id: "selection.clearContents",
+      label: "清空内容",
+      order: -4,
+      onSelect: () => {
+        flex.clearSelectionContents();
+      },
+    },
   ];
+}
+
+interface BuiltinMenuActions {
+  readonly openCellInsertSubmenu: () => void;
+  readonly openCellDeleteDialog: () => void;
+  readonly openRowHeightPrompt: () => void;
+  readonly openColWidthPrompt: () => void;
 }
 
 function buildBuiltinItems(
   scope: string,
   hit: FlexSheetSurfaceHit,
   flex: FlexSheet,
-  openCellInsertSubmenu: () => void,
+  actions: BuiltinMenuActions,
 ): readonly ContextMenuEntry[] {
   if (scope === CONTEXT_MENU_SCOPE.rowHeader && hit.kind === "rowHeader") {
+    const sheet = flex.workbook.getActiveSheet();
+    const cannotDeleteRow = sheet === undefined || sheet.rowCount <= 1;
     return [
       ...buildClipboardGroupEntries(flex),
       {
@@ -109,9 +158,27 @@ function buildBuiltinItems(
           flex.insertRows(hit.row, 1);
         },
       },
+      {
+        id: "structure.deleteRows",
+        label: "删除",
+        order: 2,
+        disabled: cannotDeleteRow,
+        onSelect: () => {
+          flex.deleteSelectedRows();
+        },
+      },
+      { kind: "separator", id: "sep.beforeRowHeight", order: 5 },
+      {
+        id: "rowHeight",
+        label: "行高",
+        order: 10,
+        onSelect: actions.openRowHeightPrompt,
+      },
     ];
   }
   if (scope === CONTEXT_MENU_SCOPE.columnHeader && hit.kind === "columnHeader") {
+    const sheet = flex.workbook.getActiveSheet();
+    const cannotDeleteCol = sheet === undefined || sheet.colCount <= 1;
     return [
       ...buildClipboardGroupEntries(flex),
       {
@@ -123,10 +190,35 @@ function buildBuiltinItems(
           flex.insertCols(hit.col, 1);
         },
       },
+      {
+        id: "structure.deleteCols",
+        label: "删除",
+        order: 2,
+        disabled: cannotDeleteCol,
+        onSelect: () => {
+          flex.deleteSelectedCols();
+        },
+      },
+      { kind: "separator", id: "sep.beforeColWidth", order: 5 },
+      {
+        id: "colWidth",
+        label: "列宽",
+        order: 10,
+        onSelect: actions.openColWidthPrompt,
+      },
     ];
   }
   if (scope === CONTEXT_MENU_SCOPE.cell && hit.kind === "cell") {
-    return [...buildClipboardGroupEntries(flex), { id: "insert", label: "插入", order: 0, onSelect: openCellInsertSubmenu }];
+    return [
+      ...buildClipboardGroupEntries(flex),
+      { id: "insert", label: "插入", order: 0, onSelect: actions.openCellInsertSubmenu },
+      {
+        id: "cell.delete",
+        label: "删除",
+        order: 2,
+        onSelect: actions.openCellDeleteDialog,
+      },
+    ];
   }
   return [{ id: "insert", label: "插入", order: 0, disabled: true }];
 }
@@ -136,9 +228,9 @@ function mergeContextMenuItems(
   ctx: PluginContext,
   hit: FlexSheetSurfaceHit,
   flex: FlexSheet,
-  openCellInsertSubmenu: () => void,
+  actions: BuiltinMenuActions,
 ): ContextMenuEntry[] {
-  const base = buildBuiltinItems(scope, hit, flex, openCellInsertSubmenu);
+  const base = buildBuiltinItems(scope, hit, flex, actions);
   const extra = ctx.ui.getContextMenuItems(scope);
   return normalizeContextMenuEntries([...base, ...extra]);
 }
@@ -163,13 +255,23 @@ export class SheetContextMenuPlugin extends PluginBase {
   private readonly canvas: HTMLCanvasElement;
   private readonly getFlexSheet: () => FlexSheet;
   private menuEl: HTMLDivElement | null = null;
+  private promptRoot: HTMLDivElement | null = null;
   private readonly onDocPointerDown = (ev: PointerEvent): void => {
+    if (this.promptRoot !== null && this.promptRoot.contains(ev.target as Node)) {
+      return;
+    }
     if (this.menuEl !== null && !this.menuEl.contains(ev.target as Node)) {
       this.hideMenu();
     }
   };
   private readonly onDocKeyDown = (ev: KeyboardEvent): void => {
     if (ev.key === "Escape") {
+      if (this.promptRoot !== null) {
+        this.closePrompt();
+        ev.preventDefault();
+        ev.stopPropagation();
+        return;
+      }
       this.hideMenu();
     }
   };
@@ -200,6 +302,7 @@ export class SheetContextMenuPlugin extends PluginBase {
 
   override destroy(): void {
     this.ctx = null;
+    this.closePrompt();
     this.hideMenu();
   }
 
@@ -235,12 +338,41 @@ export class SheetContextMenuPlugin extends PluginBase {
         flex.focusCellAt(hit.row, hit.col);
       }
     } else if (hit.kind === "rowHeader") {
-      flex.focusEntireRowForContextMenu(hit.row);
+      const sheet = flex.workbook.getActiveSheet();
+      const r = flex.selection.getNormalizedRange();
+      if (
+        sheet !== undefined &&
+        isRowHeaderHitInsideEntireRowBlockSelection(sheet, r, hit.row)
+      ) {
+        // 已在行标题多选范围内右键：不收缩为单行
+      } else {
+        flex.focusEntireRowForContextMenu(hit.row);
+      }
     } else if (hit.kind === "columnHeader") {
-      flex.focusEntireColumnForContextMenu(hit.col);
+      const sheet = flex.workbook.getActiveSheet();
+      const r = flex.selection.getNormalizedRange();
+      if (
+        sheet !== undefined &&
+        isColumnHeaderHitInsideEntireColBlockSelection(sheet, r, hit.col)
+      ) {
+        // 已在列标题多选范围内右键：不收缩为单列
+      } else {
+        flex.focusEntireColumnForContextMenu(hit.col);
+      }
     }
-    const items = mergeContextMenuItems(scope, ctx, hit, flex, () => {
-      this.openCellInsertSubmenu(flex, ev.clientX, ev.clientY);
+    const items = mergeContextMenuItems(scope, ctx, hit, flex, {
+      openCellInsertSubmenu: () => {
+        this.openCellInsertSubmenu(flex, ev.clientX, ev.clientY);
+      },
+      openCellDeleteDialog: () => {
+        this.openCellDeleteDialog(flex);
+      },
+      openRowHeightPrompt: () => {
+        this.openRowHeightPrompt(flex);
+      },
+      openColWidthPrompt: () => {
+        this.openColWidthPrompt(flex);
+      },
     });
     this.showMenu(ev.clientX, ev.clientY, items);
   };
@@ -350,6 +482,146 @@ export class SheetContextMenuPlugin extends PluginBase {
     }
   }
 
+  private openRowHeightPrompt(flex: FlexSheet): void {
+    const initial = String(flex.getRowHeightSampleForSelection());
+    this.openNumericPrompt({
+      title: "行高",
+      fieldLabel: "行高:",
+      initialValue: initial,
+      onConfirm: (value) => {
+        flex.applyRowHeightToSelection(value);
+      },
+    });
+  }
+
+  private openColWidthPrompt(flex: FlexSheet): void {
+    const initial = String(flex.getColWidthSampleForSelection());
+    this.openNumericPrompt({
+      title: "列宽",
+      fieldLabel: "列宽:",
+      initialValue: initial,
+      onConfirm: (value) => {
+        flex.applyColWidthToSelection(value);
+      },
+    });
+  }
+
+  private openNumericPrompt(options: {
+    readonly title: string;
+    readonly fieldLabel: string;
+    readonly initialValue: string;
+    readonly onConfirm: (value: number) => void;
+  }): void {
+    this.closePrompt();
+    this.ensureMenuStyles();
+
+    const overlay = document.createElement("div");
+    overlay.className = "fs-sheet-prompt-overlay";
+    overlay.setAttribute("role", "presentation");
+
+    const panel = document.createElement("div");
+    panel.className = "fs-sheet-prompt";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-labelledby", "fs-sheet-prompt-title");
+
+    const header = document.createElement("div");
+    header.className = "fs-sheet-prompt__header";
+    const titleEl = document.createElement("div");
+    titleEl.id = "fs-sheet-prompt-title";
+    titleEl.className = "fs-sheet-prompt__title";
+    titleEl.textContent = options.title;
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "fs-sheet-prompt__close";
+    closeBtn.setAttribute("aria-label", "关闭");
+    closeBtn.textContent = "×";
+    header.appendChild(titleEl);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement("div");
+    body.className = "fs-sheet-prompt__body";
+    const label = document.createElement("label");
+    label.className = "fs-sheet-prompt__label";
+    const labelText = document.createElement("span");
+    labelText.textContent = options.fieldLabel;
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "fs-sheet-prompt__input";
+    input.value = options.initialValue;
+    input.setAttribute("inputmode", "decimal");
+    label.appendChild(labelText);
+    label.appendChild(input);
+    body.appendChild(label);
+
+    const footer = document.createElement("div");
+    footer.className = "fs-sheet-prompt__footer";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--primary";
+    okBtn.textContent = "确定";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--secondary";
+    cancelBtn.textContent = "取消";
+    footer.appendChild(okBtn);
+    footer.appendChild(cancelBtn);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    panel.appendChild(footer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    this.promptRoot = overlay;
+
+    const tryConfirm = (): void => {
+      const raw = input.value.trim().replace(/,/g, "");
+      const n = Number(raw);
+      if (!Number.isFinite(n) || raw === "") {
+        input.focus();
+        input.select();
+        return;
+      }
+      options.onConfirm(n);
+      this.closePrompt();
+    };
+
+    const onOverlayPointerDown = (ev: PointerEvent): void => {
+      if (ev.target === overlay) {
+        this.closePrompt();
+      }
+    };
+    overlay.addEventListener("pointerdown", onOverlayPointerDown);
+
+    closeBtn.addEventListener("click", () => {
+      this.closePrompt();
+    });
+    cancelBtn.addEventListener("click", () => {
+      this.closePrompt();
+    });
+    okBtn.addEventListener("click", () => {
+      tryConfirm();
+    });
+    input.addEventListener("keydown", (kev) => {
+      if (kev.key === "Enter") {
+        kev.preventDefault();
+        tryConfirm();
+      }
+    });
+
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
+  }
+
+  private closePrompt(): void {
+    if (this.promptRoot !== null) {
+      this.promptRoot.remove();
+      this.promptRoot = null;
+    }
+  }
+
   private openCellInsertSubmenu(flex: FlexSheet, clientX: number, clientY: number): void {
     const { row, col } = flex.selection.getActiveCell();
     const subItems: readonly ContextMenuEntry[] = [
@@ -389,6 +661,149 @@ export class SheetContextMenuPlugin extends PluginBase {
     this.showMenu(clientX + 8, clientY, subItems);
   }
 
+  private openCellDeleteDialog(flex: FlexSheet): void {
+    this.closePrompt();
+    this.ensureMenuStyles();
+
+    const sheet = flex.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const cannotDeleteEntireRow = sheet.rowCount <= 1;
+    const cannotDeleteEntireCol = sheet.colCount <= 1;
+
+    const overlay = document.createElement("div");
+    overlay.className = "fs-sheet-prompt-overlay";
+    overlay.setAttribute("role", "presentation");
+
+    const panel = document.createElement("div");
+    panel.className = "fs-sheet-prompt fs-sheet-prompt--delete";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-labelledby", "fs-sheet-delete-dialog-title");
+
+    const header = document.createElement("div");
+    header.className = "fs-sheet-prompt__header";
+    const titleEl = document.createElement("div");
+    titleEl.id = "fs-sheet-delete-dialog-title";
+    titleEl.className = "fs-sheet-prompt__title";
+    titleEl.textContent = "删除";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "fs-sheet-prompt__close";
+    closeBtn.setAttribute("aria-label", "关闭");
+    closeBtn.textContent = "×";
+    header.appendChild(titleEl);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement("div");
+    body.className = "fs-sheet-prompt__body";
+    const fieldset = document.createElement("fieldset");
+    fieldset.className = "fs-sheet-prompt__fieldset";
+    const legend = document.createElement("legend");
+    legend.className = "fs-sheet-prompt__fieldset-legend";
+    legend.textContent = "删除";
+    fieldset.appendChild(legend);
+
+    const optionDefs: readonly {
+      readonly value: SelectionCellDeleteMode;
+      readonly label: string;
+      readonly disabled: boolean;
+    }[] = [
+      { value: "shiftLeft", label: "右侧单元格左移", disabled: false },
+      { value: "shiftUp", label: "下方单元格上移", disabled: false },
+      { value: "entireRow", label: "整行", disabled: cannotDeleteEntireRow },
+      { value: "entireCol", label: "整列", disabled: cannotDeleteEntireCol },
+    ];
+
+    let selected: SelectionCellDeleteMode = "shiftLeft";
+    const radios: HTMLInputElement[] = [];
+
+    for (const def of optionDefs) {
+      const row = document.createElement("label");
+      row.className = "fs-sheet-prompt__radio-row";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "fs-cell-delete-mode";
+      radio.value = def.value;
+      radio.disabled = def.disabled;
+      radios.push(radio);
+      const text = document.createElement("span");
+      text.textContent = def.label;
+      row.appendChild(radio);
+      row.appendChild(text);
+      fieldset.appendChild(row);
+      radio.addEventListener("change", () => {
+        if (radio.checked) {
+          selected = def.value;
+        }
+      });
+    }
+
+    const firstEnabled = optionDefs.find((d) => !d.disabled);
+    if (firstEnabled !== undefined) {
+      selected = firstEnabled.value;
+    }
+    for (let i = 0; i < optionDefs.length; i++) {
+      const r = radios[i];
+      const d = optionDefs[i];
+      if (r !== undefined && d !== undefined) {
+        r.checked = !d.disabled && d.value === selected;
+      }
+    }
+
+    body.appendChild(fieldset);
+
+    const footer = document.createElement("div");
+    footer.className = "fs-sheet-prompt__footer";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--primary";
+    okBtn.textContent = "确定";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--secondary";
+    cancelBtn.textContent = "取消";
+    footer.appendChild(okBtn);
+    footer.appendChild(cancelBtn);
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    panel.appendChild(footer);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+    this.promptRoot = overlay;
+
+    const tryConfirm = (): void => {
+      const choice =
+        (radios.find((r) => r.checked)?.value as SelectionCellDeleteMode | undefined) ?? selected;
+      flex.executeSelectionCellDelete(choice);
+      this.closePrompt();
+    };
+
+    const onOverlayPointerDown = (ev: PointerEvent): void => {
+      if (ev.target === overlay) {
+        this.closePrompt();
+      }
+    };
+    overlay.addEventListener("pointerdown", onOverlayPointerDown);
+
+    closeBtn.addEventListener("click", () => {
+      this.closePrompt();
+    });
+    cancelBtn.addEventListener("click", () => {
+      this.closePrompt();
+    });
+    okBtn.addEventListener("click", () => {
+      tryConfirm();
+    });
+
+    requestAnimationFrame(() => {
+      const focusTarget = radios.find((r) => r.checked && !r.disabled) ?? radios.find((r) => !r.disabled);
+      focusTarget?.focus();
+    });
+  }
+
   private ensureMenuStyles(): void {
     if (SheetContextMenuPlugin.styleInjected) {
       return;
@@ -415,6 +830,148 @@ export class SheetContextMenuPlugin extends PluginBase {
 .fs-sheet-context-menu__item:not(:disabled):focus-visible {
   background: #e8f5e9 !important;
   outline: none;
+}
+.fs-sheet-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.fs-sheet-prompt {
+  width: min(268px, calc(100vw - 32px));
+  max-width: 100%;
+  box-sizing: border-box;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+}
+.fs-sheet-prompt--delete {
+  width: min(340px, calc(100vw - 32px));
+}
+.fs-sheet-prompt__fieldset {
+  margin: 0;
+  padding: 10px 12px 12px 12px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #323130;
+}
+.fs-sheet-prompt__fieldset-legend {
+  padding: 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #323130;
+}
+.fs-sheet-prompt__radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0 0;
+  cursor: pointer;
+  user-select: none;
+}
+.fs-sheet-prompt__radio-row input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: #217346;
+}
+.fs-sheet-prompt__radio-row:has(input:disabled) {
+  cursor: default;
+  color: #a19f9d;
+}
+.fs-sheet-prompt__header {
+  position: relative;
+  padding: 14px 40px 8px 14px;
+  border-bottom: 1px solid #edebe9;
+}
+.fs-sheet-prompt__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #323130;
+  text-align: center;
+}
+.fs-sheet-prompt__close {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  line-height: 1;
+  color: #605e5c;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.fs-sheet-prompt__close:hover {
+  background: #f3f2f1;
+  color: #323130;
+}
+.fs-sheet-prompt__body {
+  padding: 16px 16px 6px 16px;
+}
+.fs-sheet-prompt__label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #323130;
+}
+.fs-sheet-prompt__label span {
+  flex-shrink: 0;
+  min-width: 42px;
+}
+.fs-sheet-prompt__input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 14px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  outline: none;
+  box-sizing: border-box;
+}
+.fs-sheet-prompt__input:focus {
+  border-color: #217346;
+  box-shadow: 0 0 0 1px #217346 inset;
+}
+.fs-sheet-prompt__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px 16px 16px;
+}
+.fs-sheet-prompt__btn {
+  min-width: 72px;
+  padding: 7px 14px;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fs-sheet-prompt__btn--primary {
+  border: none;
+  background: #217346;
+  color: #fff;
+  font-weight: 500;
+}
+.fs-sheet-prompt__btn--primary:hover {
+  background: #1a5c38;
+}
+.fs-sheet-prompt__btn--secondary {
+  border: 1px solid #c8c6c4;
+  background: #fff;
+  color: #323130;
+}
+.fs-sheet-prompt__btn--secondary:hover {
+  background: #f3f2f1;
 }
 `;
     document.head.appendChild(style);

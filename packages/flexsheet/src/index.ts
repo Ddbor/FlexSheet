@@ -59,6 +59,7 @@ export {
   createDefaultWorkbook,
   type FlexSheetOptions,
   type FlexSheetSurfaceHit,
+  type SelectionCellDeleteMode,
 } from "./flex-sheet.js";
 
 export { mountExcelBottomBar, type MountExcelBottomBarOptions } from "./excel-bottom-bar.js";
@@ -92,12 +93,16 @@ export {
   getPasteClippedRect,
 } from "./clipboard/clipboard-commands.js";
 export {
+  DeleteCellsShiftLeftCommand,
+  DeleteCellsShiftUpCommand,
   DeleteColsCommand,
   DeleteRowsCommand,
   InsertColsCommand,
   InsertRowsCommand,
   SetColHiddenCommand,
+  SetColWidthsInRangeCommand,
   SetColWidthCommand,
+  SetRowHeightsInRangeCommand,
   SetRowHeightCommand,
   SetRowHiddenCommand,
 } from "./sheet-structure-commands.js";

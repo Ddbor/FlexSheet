@@ -106,6 +106,27 @@ describe("SelectionModel", () => {
     expect(model.getActiveCell()).toEqual({ row: 0, col: 0 });
   });
 
+  it("selectEntireColumnRange / selectEntireRowRange span inclusive blocks", () => {
+    const sheet = new Worksheet("S", 8, 6);
+    const model = new SelectionModel(() => sheet);
+    model.selectEntireColumnRange(4, 1);
+    expect(model.getNormalizedRange()).toEqual({
+      startRow: 0,
+      startCol: 1,
+      endRow: 7,
+      endCol: 4,
+    });
+    expect(model.getActiveCell()).toEqual({ row: 0, col: 1 });
+    model.selectEntireRowRange(5, 2);
+    expect(model.getNormalizedRange()).toEqual({
+      startRow: 2,
+      startCol: 0,
+      endRow: 5,
+      endCol: 5,
+    });
+    expect(model.getActiveCell()).toEqual({ row: 2, col: 0 });
+  });
+
   it("selectEntireColumn / Row / Sheet set full spans", () => {
     const sheet = new Worksheet("S", 8, 6);
     const model = new SelectionModel(() => sheet);

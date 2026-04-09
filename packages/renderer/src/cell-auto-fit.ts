@@ -99,8 +99,7 @@ export function computeRowAutoHeight(sheet: Worksheet, row: number, viewZoom: nu
       indentPx = maxIndentPx;
     }
     const innerW = Math.max(1, colW - 2 * PAD - indentPx);
-    const lines =
-      st?.wrapText === true ? wrapCellLines(ctx, text, innerW) : text.split("\n");
+    const lines = st?.wrapText === true ? wrapCellLines(ctx, text, innerW) : text.split("\n");
     const cellH = Math.ceil(lines.length * lineH + 4);
     maxH = Math.max(maxH, cellH);
   }

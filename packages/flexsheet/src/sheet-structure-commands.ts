@@ -1,4 +1,10 @@
-import { type CellStyle, type ICommand, type SelectionRange, type Worksheet } from "@flexsheet/core";
+import {
+  normalizeSelectionRange,
+  type CellStyle,
+  type ICommand,
+  type SelectionRange,
+  type Worksheet,
+} from "@flexsheet/core";
 import { recalcWorksheet } from "@flexsheet/formula";
 import type { SelectionModel } from "@flexsheet/selection";
 
@@ -237,6 +243,82 @@ export class SetColWidthCommand implements ICommand {
   }
 }
 
+/** 将闭区间 [startRow,endRow] 各行设为同一高度，单次撤销。 */
+export class SetRowHeightsInRangeCommand implements ICommand {
+  readonly id = "sheet.setRowHeightsInRange";
+  readonly label = "调整行高";
+  private readonly sheet: Worksheet;
+  private readonly startRow: number;
+  private readonly endRow: number;
+  private readonly height: number;
+  private readonly before: number[];
+
+  constructor(sheet: Worksheet, startRow: number, endRow: number, height: number) {
+    this.sheet = sheet;
+    const lo = Math.min(startRow, endRow);
+    const hi = Math.max(startRow, endRow);
+    this.startRow = lo;
+    this.endRow = hi;
+    this.height = height;
+    this.before = [];
+    for (let r = lo; r <= hi; r++) {
+      this.before.push(sheet.getRowHeight(r));
+    }
+  }
+
+  execute(): void {
+    for (let r = this.startRow; r <= this.endRow; r++) {
+      this.sheet.setRowHeight(r, this.height);
+    }
+  }
+
+  undo(): void {
+    let i = 0;
+    for (let r = this.startRow; r <= this.endRow; r++) {
+      this.sheet.setRowHeight(r, this.before[i]!);
+      i++;
+    }
+  }
+}
+
+/** 将闭区间 [startCol,endCol] 各列设为同一宽度，单次撤销。 */
+export class SetColWidthsInRangeCommand implements ICommand {
+  readonly id = "sheet.setColWidthsInRange";
+  readonly label = "调整列宽";
+  private readonly sheet: Worksheet;
+  private readonly startCol: number;
+  private readonly endCol: number;
+  private readonly width: number;
+  private readonly before: number[];
+
+  constructor(sheet: Worksheet, startCol: number, endCol: number, width: number) {
+    this.sheet = sheet;
+    const lo = Math.min(startCol, endCol);
+    const hi = Math.max(startCol, endCol);
+    this.startCol = lo;
+    this.endCol = hi;
+    this.width = width;
+    this.before = [];
+    for (let c = lo; c <= hi; c++) {
+      this.before.push(sheet.getColWidth(c));
+    }
+  }
+
+  execute(): void {
+    for (let c = this.startCol; c <= this.endCol; c++) {
+      this.sheet.setColWidth(c, this.width);
+    }
+  }
+
+  undo(): void {
+    let i = 0;
+    for (let c = this.startCol; c <= this.endCol; c++) {
+      this.sheet.setColWidth(c, this.before[i]!);
+      i++;
+    }
+  }
+}
+
 export class InsertCellsShiftRightCommand implements ICommand {
   readonly id = "sheet.insertCellsShiftRight";
   readonly label = "插入单元格右移";
@@ -328,6 +410,172 @@ export class InsertCellsShiftDownCommand implements ICommand {
     restoreCol(this.sheet, this.col, this.beforeCol);
     this.selection.setNormalizedRange(this.beforeSelection);
     recalcWorksheet(this.sheet);
+  }
+}
+
+/** 删除选区单元格，同行内右侧左移填补（与 Excel「右侧单元格左移」一致）。 */
+export class DeleteCellsShiftLeftCommand implements ICommand {
+  readonly id = "sheet.deleteCellsShiftLeft";
+  readonly label = "删除单元格右移左填";
+  private readonly range: SelectionRange;
+  private readonly beforeTailByRow: readonly CellStateSnapshot[][];
+  private readonly beforeSelection: SelectionRange;
+
+  constructor(
+    private readonly sheet: Worksheet,
+    private readonly selection: SelectionModel,
+    range: SelectionRange,
+  ) {
+    const n = normalizeSelectionRange(range);
+    this.range = n;
+    this.beforeSelection = this.selection.getNormalizedRange();
+    const tails: CellStateSnapshot[][] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      const seg: CellStateSnapshot[] = [];
+      for (let c = n.startCol; c < sheet.colCount; c++) {
+        const cell = sheet.getCell(r, c);
+        seg.push({
+          formula: cell.formula,
+          value: cell.value,
+          style: cell.style,
+        });
+      }
+      tails.push(seg);
+    }
+    this.beforeTailByRow = tails;
+  }
+
+  execute(): void {
+    const sheet = this.sheet;
+    const { startRow, endRow, startCol, endCol } = this.range;
+    const w = endCol - startCol + 1;
+    sheet.batch(() => {
+      for (let r = startRow; r <= endRow; r++) {
+        for (let c = startCol; c <= sheet.colCount - 1 - w; c++) {
+          const target = sheet.getCell(r, c);
+          const source = sheet.getCell(r, c + w);
+          target.formula = source.formula;
+          target.value = source.value;
+          target.style = source.style;
+        }
+        for (let c = sheet.colCount - w; c < sheet.colCount; c++) {
+          const target = sheet.getCell(r, c);
+          target.formula = null;
+          target.value = null;
+          target.style = null;
+        }
+      }
+      sheet.notifyDataChanged();
+    });
+    this.selection.selectCell(startRow, startCol);
+    recalcWorksheet(sheet);
+  }
+
+  undo(): void {
+    const sheet = this.sheet;
+    const { startRow, endRow, startCol } = this.range;
+    let rowIdx = 0;
+    for (let r = startRow; r <= endRow; r++) {
+      const seg = this.beforeTailByRow[rowIdx]!;
+      for (let j = 0; j < seg.length; j++) {
+        const c = startCol + j;
+        if (c >= sheet.colCount) {
+          break;
+        }
+        const target = sheet.getCell(r, c);
+        const st = seg[j]!;
+        target.formula = st.formula;
+        target.value = st.value;
+        target.style = st.style;
+      }
+      rowIdx++;
+    }
+    sheet.notifyDataChanged();
+    this.selection.setNormalizedRange(this.beforeSelection);
+    recalcWorksheet(sheet);
+  }
+}
+
+/** 删除选区单元格，同列内下方上移填补（与 Excel「下方单元格上移」一致）。 */
+export class DeleteCellsShiftUpCommand implements ICommand {
+  readonly id = "sheet.deleteCellsShiftUp";
+  readonly label = "删除单元格下移上填";
+  private readonly range: SelectionRange;
+  private readonly beforeTailByCol: readonly CellStateSnapshot[][];
+  private readonly beforeSelection: SelectionRange;
+
+  constructor(
+    private readonly sheet: Worksheet,
+    private readonly selection: SelectionModel,
+    range: SelectionRange,
+  ) {
+    const n = normalizeSelectionRange(range);
+    this.range = n;
+    this.beforeSelection = this.selection.getNormalizedRange();
+    const tails: CellStateSnapshot[][] = [];
+    for (let c = n.startCol; c <= n.endCol; c++) {
+      const seg: CellStateSnapshot[] = [];
+      for (let r = n.startRow; r < sheet.rowCount; r++) {
+        const cell = sheet.getCell(r, c);
+        seg.push({
+          formula: cell.formula,
+          value: cell.value,
+          style: cell.style,
+        });
+      }
+      tails.push(seg);
+    }
+    this.beforeTailByCol = tails;
+  }
+
+  execute(): void {
+    const sheet = this.sheet;
+    const { startRow, endRow, startCol, endCol } = this.range;
+    const h = endRow - startRow + 1;
+    sheet.batch(() => {
+      for (let c = startCol; c <= endCol; c++) {
+        for (let r = startRow; r <= sheet.rowCount - 1 - h; r++) {
+          const target = sheet.getCell(r, c);
+          const source = sheet.getCell(r + h, c);
+          target.formula = source.formula;
+          target.value = source.value;
+          target.style = source.style;
+        }
+        for (let r = sheet.rowCount - h; r < sheet.rowCount; r++) {
+          const target = sheet.getCell(r, c);
+          target.formula = null;
+          target.value = null;
+          target.style = null;
+        }
+      }
+      sheet.notifyDataChanged();
+    });
+    this.selection.selectCell(startRow, startCol);
+    recalcWorksheet(sheet);
+  }
+
+  undo(): void {
+    const sheet = this.sheet;
+    const { startRow, startCol, endCol } = this.range;
+    let colIdx = 0;
+    for (let c = startCol; c <= endCol; c++) {
+      const seg = this.beforeTailByCol[colIdx]!;
+      for (let j = 0; j < seg.length; j++) {
+        const r = startRow + j;
+        if (r >= sheet.rowCount) {
+          break;
+        }
+        const target = sheet.getCell(r, c);
+        const st = seg[j]!;
+        target.formula = st.formula;
+        target.value = st.value;
+        target.style = st.style;
+      }
+      colIdx++;
+    }
+    sheet.notifyDataChanged();
+    this.selection.setNormalizedRange(this.beforeSelection);
+    recalcWorksheet(sheet);
   }
 }
 

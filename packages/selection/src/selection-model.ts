@@ -76,29 +76,43 @@ export class SelectionModel {
 
   /** 选中整列（活动格为列顶格，与 Excel 一致）。 */
   selectEntireColumn(col: number): void {
+    this.selectEntireColumnRange(col, col);
+  }
+
+  /** 选中连续多列（整表高），活动格为所选列块左上角。 */
+  selectEntireColumnRange(startCol: number, endCol: number): void {
     const sheet = this.getSheet();
     if (sheet === undefined) {
       return;
     }
-    const c = clamp(col, 0, sheet.colCount - 1);
     const lastR = Math.max(0, sheet.rowCount - 1);
+    const hi = sheet.colCount - 1;
+    const c0 = clamp(Math.min(startCol, endCol), 0, hi);
+    const c1 = clamp(Math.max(startCol, endCol), 0, hi);
     this.anchorRow = lastR;
-    this.anchorCol = c;
+    this.anchorCol = c1;
     this.focusRow = 0;
-    this.focusCol = c;
+    this.focusCol = c0;
   }
 
   /** 选中整行（活动格为行首格）。 */
   selectEntireRow(row: number): void {
+    this.selectEntireRowRange(row, row);
+  }
+
+  /** 选中连续多行（整表宽），活动格为所选行块左上角。 */
+  selectEntireRowRange(startRow: number, endRow: number): void {
     const sheet = this.getSheet();
     if (sheet === undefined) {
       return;
     }
-    const r = clamp(row, 0, sheet.rowCount - 1);
     const lastC = Math.max(0, sheet.colCount - 1);
-    this.anchorRow = r;
+    const hi = sheet.rowCount - 1;
+    const r0 = clamp(Math.min(startRow, endRow), 0, hi);
+    const r1 = clamp(Math.max(startRow, endRow), 0, hi);
+    this.anchorRow = r1;
     this.anchorCol = lastC;
-    this.focusRow = r;
+    this.focusRow = r0;
     this.focusCol = 0;
   }
 

@@ -4,6 +4,8 @@ import { SelectionModel } from "@flexsheet/selection";
 import { describe, expect, it } from "vitest";
 
 import {
+  DeleteCellsShiftLeftCommand,
+  DeleteCellsShiftUpCommand,
   DeleteColsCommand,
   DeleteRowsCommand,
   InsertCellsShiftDownCommand,
@@ -94,6 +96,50 @@ describe("row/col structural commands", () => {
     expect(sheet.getCell(2, 1).value).toBeNull();
     expect(sheet.getCell(3, 1).value).toBe("B3");
     cm.undo();
+    expect(sheet.getCell(2, 1).value).toBe("B3");
+  });
+
+  it("delete cells shift left/up should support undo redo", () => {
+    const sheet = new Worksheet("S1", 4, 4);
+    const selection = new SelectionModel(() => sheet);
+    const cm = new CommandManager();
+    sheet.setCellLiteral(1, 1, "B2");
+    sheet.setCellLiteral(1, 2, "C2");
+    sheet.setCellLiteral(1, 3, "D2");
+    selection.selectCell(1, 1);
+
+    cm.execute(
+      new DeleteCellsShiftLeftCommand(sheet, selection, {
+        startRow: 1,
+        startCol: 1,
+        endRow: 1,
+        endCol: 1,
+      }),
+    );
+    expect(sheet.getCell(1, 1).value).toBe("C2");
+    expect(sheet.getCell(1, 2).value).toBe("D2");
+    expect(sheet.getCell(1, 3).value).toBeNull();
+    cm.undo();
+    expect(sheet.getCell(1, 1).value).toBe("B2");
+    expect(sheet.getCell(1, 2).value).toBe("C2");
+
+    sheet.setCellLiteral(1, 1, "B2");
+    sheet.setCellLiteral(2, 1, "B3");
+    sheet.setCellLiteral(3, 1, "B4");
+    selection.selectCell(1, 1);
+    cm.execute(
+      new DeleteCellsShiftUpCommand(sheet, selection, {
+        startRow: 1,
+        startCol: 1,
+        endRow: 1,
+        endCol: 1,
+      }),
+    );
+    expect(sheet.getCell(1, 1).value).toBe("B3");
+    expect(sheet.getCell(2, 1).value).toBe("B4");
+    expect(sheet.getCell(3, 1).value).toBeNull();
+    cm.undo();
+    expect(sheet.getCell(1, 1).value).toBe("B2");
     expect(sheet.getCell(2, 1).value).toBe("B3");
   });
 });

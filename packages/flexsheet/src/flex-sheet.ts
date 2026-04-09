@@ -41,6 +41,8 @@ import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from
 import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
 import { useClipboard } from "./clipboard-plugin.js";
 import {
+  DeleteCellsShiftLeftCommand,
+  DeleteCellsShiftUpCommand,
   DeleteColsCommand,
   DeleteRowsCommand,
   InsertColsCommand,
@@ -48,7 +50,9 @@ import {
   InsertCellsShiftRightCommand,
   InsertRowsCommand,
   SetColHiddenCommand,
+  SetColWidthsInRangeCommand,
   SetColWidthCommand,
+  SetRowHeightsInRangeCommand,
   SetRowHeightCommand,
   SetRowHiddenCommand,
 } from "./sheet-structure-commands.js";
@@ -70,6 +74,9 @@ export type FlexSheetSurfaceHit =
   | { readonly kind: "columnHeader"; readonly col: number }
   | { readonly kind: "rowHeader"; readonly row: number }
   | { readonly kind: "cell"; readonly row: number; readonly col: number };
+
+/** 单元格右键「删除」弹窗中的删除方式。 */
+export type SelectionCellDeleteMode = "shiftLeft" | "shiftUp" | "entireRow" | "entireCol";
 
 export interface FlexSheetOptions {
   /** 挂载容器，将插入全尺寸 canvas。 */
@@ -138,6 +145,11 @@ export class FlexSheet {
   private lastDragClientY = 0;
   private dragAutoscrollRafId: number | null = null;
   private dragAutoscrollPrevNow = 0;
+  /** 在列标题或行标题上按下后拖拽，扩展多列/多行选区（与表体框选互斥）。 */
+  private headingDrag:
+    | { readonly kind: "column"; readonly originCol: number }
+    | { readonly kind: "row"; readonly originRow: number }
+    | null = null;
   private workbookUnsub: (() => void) | null = null;
   private lastWorkbookActiveIndex = 0;
   private activeSheetFormattingUnsub: (() => void) | null = null;
@@ -468,6 +480,69 @@ export class FlexSheet {
     this.refresh();
   }
 
+  /**
+   * 删除当前选区内的所有行（选区来自行标题或整行框选时即为这些行；表至少保留一行时不执行）。
+   */
+  deleteSelectedRows(): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined || sheet.rowCount <= 1) {
+      return;
+    }
+    const r = this.selection.getNormalizedRange();
+    const startRow = r.startRow;
+    const count = r.endRow - startRow + 1;
+    this.deleteRows(startRow, count);
+  }
+
+  /**
+   * 删除当前选区内的所有列（选区来自列标题或整列框选时即为这些列；表至少保留一列时不执行）。
+   */
+  deleteSelectedCols(): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined || sheet.colCount <= 1) {
+      return;
+    }
+    const r = this.selection.getNormalizedRange();
+    const startCol = r.startCol;
+    const count = r.endCol - startCol + 1;
+    this.deleteCols(startCol, count);
+  }
+
+  /**
+   * 按「删除」弹窗选项处理当前选区：左移/上移填补，或删除整行、整列。
+   */
+  executeSelectionCellDelete(mode: SelectionCellDeleteMode): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const r = normalizeSelectionRange(this.selection.getNormalizedRange());
+    if (mode === "shiftLeft") {
+      this.workspace.commands.execute(new DeleteCellsShiftLeftCommand(sheet, this.selection, r));
+      this.refresh();
+      return;
+    }
+    if (mode === "shiftUp") {
+      this.workspace.commands.execute(new DeleteCellsShiftUpCommand(sheet, this.selection, r));
+      this.refresh();
+      return;
+    }
+    if (mode === "entireRow") {
+      if (sheet.rowCount <= 1) {
+        return;
+      }
+      this.deleteRows(r.startRow, r.endRow - r.startRow + 1);
+      return;
+    }
+    if (mode === "entireCol") {
+      if (sheet.colCount <= 1) {
+        return;
+      }
+      this.deleteCols(r.startCol, r.endCol - r.startCol + 1);
+      return;
+    }
+  }
+
   setRowHidden(row: number, hidden: boolean): void {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) return;
@@ -479,6 +554,56 @@ export class FlexSheet {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) return;
     this.workspace.commands.execute(new SetColHiddenCommand(sheet, col, hidden));
+    this.refresh();
+  }
+
+  /**
+   * 行标题右键「行高」：默认展示值（活动格所在行，文档像素，与拖拽调整一致）。
+   */
+  getRowHeightSampleForSelection(): number {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return 20;
+    }
+    const { row } = this.selection.getActiveCell();
+    return Math.round(sheet.getRowHeight(row));
+  }
+
+  /**
+   * 列标题右键「列宽」：默认展示值（活动格所在列，文档像素）。
+   */
+  getColWidthSampleForSelection(): number {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return 64;
+    }
+    const { col } = this.selection.getActiveCell();
+    return Math.round(sheet.getColWidth(col));
+  }
+
+  /** 将当前选区所含各行设为同一高度（与行标题右键一致，可一次撤销）。 */
+  applyRowHeightToSelection(heightPx: number): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const h = clampRowColSizePx(heightPx);
+    const { startRow, endRow } = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new SetRowHeightsInRangeCommand(sheet, startRow, endRow, h));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** 将当前选区所含各列设为同一宽度（与列标题右键一致，可一次撤销）。 */
+  applyColWidthToSelection(widthPx: number): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const w = clampRowColSizePx(widthPx);
+    const { startCol, endCol } = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new SetColWidthsInRangeCommand(sheet, startCol, endCol, w));
+    this.cellEditor.syncLayout();
     this.refresh();
   }
 
@@ -671,8 +796,29 @@ export class FlexSheet {
     await runClipboardPaste(this, sheet);
   }
 
+  /**
+   * 清空当前选区内单元格的值与公式，保留格式（与 Delete / Backspace 一致）；
+   * 内联编辑或无活动表时不执行。
+   */
+  clearSelectionContents(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.clearClipboardMarquee();
+    const cmd = new ClearRegionContentsCommand(sheet, this.selection.getNormalizedRange());
+    if (cmd.hasChanges) {
+      this.workspace.commands.execute(cmd);
+    }
+    this.renderer.requestRedraw();
+  }
+
   destroy(): void {
     this.cancelDragAutoscrollRaf();
+    this.headingDrag = null;
     this.detachDocumentDragListeners();
     this.renderer.cancelPendingRedraw();
     this.hideResizePreviewLine();
@@ -735,46 +881,64 @@ export class FlexSheet {
   }
 
   private finishDrag(ev?: PointerEvent): void {
-    if (!this.dragSelecting) {
-      if (this.resizing) {
-        const sheet = this.workbook.getActiveSheet();
-        if (sheet !== undefined && this.resizingKind !== null && this.resizingIndex >= 0) {
-          const finalSize = this.resizingCurrentSize;
-          if (this.resizingKind === "col") {
-            if (Math.abs(finalSize - this.resizingOriginSize) > 1e-6) {
-              this.workspace.commands.execute(
-                new SetColWidthCommand(sheet, this.resizingIndex, finalSize),
-              );
-            }
-          } else {
-            if (Math.abs(finalSize - this.resizingOriginSize) > 1e-6) {
-              this.workspace.commands.execute(
-                new SetRowHeightCommand(sheet, this.resizingIndex, finalSize),
-              );
-            }
-          }
-        }
-        this.resizing = false;
-        this.resizingKind = null;
-        this.resizingIndex = -1;
-        this.hoverResizeKind = null;
-        this.hideResizePreviewLine();
-        this.dragPointerId = null;
-        this.detachDocumentDragListeners();
-        this.clearResizeDragBodyCursor();
-        if (ev !== undefined) {
-          this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
-          try {
-            this.canvas.releasePointerCapture(ev.pointerId);
-          } catch {
-            /* ignore */
+    if (this.resizing) {
+      const sheet = this.workbook.getActiveSheet();
+      if (sheet !== undefined && this.resizingKind !== null && this.resizingIndex >= 0) {
+        const finalSize = this.resizingCurrentSize;
+        if (this.resizingKind === "col") {
+          if (Math.abs(finalSize - this.resizingOriginSize) > 1e-6) {
+            this.workspace.commands.execute(
+              new SetColWidthCommand(sheet, this.resizingIndex, finalSize),
+            );
           }
         } else {
-          this.applyPointerCursor("default");
+          if (Math.abs(finalSize - this.resizingOriginSize) > 1e-6) {
+            this.workspace.commands.execute(
+              new SetRowHeightCommand(sheet, this.resizingIndex, finalSize),
+            );
+          }
         }
-        this.selection.syncWithSheet();
-        this.afterSelectionChanged();
       }
+      this.resizing = false;
+      this.resizingKind = null;
+      this.resizingIndex = -1;
+      this.hoverResizeKind = null;
+      this.hideResizePreviewLine();
+      this.dragPointerId = null;
+      this.detachDocumentDragListeners();
+      this.clearResizeDragBodyCursor();
+      if (ev !== undefined) {
+        this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
+        try {
+          this.canvas.releasePointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      } else {
+        this.applyPointerCursor("default");
+      }
+      this.selection.syncWithSheet();
+      this.afterSelectionChanged();
+      return;
+    }
+
+    if (this.headingDrag !== null) {
+      this.cancelDragAutoscrollRaf();
+      this.headingDrag = null;
+      this.dragPointerId = null;
+      this.detachDocumentDragListeners();
+      if (ev !== undefined) {
+        try {
+          this.canvas.releasePointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      this.afterSelectionChanged();
+      return;
+    }
+
+    if (!this.dragSelecting) {
       return;
     }
     this.cancelDragAutoscrollRaf();
@@ -796,14 +960,17 @@ export class FlexSheet {
   }
 
   private readonly onLostPointerCapture = (ev: PointerEvent): void => {
-    if ((!this.dragSelecting && !this.resizing) || ev.pointerId !== this.dragPointerId) {
+    if (
+      (!this.dragSelecting && !this.resizing && this.headingDrag === null) ||
+      ev.pointerId !== this.dragPointerId
+    ) {
       return;
     }
     this.finishDrag();
   };
 
   private readonly onCanvasPointerMove = (ev: PointerEvent): void => {
-    if (this.resizing || this.dragSelecting) {
+    if (this.resizing || this.dragSelecting || this.headingDrag !== null) {
       return;
     }
     this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
@@ -829,7 +996,7 @@ export class FlexSheet {
   }
 
   private readonly onCanvasPointerLeave = (): void => {
-    if (this.resizing || this.dragSelecting) {
+    if (this.resizing || this.dragSelecting || this.headingDrag !== null) {
       return;
     }
     this.hoverResizeKind = null;
@@ -842,6 +1009,20 @@ export class FlexSheet {
     }
     if (this.resizing) {
       this.handleResizingPointerMove(ev);
+      return;
+    }
+    if (this.headingDrag !== null) {
+      this.lastDragClientX = ev.clientX;
+      this.lastDragClientY = ev.clientY;
+
+      if (this.isDragAutoscrollActive(ev.clientX, ev.clientY)) {
+        this.ensureDragAutoscrollRaf();
+        return;
+      }
+
+      this.cancelDragAutoscrollRaf();
+      this.applyHeadingDragSelectionFromClient(ev.clientX, ev.clientY);
+      this.afterSelectionChanged();
       return;
     }
     if (!this.dragSelecting) {
@@ -978,6 +1159,21 @@ export class FlexSheet {
       const expand = ev.shiftKey || ev.ctrlKey || ev.metaKey;
       this.applyHeadingHitSelection(headingHit, sheet, expand);
       this.afterSelectionChanged();
+      if (!expand && (headingHit.kind === "columnHeader" || headingHit.kind === "rowHeader")) {
+        this.lastDragClientX = ev.clientX;
+        this.lastDragClientY = ev.clientY;
+        this.headingDrag =
+          headingHit.kind === "columnHeader"
+            ? { kind: "column", originCol: headingHit.col }
+            : { kind: "row", originRow: headingHit.row };
+        this.dragPointerId = ev.pointerId;
+        this.attachDocumentDragListeners();
+        try {
+          this.canvas.setPointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
       this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
       return;
     }
@@ -1166,8 +1362,7 @@ export class FlexSheet {
     if (this.cellEditor.isEditing()) {
       return;
     }
-    const sheet = this.workbook.getActiveSheet();
-    if (sheet === undefined) {
+    if (this.workbook.getActiveSheet() === undefined) {
       return;
     }
 
@@ -1226,12 +1421,7 @@ export class FlexSheet {
 
     if (ev.key === "Delete" || ev.key === "Backspace") {
       ev.preventDefault();
-      this.clearClipboardMarquee();
-      const cmd = new ClearRegionContentsCommand(sheet, this.selection.getNormalizedRange());
-      if (cmd.hasChanges) {
-        this.workspace.commands.execute(cmd);
-      }
-      this.renderer.requestRedraw();
+      this.clearSelectionContents();
       return;
     }
 
@@ -1367,6 +1557,106 @@ export class FlexSheet {
       this.renderer.scrollY,
       this.renderer.viewZoom,
     );
+  }
+
+  private applyHeadingDragSelectionFromClient(clientX: number, clientY: number): void {
+    const drag = this.headingDrag;
+    if (drag === null) {
+      return;
+    }
+    if (drag.kind === "column") {
+      const endCol = this.resolveColumnIndexForHeadingDrag(clientX, clientY, drag.originCol);
+      this.selection.selectEntireColumnRange(drag.originCol, endCol);
+      return;
+    }
+    const endRow = this.resolveRowIndexForHeadingDrag(clientX, clientY, drag.originRow);
+    this.selection.selectEntireRowRange(drag.originRow, endRow);
+  }
+
+  private resolveColumnIndexForHeadingDrag(
+    clientX: number,
+    clientY: number,
+    fallbackCol: number,
+  ): number {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return fallbackCol;
+    }
+    const heading = this.hitTestHeadingFromClient(clientX, clientY);
+    if (heading?.kind === "columnHeader") {
+      return heading.col;
+    }
+    let { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const corner = this.renderer.getCornerSize();
+    const layout = buildFrozenLayout(
+      sheet,
+      corner.width,
+      corner.height,
+      this.canvas.clientWidth,
+      this.canvas.clientHeight,
+      this.renderer.frozenRows,
+      this.renderer.frozenCols,
+      this.renderer.viewZoom,
+    );
+    if (x < layout.headerW && y >= layout.headerH) {
+      x = layout.headerW + 0.5;
+    }
+    const cell = hitTestCell(
+      x,
+      y,
+      sheet,
+      layout,
+      this.renderer.scrollX,
+      this.renderer.scrollY,
+      this.renderer.viewZoom,
+    );
+    if (cell !== null) {
+      return cell.col;
+    }
+    return fallbackCol;
+  }
+
+  private resolveRowIndexForHeadingDrag(
+    clientX: number,
+    clientY: number,
+    fallbackRow: number,
+  ): number {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return fallbackRow;
+    }
+    const heading = this.hitTestHeadingFromClient(clientX, clientY);
+    if (heading?.kind === "rowHeader") {
+      return heading.row;
+    }
+    let { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const corner = this.renderer.getCornerSize();
+    const layout = buildFrozenLayout(
+      sheet,
+      corner.width,
+      corner.height,
+      this.canvas.clientWidth,
+      this.canvas.clientHeight,
+      this.renderer.frozenRows,
+      this.renderer.frozenCols,
+      this.renderer.viewZoom,
+    );
+    if (y < layout.headerH && x >= layout.headerW) {
+      y = layout.headerH + 0.5;
+    }
+    const cell = hitTestCell(
+      x,
+      y,
+      sheet,
+      layout,
+      this.renderer.scrollX,
+      this.renderer.scrollY,
+      this.renderer.viewZoom,
+    );
+    if (cell !== null) {
+      return cell.row;
+    }
+    return fallbackRow;
   }
 
   /**
@@ -1515,7 +1805,9 @@ export class FlexSheet {
     const a = sheet.getMergeAnchorCell(row, col);
     const cell = sheet.getCell(a.row, a.col);
     el.value =
-      cell.formula !== null && cell.formula.length > 0 ? cell.formula : cellScalarToEditString(cell.value);
+      cell.formula !== null && cell.formula.length > 0
+        ? cell.formula
+        : cellScalarToEditString(cell.value);
     el.blur();
   }
 
@@ -1555,7 +1847,9 @@ export class FlexSheet {
     }
     const cell = sheet.getCell(a.row, a.col);
     const text =
-      cell.formula !== null && cell.formula.length > 0 ? cell.formula : cellScalarToEditString(cell.value);
+      cell.formula !== null && cell.formula.length > 0
+        ? cell.formula
+        : cellScalarToEditString(cell.value);
     this.formulaBarInputEl.value = text;
   }
 
@@ -1574,7 +1868,9 @@ export class FlexSheet {
     const a = sheet.getMergeAnchorCell(row, col);
     const cell = sheet.getCell(a.row, a.col);
     const current =
-      cell.formula !== null && cell.formula.length > 0 ? cell.formula : cellScalarToEditString(cell.value);
+      cell.formula !== null && cell.formula.length > 0
+        ? cell.formula
+        : cellScalarToEditString(cell.value);
     const raw = this.formulaBarInputEl.value;
     if (raw === current) {
       return;
@@ -1704,7 +2000,7 @@ export class FlexSheet {
 
   private readonly dragAutoscrollLoop = (): void => {
     this.dragAutoscrollRafId = null;
-    if (!this.dragSelecting) {
+    if (!this.dragSelecting && this.headingDrag === null) {
       return;
     }
 
@@ -1719,18 +2015,22 @@ export class FlexSheet {
 
     if (Math.abs(sx) > 1e-6 || Math.abs(sy) > 1e-6) {
       this.renderer.applyScrollDelta(sx * dt, sy * dt);
-      const hit = this.hitTestClient(this.lastDragClientX, this.lastDragClientY, {
-        clampToBody: true,
-      });
-      if (hit !== null) {
-        this.selection.extendFocusTo(hit.row, hit.col);
+      if (this.headingDrag !== null) {
+        this.applyHeadingDragSelectionFromClient(this.lastDragClientX, this.lastDragClientY);
+      } else {
+        const hit = this.hitTestClient(this.lastDragClientX, this.lastDragClientY, {
+          clampToBody: true,
+        });
+        if (hit !== null) {
+          this.selection.extendFocusTo(hit.row, hit.col);
+        }
       }
       this.cellEditor.syncLayout();
       this.renderer.requestRedraw();
     }
 
     if (
-      this.dragSelecting &&
+      (this.dragSelecting || this.headingDrag !== null) &&
       this.isDragAutoscrollActive(this.lastDragClientX, this.lastDragClientY)
     ) {
       this.dragAutoscrollRafId = requestAnimationFrame(() => {
@@ -1770,6 +2070,14 @@ export class FlexSheet {
       this.workspace.commands.execute(new SetRowHeightCommand(sheet, row, target));
     }
   }
+}
+
+/** 与表头拖拽调整行列尺寸一致的下上限（文档像素）。 */
+function clampRowColSizePx(px: number): number {
+  if (!Number.isFinite(px)) {
+    return 8;
+  }
+  return Math.max(8, Math.min(4096, Math.round(px)));
 }
 
 export function createDefaultWorkbook(): Workbook {

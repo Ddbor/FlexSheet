@@ -237,7 +237,16 @@ export function drawAllColumnHeaders(
     for (const c of scrollCols) {
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
       const colW = scaledColWidthAt(sheet, c, env.viewZoom);
-      paintColumnHeaderCell(ctx, env.theme, env.viewZoom, c, x, colW, headerH, columnInSelection(c));
+      paintColumnHeaderCell(
+        ctx,
+        env.theme,
+        env.viewZoom,
+        c,
+        x,
+        colW,
+        headerH,
+        columnInSelection(c),
+      );
     }
     strokeColumnHeaderGrid(scrollCols, sx0);
     ctx.restore();
@@ -252,7 +261,16 @@ export function drawAllColumnHeaders(
     for (const c of frozenColsList) {
       const x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
       const colW = scaledColWidthAt(sheet, c, env.viewZoom);
-      paintColumnHeaderCell(ctx, env.theme, env.viewZoom, c, x, colW, headerH, columnInSelection(c));
+      paintColumnHeaderCell(
+        ctx,
+        env.theme,
+        env.viewZoom,
+        c,
+        x,
+        colW,
+        headerH,
+        columnInSelection(c),
+      );
     }
     strokeColumnHeaderGrid(frozenColsList, headerW);
     ctx.restore();
