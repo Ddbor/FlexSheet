@@ -30,3 +30,21 @@ export function selectionRangeContains(range: SelectionRange, row: number, col: 
   const n = normalizeSelectionRange(range);
   return row >= n.startRow && row <= n.endRow && col >= n.startCol && col <= n.endCol;
 }
+
+export function selectionRangesIntersect(a: SelectionRange, b: SelectionRange): boolean {
+  const na = normalizeSelectionRange(a);
+  const nb = normalizeSelectionRange(b);
+  return !(na.endRow < nb.startRow || na.startRow > nb.endRow || na.endCol < nb.startCol || na.startCol > nb.endCol);
+}
+
+/** 两选区规范化后是否为同一矩形（用于条件格式等同选区覆盖等）。 */
+export function selectionRangesEqualNormalized(a: SelectionRange, b: SelectionRange): boolean {
+  const na = normalizeSelectionRange(a);
+  const nb = normalizeSelectionRange(b);
+  return (
+    na.startRow === nb.startRow &&
+    na.endRow === nb.endRow &&
+    na.startCol === nb.startCol &&
+    na.endCol === nb.endCol
+  );
+}

@@ -1,6 +1,18 @@
-import type { CellBorderKind, CellBorderSide, CellStyle, Worksheet } from "@flexsheet/core";
+import type {
+  CellBorderKind,
+  CellBorderSide,
+  CellStyle,
+  ConditionalFormattingOverlay,
+  Worksheet,
+} from "@flexsheet/core";
+import { getConditionalFormattingCellOverlayCached } from "./canvas-renderer-cf-overlay.js";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
-import { argbToCss, scaledColWidthAt, scaledRowHeightAt, snapLine } from "./canvas-renderer-utils.js";
+import {
+  argbToCss,
+  scaledColWidthAt,
+  scaledRowHeightAt,
+  snapLine,
+} from "./canvas-renderer-utils.js";
 import type { FrozenLayout } from "./viewport.js";
 
 /** 与 `BodyPaintEnv` 中画布边框绘制所需字段一致（避免与 body 模块循环引用）。 */
@@ -11,9 +23,39 @@ export interface CellBorderPaintEnv {
   readonly scrollY: number;
 }
 
-function effectiveStyle(sheet: Worksheet, row: number, col: number): CellStyle | null {
+function mergeBorderFromCf(
+  base: CellStyle | null,
+  cf: ConditionalFormattingOverlay | null,
+): CellStyle | null {
+  if (cf === null) {
+    return base;
+  }
+  const out: CellStyle = { ...(base ?? {}) };
+  if (cf.borderTop !== undefined) {
+    out.borderTop = cf.borderTop;
+  }
+  if (cf.borderLeft !== undefined) {
+    out.borderLeft = cf.borderLeft;
+  }
+  if (cf.borderBottom !== undefined) {
+    out.borderBottom = cf.borderBottom;
+  }
+  if (cf.borderRight !== undefined) {
+    out.borderRight = cf.borderRight;
+  }
+  return Object.keys(out).length > 0 ? out : base;
+}
+
+function effectiveStyle(
+  sheet: Worksheet,
+  row: number,
+  col: number,
+  cfOverlayCellCache: Map<string, ConditionalFormattingOverlay | null> | undefined,
+): CellStyle | null {
   const a = sheet.getMergeAnchorCell(row, col);
-  return sheet.getCell(a.row, a.col).style;
+  const base = sheet.getCell(a.row, a.col).style;
+  const cf = getConditionalFormattingCellOverlayCached(sheet, a.row, a.col, cfOverlayCellCache);
+  return mergeBorderFromCf(base, cf);
 }
 
 function cellRightX(
@@ -165,6 +207,7 @@ export function paintBodyCellBorders(
   r1: number,
   c0: number,
   c1: number,
+  cfOverlayCellCache?: Map<string, ConditionalFormattingOverlay | null>,
 ): void {
   const { ctx } = env;
   ctx.save();
@@ -225,7 +268,7 @@ export function paintBodyCellBorders(
         let skip = false;
         if (ar > 0) {
           const na = sheet.getMergeAnchorCell(ar - 1, ac);
-          const nb = effectiveStyle(sheet, na.row, na.col);
+          const nb = effectiveStyle(sheet, na.row, na.col, cfOverlayCellCache);
           const nbBottom = cellBottomY(sheet, layout, na.row, na.col, env.viewZoom, env.scrollY);
           if (Math.abs(nbBottom - topY) < 0.75 && nb?.borderBottom !== undefined) {
             skip = true;
@@ -244,7 +287,7 @@ export function paintBodyCellBorders(
         let skip = false;
         if (ac > 0) {
           const na = sheet.getMergeAnchorCell(ar, ac - 1);
-          const nb = effectiveStyle(sheet, na.row, na.col);
+          const nb = effectiveStyle(sheet, na.row, na.col, cfOverlayCellCache);
           const nbRight = cellRightX(sheet, layout, na.row, na.col, env.viewZoom, env.scrollX);
           if (Math.abs(nbRight - leftX) < 0.75 && nb?.borderRight !== undefined) {
             skip = true;

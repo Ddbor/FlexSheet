@@ -6,6 +6,7 @@ import {
   Worksheet,
   type CellStyle,
   type CellStylePatch,
+  type ConditionalFormatRule,
   type SelectionRange,
 } from "@flexsheet/core";
 import {
@@ -65,6 +66,12 @@ import {
   ApplySelectionIndentStepCommand,
   isRibbonBorderCommandId,
 } from "./cell-style-commands.js";
+import {
+  AddConditionalFormatRuleCommand,
+  ClearAllConditionalFormatRulesCommand,
+  ClearConditionalFormatRulesIntersectingCommand,
+  SetConditionalFormatRulesCommand,
+} from "./conditional-format-commands.js";
 import { SelectionMergeCommand } from "./merge-commands.js";
 import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
 import { openColumnFilterPanel } from "./column-filter-panel.js";
@@ -699,6 +706,51 @@ export class FlexSheet {
     }
     const range = this.selection.getNormalizedRange();
     this.workspace.commands.execute(new ApplySelectionBorderRibbonCommand(sheet, range, commandId));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** Ribbon「条件格式」：追加一条规则（可撤销）。 */
+  addConditionalFormatRuleFromUi(rule: ConditionalFormatRule): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.workspace.commands.execute(new AddConditionalFormatRuleCommand(sheet, rule));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** Ribbon「管理规则」：整体替换当前工作表条件格式列表（可撤销）。 */
+  replaceConditionalFormatRulesFromUi(rules: readonly ConditionalFormatRule[]): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.workspace.commands.execute(new SetConditionalFormatRulesCommand(sheet, rules));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** 清除与当前选区相交的条件格式规则（可撤销）。 */
+  clearConditionalFormatRulesInSelection(): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const range = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(new ClearConditionalFormatRulesIntersectingCommand(sheet, range));
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** 清除当前工作表全部条件格式规则（可撤销）。 */
+  clearAllConditionalFormatRulesFromUi(): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.workspace.commands.execute(new ClearAllConditionalFormatRulesCommand(sheet));
     this.cellEditor.syncLayout();
     this.refresh();
   }

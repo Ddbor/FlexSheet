@@ -139,6 +139,105 @@ function createSwatch(hex: string, onPick: (h: string) => void): HTMLButtonEleme
   return b;
 }
 
+export interface AppendRibbonColorPaletteOptions {
+  readonly onPickHex: (hex: string) => void;
+  readonly onMoreColors: () => void;
+  /** 默认「自定义」（Ribbon）；条件格式对话框可传「主题颜色」。 */
+  readonly themeHeading?: string;
+  /** 默认「标准」。 */
+  readonly standardHeading?: string;
+  readonly includeNoneRow?: boolean;
+  readonly onNone?: () => void;
+}
+
+/**
+ * 向容器追加与 Ribbon 一致的主题格 + 标准色 +「其他颜色」行（可选「无颜色」）。
+ * 供 `mountRibbonColorPickerMenu` 与条件格式等离屏面板复用。
+ */
+export function appendRibbonColorPaletteContent(
+  menu: HTMLElement,
+  opts: AppendRibbonColorPaletteOptions,
+): void {
+  const heading = (text: string): HTMLDivElement => {
+    const h = document.createElement("div");
+    h.className = "fs-color-menu__heading";
+    h.textContent = text;
+    return h;
+  };
+
+  const pick = opts.onPickHex;
+  menu.appendChild(heading(opts.themeHeading ?? "自定义"));
+
+  const topRow = document.createElement("div");
+  topRow.className = "fs-color-menu__row fs-color-menu__row--top";
+  for (const hex of THEME_TOP_ROW) {
+    topRow.appendChild(createSwatch(hex, pick));
+  }
+  menu.appendChild(topRow);
+
+  const gridWrap = document.createElement("div");
+  gridWrap.className = "fs-color-menu__grid";
+  const grid = buildCustomGridCells();
+  for (const row of grid) {
+    for (const hex of row) {
+      gridWrap.appendChild(createSwatch(hex, pick));
+    }
+  }
+  menu.appendChild(gridWrap);
+
+  menu.appendChild(heading(opts.standardHeading ?? "标准"));
+
+  const stdRow = document.createElement("div");
+  stdRow.className = "fs-color-menu__row fs-color-menu__row--standard";
+  for (const hex of STANDARD_ROW) {
+    stdRow.appendChild(createSwatch(hex, pick));
+  }
+  menu.appendChild(stdRow);
+
+  if (opts.includeNoneRow === true && opts.onNone !== undefined) {
+    const noneBtn = document.createElement("button");
+    noneBtn.type = "button";
+    noneBtn.className = "fs-color-menu__row-btn";
+    noneBtn.setAttribute("role", "menuitem");
+    const noneIcon = document.createElement("span");
+    noneIcon.className = "fs-color-menu__none-icon";
+    noneIcon.setAttribute("aria-hidden", "true");
+    const noneLab = document.createElement("span");
+    noneLab.className = "fs-color-menu__row-btn-label";
+    noneLab.textContent = "无颜色";
+    noneBtn.appendChild(noneIcon);
+    noneBtn.appendChild(noneLab);
+    noneBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      opts.onNone?.();
+    });
+    menu.appendChild(noneBtn);
+  }
+
+  const sep = document.createElement("div");
+  sep.className = "fs-color-menu__sep";
+  sep.setAttribute("role", "separator");
+  menu.appendChild(sep);
+
+  const moreBtn = document.createElement("button");
+  moreBtn.type = "button";
+  moreBtn.className = "fs-color-menu__row-btn";
+  moreBtn.setAttribute("role", "menuitem");
+  const palWrap = document.createElement("span");
+  palWrap.className = "fs-color-menu__palette-icon";
+  palWrap.appendChild(paletteIconSvg());
+  const moreLab = document.createElement("span");
+  moreLab.className = "fs-color-menu__row-btn-label";
+  moreLab.textContent = "其他颜色...";
+  moreBtn.appendChild(palWrap);
+  moreBtn.appendChild(moreLab);
+  moreBtn.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    opts.onMoreColors();
+  });
+  menu.appendChild(moreBtn);
+}
+
 /**
  * 填充色 / 字体颜色面板：自定义区、标准色、无颜色、其他颜色。
  * 挂在 `.fs-ribbon` 下以继承主题变量。
@@ -172,85 +271,20 @@ export function mountRibbonColorPickerMenu(
     closeMenu();
   };
 
-  const heading = (text: string): HTMLDivElement => {
-    const h = document.createElement("div");
-    h.className = "fs-color-menu__heading";
-    h.textContent = text;
-    return h;
-  };
-
-  menu.appendChild(heading("自定义"));
-
-  const topRow = document.createElement("div");
-  topRow.className = "fs-color-menu__row fs-color-menu__row--top";
-  for (const hex of THEME_TOP_ROW) {
-    topRow.appendChild(createSwatch(hex, pick));
-  }
-  menu.appendChild(topRow);
-
-  const gridWrap = document.createElement("div");
-  gridWrap.className = "fs-color-menu__grid";
-  const grid = buildCustomGridCells();
-  for (const row of grid) {
-    for (const hex of row) {
-      gridWrap.appendChild(createSwatch(hex, pick));
-    }
-  }
-  menu.appendChild(gridWrap);
-
-  menu.appendChild(heading("标准"));
-
-  const stdRow = document.createElement("div");
-  stdRow.className = "fs-color-menu__row fs-color-menu__row--standard";
-  for (const hex of STANDARD_ROW) {
-    stdRow.appendChild(createSwatch(hex, pick));
-  }
-  menu.appendChild(stdRow);
-
-  const noneBtn = document.createElement("button");
-  noneBtn.type = "button";
-  noneBtn.className = "fs-color-menu__row-btn";
-  noneBtn.setAttribute("role", "menuitem");
-  const noneIcon = document.createElement("span");
-  noneIcon.className = "fs-color-menu__none-icon";
-  noneIcon.setAttribute("aria-hidden", "true");
-  const noneLab = document.createElement("span");
-  noneLab.className = "fs-color-menu__row-btn-label";
-  noneLab.textContent = "无颜色";
-  noneBtn.appendChild(noneIcon);
-  noneBtn.appendChild(noneLab);
-  noneBtn.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    emit(ids.none, tab);
-    closeMenu();
+  appendRibbonColorPaletteContent(menu, {
+    onPickHex: pick,
+    onMoreColors: () => {
+      closeMenu();
+      queueMicrotask(() => {
+        emit(ids.more, tab);
+      });
+    },
+    includeNoneRow: true,
+    onNone: () => {
+      emit(ids.none, tab);
+      closeMenu();
+    },
   });
-  menu.appendChild(noneBtn);
-
-  const sep = document.createElement("div");
-  sep.className = "fs-color-menu__sep";
-  sep.setAttribute("role", "separator");
-  menu.appendChild(sep);
-
-  const moreBtn = document.createElement("button");
-  moreBtn.type = "button";
-  moreBtn.className = "fs-color-menu__row-btn";
-  moreBtn.setAttribute("role", "menuitem");
-  const palWrap = document.createElement("span");
-  palWrap.className = "fs-color-menu__palette-icon";
-  palWrap.appendChild(paletteIconSvg());
-  const moreLab = document.createElement("span");
-  moreLab.className = "fs-color-menu__row-btn-label";
-  moreLab.textContent = "其他颜色...";
-  moreBtn.appendChild(palWrap);
-  moreBtn.appendChild(moreLab);
-  moreBtn.addEventListener("click", (ev) => {
-    ev.stopPropagation();
-    closeMenu();
-    queueMicrotask(() => {
-      emit(ids.more, tab);
-    });
-  });
-  menu.appendChild(moreBtn);
 
   const ribbonRoot = anchor.closest(".fs-ribbon");
   (ribbonRoot ?? document.body).appendChild(menu);

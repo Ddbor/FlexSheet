@@ -2,7 +2,13 @@
  * Ribbon 标签与对外命令事件（宿主可据此驱动 FlexSheet / CanvasRenderer）。
  */
 
-import type { CellStyle, CellStylePatch, SelectionRange, Workbook } from "@flexsheet/core";
+import type {
+  CellStyle,
+  CellStylePatch,
+  ConditionalFormatRule,
+  SelectionRange,
+  Workbook,
+} from "@flexsheet/core";
 import type { CanvasRenderer } from "@flexsheet/renderer";
 import type { SheetTheme } from "@flexsheet/theme";
 export type RibbonTabId = "home" | "insert" | "pageLayout" | "formula" | "data" | "view";
@@ -86,6 +92,14 @@ export interface FlexSheetLike {
   ): void;
   /** 打开简单自定义排序对话框（列标 + 升/降序）。 */
   openCustomSortDialog?(): void;
+  /** 条件格式：追加一条规则（Ribbon 对话框确定后调用，可撤销）。 */
+  addConditionalFormatRuleFromUi?(rule: ConditionalFormatRule): void;
+  /** 条件格式：替换当前表全部规则（管理规则对话框，可撤销）。 */
+  replaceConditionalFormatRulesFromUi?(rules: readonly ConditionalFormatRule[]): void;
+  /** 条件格式：清除与选区相交的规则（可撤销）。 */
+  clearConditionalFormatRulesInSelection?(): void;
+  /** 条件格式：清除整张表规则（可撤销）。 */
+  clearAllConditionalFormatRulesFromUi?(): void;
 }
 
 export type { ViewTabHandles } from "./tabs/view-tab.js";

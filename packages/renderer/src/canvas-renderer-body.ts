@@ -2,6 +2,7 @@ import {
   formatCellDisplayWithStyle,
   type CellStyle,
   type CellTextOrientation,
+  type ConditionalFormattingOverlay,
   type Worksheet,
 } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
@@ -18,6 +19,7 @@ import {
   wrapCellLines,
 } from "./canvas-renderer-utils.js";
 import { paintBodyCellBorders } from "./canvas-renderer-body-borders.js";
+import { getConditionalFormattingCellOverlayCached } from "./canvas-renderer-cf-overlay.js";
 import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
 import { COLUMN_HEADER_FILTER_BUTTON_CSS_PX } from "./grid-hit-test.js";
 import type { FrozenLayout } from "./viewport.js";
@@ -44,6 +46,7 @@ function paintBodyCellFills(
   r1: number,
   c0: number,
   c1: number,
+  cfOverlayCellCache: Map<string, ConditionalFormattingOverlay | null> | undefined,
 ): void {
   const { ctx } = env;
   for (let r = r0; r <= r1; r++) {
@@ -73,13 +76,143 @@ function paintBodyCellFills(
         continue;
       }
       const cell = sheet.getCell(r, c);
-      const fillArgb = cell.style?.fillArgb;
+      const cfFill = getConditionalFormattingCellOverlayCached(
+        sheet,
+        r,
+        c,
+        cfOverlayCellCache,
+      )?.fillArgb;
+      const fillArgb = cfFill !== undefined && cfFill !== "" ? cfFill : cell.style?.fillArgb;
       const fillCss =
         fillArgb !== undefined && fillArgb !== ""
           ? (argbToCss(fillArgb) ?? env.theme.cellBg)
           : env.theme.cellBg;
       ctx.fillStyle = fillCss;
       ctx.fillRect(x, y, colW, rowH);
+    }
+  }
+}
+
+function argbLerpTowardWhite(argbStr: string, t: number): string {
+  const t0 = argbStr.trim();
+  if (!/^[\dA-Fa-f]{8}$/i.test(t0)) {
+    return "#4488cc";
+  }
+  const r = parseInt(t0.slice(2, 4), 16);
+  const g = parseInt(t0.slice(4, 6), 16);
+  const b = parseInt(t0.slice(6, 8), 16);
+  const u = Math.max(0, Math.min(1, t));
+  const rr = Math.round(r + (255 - r) * u);
+  const gg = Math.round(g + (255 - g) * u);
+  const bb = Math.round(b + (255 - b) * u);
+  return `rgb(${rr},${gg},${bb})`;
+}
+
+function paintBodyCellDataBars(
+  env: BodyPaintEnv,
+  sheet: Worksheet,
+  layout: FrozenLayout,
+  headerW: number,
+  headerH: number,
+  canvasW: number,
+  canvasH: number,
+  r0: number,
+  r1: number,
+  c0: number,
+  c1: number,
+  cfOverlayCellCache: Map<string, ConditionalFormattingOverlay | null> | undefined,
+): void {
+  const { ctx } = env;
+  const padX = 3;
+  const padY = 2;
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (sheet.isMergeCoveredCell(r, c)) {
+        continue;
+      }
+      const info = sheet.getMergedRectInfo(r, c);
+      let colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      let rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
+      let x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      let y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      if (info.rowSpan > 1 || info.colSpan > 1) {
+        colW = 0;
+        for (let cc = info.anchorCol; cc < info.anchorCol + info.colSpan; cc++) {
+          colW += scaledColWidthAt(sheet, cc, env.viewZoom);
+        }
+        rowH = 0;
+        for (let rr = info.anchorRow; rr < info.anchorRow + info.rowSpan; rr++) {
+          rowH += scaledRowHeightAt(sheet, rr, env.viewZoom);
+        }
+        x = cellLeftX(sheet, layout, info.anchorCol, env.viewZoom, env.scrollX);
+        y = cellTopY(sheet, layout, info.anchorRow, env.viewZoom, env.scrollY);
+      }
+      if (colW <= 0 || rowH <= 0) {
+        continue;
+      }
+      if (!cellIntersectsCanvas(x, y, colW, rowH, headerW, headerH, canvasW, canvasH)) {
+        continue;
+      }
+      const db = getConditionalFormattingCellOverlayCached(
+        sheet,
+        r,
+        c,
+        cfOverlayCellCache,
+      )?.dataBar;
+      if (db === undefined) {
+        continue;
+      }
+      const innerW = colW - 2 * padX;
+      const innerH = rowH - 2 * padY;
+      if (innerW <= 1 || innerH <= 3) {
+        continue;
+      }
+      const barH = Math.max(2, innerH * db.barHeightFrac);
+      const top = y + padY + (innerH - barH) / 2;
+      const left = x + padX;
+      const x0 = left + db.barX0Frac * innerW;
+      const x1 = left + db.barX1Frac * innerW;
+      const w = Math.max(0, x1 - x0);
+      if (w < 0.5) {
+        continue;
+      }
+      const baseArgb = db.usePositiveFill ? db.posFillArgb : db.negFillArgb;
+      const baseCss = argbToCss(baseArgb) ?? "#4488cc";
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(left, top, innerW, barH);
+      ctx.clip();
+
+      if (db.fillKind === "gradient") {
+        const g = ctx.createLinearGradient(x0, top, x1, top + barH);
+        g.addColorStop(0, baseCss);
+        g.addColorStop(1, argbLerpTowardWhite(baseArgb, 0.45));
+        ctx.fillStyle = g;
+      } else {
+        ctx.fillStyle = baseCss;
+      }
+      ctx.fillRect(x0, top, w, barH);
+
+      if (db.border.kind === "solid") {
+        const bArgb = db.usePositiveFill ? db.border.posArgb : db.border.negArgb;
+        const bCss = argbToCss(bArgb) ?? "#000000";
+        ctx.strokeStyle = bCss;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x0 + 0.5, top + 0.5, w - 1, barH - 1);
+      }
+
+      if (db.axisXFrac !== null) {
+        const ax = left + db.axisXFrac * innerW;
+        const xs = snapLine(ax);
+        ctx.strokeStyle = argbToCss(db.axisColorArgb) ?? "#000000";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(xs, top);
+        ctx.lineTo(xs, top + barH);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
   }
 }
@@ -213,6 +346,7 @@ function paintBodyCellTexts(
   r1: number,
   c0: number,
   c1: number,
+  cfOverlayCellCache: Map<string, ConditionalFormattingOverlay | null> | undefined,
 ): void {
   const { ctx } = env;
   const hasVisibleContent = (row: number, col: number): boolean => {
@@ -269,7 +403,12 @@ function paintBodyCellTexts(
       if (text === "") {
         continue;
       }
-      const fgArgb = cell.style?.fgArgb;
+      const cfOv = getConditionalFormattingCellOverlayCached(sheet, r, c, cfOverlayCellCache);
+      if (cfOv?.dataBar?.hideCellValue === true) {
+        continue;
+      }
+      const cfFg = cfOv?.fgArgb;
+      const fgArgb = cfFg !== undefined && cfFg !== "" ? cfFg : cell.style?.fgArgb;
       ctx.fillStyle =
         fgArgb !== undefined && fgArgb !== ""
           ? (argbToCss(fgArgb) ?? env.theme.cellColor)
@@ -587,14 +726,71 @@ function runBodyQuadrantPass(
   ctx.beginPath();
   ctx.rect(clipX, clipY, clipW, clipH);
   ctx.clip();
-  paintBodyCellFills(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
+  const cfOverlayCellCache =
+    sheet.getConditionalFormatRules().length > 0
+      ? new Map<string, ConditionalFormattingOverlay | null>()
+      : undefined;
+  paintBodyCellFills(
+    env,
+    sheet,
+    layout,
+    headerW,
+    headerH,
+    canvasW,
+    canvasH,
+    r0,
+    r1,
+    c0,
+    c1,
+    cfOverlayCellCache,
+  );
+  paintBodyCellDataBars(
+    env,
+    sheet,
+    layout,
+    headerW,
+    headerH,
+    canvasW,
+    canvasH,
+    r0,
+    r1,
+    c0,
+    c1,
+    cfOverlayCellCache,
+  );
 
   if (strokeBounds !== null && env.showGridLines) {
     strokeBodyGrid(env, sheet, layout, r0, r1, c0, c1, strokeBounds);
   }
 
-  paintBodyCellBorders(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
-  paintBodyCellTexts(env, sheet, layout, headerW, headerH, canvasW, canvasH, r0, r1, c0, c1);
+  paintBodyCellBorders(
+    env,
+    sheet,
+    layout,
+    headerW,
+    headerH,
+    canvasW,
+    canvasH,
+    r0,
+    r1,
+    c0,
+    c1,
+    cfOverlayCellCache,
+  );
+  paintBodyCellTexts(
+    env,
+    sheet,
+    layout,
+    headerW,
+    headerH,
+    canvasW,
+    canvasH,
+    r0,
+    r1,
+    c0,
+    c1,
+    cfOverlayCellCache,
+  );
   paintBodyAutoFilterAnchors(
     env,
     sheet,

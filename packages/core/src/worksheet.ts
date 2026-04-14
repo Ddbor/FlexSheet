@@ -4,8 +4,18 @@ import {
   compareAutoFilterDisplayKeys,
 } from "./column-auto-filter-keys.js";
 import { Cell, applyCellStylePatch, type CellScalar, type CellStyle } from "./cell.js";
+import type {
+  ConditionalFormatRule,
+  ConditionalFormattingOverlay,
+} from "./conditional-formatting.js";
+import { resolveConditionalFormattingOverlay } from "./conditional-formatting.js";
 import { formatCellDisplayWithStyle } from "./excel-number-format.js";
-import { normalizeSelectionRange, type SelectionRange } from "./selection-range.js";
+import {
+  normalizeSelectionRange,
+  selectionRangesEqualNormalized,
+  selectionRangesIntersect,
+  type SelectionRange,
+} from "./selection-range.js";
 
 /** 列筛选按钮绘制位置：列标题栏或选区上一行的表体单元格。 */
 export type ColumnAutoFilterUiKind = "header" | "body";
@@ -81,6 +91,9 @@ export class Worksheet {
   private batchDepth = 0;
   private pendingNotify = false;
   private _revision = 0;
+
+  /** 条件格式规则（自上而下求值，首条匹配生效）。 */
+  private conditionalFormatRules: ConditionalFormatRule[] = [];
 
   constructor(name: string, rowCount = 1000, colCount = 26) {
     this._name = name;
@@ -715,6 +728,65 @@ export class Worksheet {
     for (const c of this.cells.values()) {
       callback(c);
     }
+  }
+
+  getConditionalFormatRules(): readonly ConditionalFormatRule[] {
+    return this.conditionalFormatRules;
+  }
+
+  /** 替换整张表的条件格式规则列表。 */
+  setConditionalFormatRules(rules: readonly ConditionalFormatRule[]): void {
+    this.conditionalFormatRules = rules.map((r) => ({ ...r, range: normalizeSelectionRange(r.range) }));
+    this.touchData();
+  }
+
+  /**
+   * 追加一条条件格式规则。
+   * 若已有规则的适用选区与新区规范化后完全一致，则先移除这些规则再追加（同一选区重复设置视为用新规则覆盖）。
+   */
+  addConditionalFormatRule(rule: ConditionalFormatRule): void {
+    const n = normalizeSelectionRange(rule.range);
+    const filtered = this.conditionalFormatRules.filter(
+      (r) => !selectionRangesEqualNormalized(r.range, n),
+    );
+    this.conditionalFormatRules = [...filtered, { ...rule, range: n }];
+    this.touchData();
+  }
+
+  removeConditionalFormatRuleById(ruleId: string): void {
+    const next = this.conditionalFormatRules.filter((r) => r.id !== ruleId);
+    if (next.length === this.conditionalFormatRules.length) {
+      return;
+    }
+    this.conditionalFormatRules = next;
+    this.touchData();
+  }
+
+  /** 删除与给定选区相交的所有规则。 */
+  clearConditionalFormatRulesIntersecting(range: SelectionRange): void {
+    const n = normalizeSelectionRange(range);
+    const next = this.conditionalFormatRules.filter((r) => !selectionRangesIntersect(r.range, n));
+    if (next.length === this.conditionalFormatRules.length) {
+      return;
+    }
+    this.conditionalFormatRules = next;
+    this.touchData();
+  }
+
+  clearAllConditionalFormatRules(): void {
+    if (this.conditionalFormatRules.length === 0) {
+      return;
+    }
+    this.conditionalFormatRules = [];
+    this.touchData();
+  }
+
+  /** 供 Canvas 绘制：首条匹配规则的预设/自定义样式叠加（不改变单元格持久样式）。 */
+  resolveConditionalFormattingCellOverlay(
+    row: number,
+    col: number,
+  ): ConditionalFormattingOverlay | null {
+    return resolveConditionalFormattingOverlay(this, row, col);
   }
 
   /** 字面量：清除公式并写入标量（不含公式重算，请在外层调用 `recalcWorksheet`）。 */

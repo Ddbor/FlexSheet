@@ -37,7 +37,18 @@ const CONDITIONAL_MENU_ROWS: readonly ConditionalMenuRow[] = [
   { kind: "item", id: "home.style.conditional.iconSets", label: "图标集", submenu: true },
   { kind: "sep" },
   { kind: "item", id: "home.style.conditional.newRule", label: "新建规则...", submenu: false },
-  { kind: "item", id: "home.style.conditional.clearRules", label: "清除规则", submenu: true },
+  {
+    kind: "item",
+    id: "home.style.conditional.clearRulesFromSelection",
+    label: "清除所选单元格的规则",
+    submenu: false,
+  },
+  {
+    kind: "item",
+    id: "home.style.conditional.clearRulesFromSheet",
+    label: "清除整个工作表的规则",
+    submenu: false,
+  },
   { kind: "item", id: "home.style.conditional.manageRules", label: "管理规则...", submenu: false },
 ];
 

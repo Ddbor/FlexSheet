@@ -8,8 +8,38 @@ import {
 import { RIBBON_FONT_FAMILY_ITEMS } from "./font-family-items.js";
 import { argb8ToCssHex6, cssHexToFillArgb } from "./ribbon-color-argb.js";
 import { showRibbonColorDialog } from "./ribbon-color-dialog.js";
+import {
+  showConditionalFormatManageRulesDialog,
+  showConditionalFormatNewRuleDialog,
+  type CfNewRuleDialogSeed,
+} from "./ribbon-conditional-format-dialog.js";
 import { getNumberFormatPresetByCommandId } from "./ribbon-number-format-chrome.js";
 import type { FlexSheetLike, RibbonCommandEvent } from "./ribbon-types.js";
+
+async function openNewConditionalFormatRule(
+  fs: FlexSheetLike,
+  seed: CfNewRuleDialogSeed,
+): Promise<void> {
+  const range = fs.selection.getNormalizedRange();
+  const rule = await showConditionalFormatNewRuleDialog(range, seed);
+  if (rule !== null && fs.addConditionalFormatRuleFromUi !== undefined) {
+    fs.addConditionalFormatRuleFromUi(rule);
+  }
+}
+
+async function openManageConditionalFormatRules(fs: FlexSheetLike): Promise<void> {
+  const sheet = fs.workbook?.getActiveSheet();
+  if (sheet === undefined || fs.replaceConditionalFormatRulesFromUi === undefined) {
+    return;
+  }
+  const next = await showConditionalFormatManageRulesDialog(
+    sheet.getConditionalFormatRules(),
+    sheet.name,
+  );
+  if (next !== null) {
+    fs.replaceConditionalFormatRulesFromUi(next);
+  }
+}
 
 const FONT_FAMILY_CSS = new Map<string, string>(
   RIBBON_FONT_FAMILY_ITEMS.map((it) => {
@@ -383,7 +413,47 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.openCustomSortDialog();
       return true;
     }
+    case "home.style.conditional.newRule":
+    case "home.style.conditional.highlightCells.moreRules": {
+      if (fs.addConditionalFormatRuleFromUi === undefined) {
+        return false;
+      }
+      void openNewConditionalFormatRule(fs, { kind: "default" });
+      return true;
+    }
+    case "home.style.conditional.manageRules": {
+      if (fs.replaceConditionalFormatRulesFromUi === undefined || fs.workbook === undefined) {
+        return false;
+      }
+      void openManageConditionalFormatRules(fs);
+      return true;
+    }
+    case "home.style.conditional.clearRulesFromSelection": {
+      if (fs.clearConditionalFormatRulesInSelection === undefined) {
+        return false;
+      }
+      fs.clearConditionalFormatRulesInSelection();
+      return true;
+    }
+    case "home.style.conditional.clearRulesFromSheet": {
+      if (fs.clearAllConditionalFormatRulesFromUi === undefined) {
+        return false;
+      }
+      fs.clearAllConditionalFormatRulesFromUi();
+      return true;
+    }
     default: {
+      if (
+        ev.id.startsWith("home.style.conditional.highlightCells.") &&
+        ev.id !== "home.style.conditional.highlightCells" &&
+        fs.addConditionalFormatRuleFromUi !== undefined
+      ) {
+        void openNewConditionalFormatRule(fs, {
+          kind: "highlightPreset",
+          highlightCommandId: ev.id,
+        });
+        return true;
+      }
       const fam = FONT_FAMILY_CSS.get(ev.id);
       if (fam !== undefined) {
         fs.applySelectionStylePatch({ fontFamily: fam });
