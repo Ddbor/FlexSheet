@@ -165,6 +165,12 @@ export function closeAllRibbonPopups(): void {
       }
     }
   });
+  document.querySelectorAll("[data-fs-conditional-flyout]").forEach((el) => {
+    if (el instanceof HTMLElement && !el.hidden) {
+      el.hidden = true;
+      clearToolbarDropdownMenuPosition(el);
+    }
+  });
 }
 
 /** 展开时脱离 Ribbon overflow，用视口坐标贴触发器下沿；宽度由 CSS（内容自适应）决定 */

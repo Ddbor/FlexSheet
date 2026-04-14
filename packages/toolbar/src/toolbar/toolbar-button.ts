@@ -10,6 +10,11 @@ export interface ToolbarButtonOptions {
   readonly icon?: SVGSVGElement;
   /** 带下拉箭头，点击箭头展开菜单（需配合 onOpenDropdown） */
   readonly splitDropdown?: boolean;
+  /**
+   * 大号 Ribbon 专用：整钮点击只触发展开菜单（`fs-dropdown-toggle`），不发送 `id`；
+   * 布局为图标、标签、下拉箭头自上而下，无分割条（与 `splitDropdown` 互斥，优先本项）。
+   */
+  readonly menuTrigger?: boolean;
   /** 点击仅触发展开颜色面板（`fs-color-picker-toggle`），不发送 commandId */
   readonly colorPickerToggle?: boolean;
   readonly title?: string;
@@ -48,29 +53,51 @@ export function createToolbarButton(
   const row = document.createElement("span");
   row.className = "fs-tb-btn__row";
 
-  if (options.icon !== undefined) {
-    const wrap = document.createElement("span");
-    wrap.className = "fs-tb-btn__icon";
-    wrap.appendChild(options.icon);
-    row.appendChild(wrap);
-  }
-
-  const text = document.createElement("span");
-  text.className = "fs-tb-btn__label";
-  text.textContent = options.label;
-  row.appendChild(text);
-
-  if (options.splitDropdown === true) {
-    const split = document.createElement("span");
-    split.className = "fs-tb-btn__split";
+  if (options.menuTrigger === true) {
+    btn.classList.add("fs-tb-btn--ribbon-menu");
+    if (options.icon !== undefined) {
+      const wrap = document.createElement("span");
+      wrap.className = "fs-tb-btn__icon";
+      wrap.appendChild(options.icon);
+      row.appendChild(wrap);
+    }
+    const text = document.createElement("span");
+    text.className = "fs-tb-btn__label";
+    text.textContent = options.label;
+    const chevWrap = document.createElement("span");
+    chevWrap.className = "fs-tb-btn__menu-chev-wrap";
+    chevWrap.setAttribute("aria-hidden", "true");
     const chev = iconChevronDown();
-    chev.classList.add("fs-tb-btn__chev");
-    split.appendChild(chev);
+    chev.classList.add("fs-tb-btn__menu-chev");
+    chevWrap.appendChild(chev);
+    row.appendChild(text);
+    row.appendChild(chevWrap);
     btn.appendChild(row);
-    btn.appendChild(split);
-    btn.classList.add("fs-tb-btn--split");
   } else {
-    btn.appendChild(row);
+    if (options.icon !== undefined) {
+      const wrap = document.createElement("span");
+      wrap.className = "fs-tb-btn__icon";
+      wrap.appendChild(options.icon);
+      row.appendChild(wrap);
+    }
+
+    const text = document.createElement("span");
+    text.className = "fs-tb-btn__label";
+    text.textContent = options.label;
+    row.appendChild(text);
+
+    if (options.splitDropdown === true) {
+      const split = document.createElement("span");
+      split.className = "fs-tb-btn__split";
+      const chev = iconChevronDown();
+      chev.classList.add("fs-tb-btn__chev");
+      split.appendChild(chev);
+      btn.appendChild(row);
+      btn.appendChild(split);
+      btn.classList.add("fs-tb-btn--split");
+    } else {
+      btn.appendChild(row);
+    }
   }
 
   btn.addEventListener("click", (ev) => {
@@ -80,6 +107,11 @@ export function createToolbarButton(
     if (options.colorPickerToggle === true) {
       ev.stopPropagation();
       btn.dispatchEvent(new CustomEvent("fs-color-picker-toggle", { bubbles: true }));
+      return;
+    }
+    if (options.menuTrigger === true) {
+      ev.stopPropagation();
+      btn.dispatchEvent(new CustomEvent("fs-dropdown-toggle", { bubbles: true }));
       return;
     }
     if (options.splitDropdown === true) {

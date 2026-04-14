@@ -13,7 +13,9 @@ import {
   iconAlignTop,
   iconBold,
   iconBorderAll,
+  iconCellStyle,
   iconCommaStyle,
+  iconConditionalFormatting,
   iconCopy,
   iconCut,
   iconDecreaseDecimal,
@@ -40,6 +42,7 @@ import {
   iconPaste,
   iconPercent,
   iconRedo,
+  iconTableStyle,
   iconTextOrientation,
   iconUnderline,
   iconUndo,
@@ -47,6 +50,11 @@ import {
 } from "../../toolbar/icons.js";
 import { mountAlignMergeMenu } from "../align-merge-menu.js";
 import { mountAlignOrientationMenu } from "../align-orientation-menu.js";
+import {
+  mountCellStyleRibbonMenu,
+  mountConditionalFormatMenu,
+  mountTableFormatStyleMenu,
+} from "../home-styles-menus.js";
 import {
   RIBBON_FONT_FAMILY_DEFAULT_PREVIEW,
   RIBBON_FONT_FAMILY_ITEMS,
@@ -512,6 +520,58 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
 
     content.appendChild(leftCol);
     content.appendChild(rightStack);
+    inner.appendChild(root);
+  }
+
+  // 样式（条件格式 / 套用表格格式 / 单元格样式）
+  {
+    const { root, content } = createRibbonGroup("样式");
+    content.classList.add("fs-ribbon-styles");
+    const conditionalBtn = createToolbarButton(
+      {
+        id: "home.style.conditional",
+        tab: TAB,
+        label: "条件格式",
+        variant: "large",
+        icon: iconConditionalFormatting(),
+        menuTrigger: true,
+        title: "条件格式",
+      },
+      emit,
+    );
+    conditionalBtn.element.id = "fs-ribbon-home-style-conditional";
+    mountConditionalFormatMenu(conditionalBtn.element, emit, TAB);
+    const tableFormatBtn = createToolbarButton(
+      {
+        id: "home.style.tableFormat",
+        tab: TAB,
+        label: "套用表格格式",
+        variant: "large",
+        icon: iconTableStyle(),
+        menuTrigger: true,
+        title: "套用表格格式",
+      },
+      emit,
+    );
+    tableFormatBtn.element.id = "fs-ribbon-home-style-table-format";
+    mountTableFormatStyleMenu(tableFormatBtn.element, emit, TAB);
+    const cellStylesBtn = createToolbarButton(
+      {
+        id: "home.style.cellStyles",
+        tab: TAB,
+        label: "单元格样式",
+        variant: "large",
+        icon: iconCellStyle(),
+        menuTrigger: true,
+        title: "单元格样式",
+      },
+      emit,
+    );
+    cellStylesBtn.element.id = "fs-ribbon-home-style-cell-styles";
+    mountCellStyleRibbonMenu(cellStylesBtn.element, emit, TAB);
+    content.appendChild(conditionalBtn.element);
+    content.appendChild(tableFormatBtn.element);
+    content.appendChild(cellStylesBtn.element);
     inner.appendChild(root);
   }
 

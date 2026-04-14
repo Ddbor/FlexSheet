@@ -325,6 +325,45 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
     case "home.align.textDirection.rotateDown":
       fs.applySelectionStylePatch({ textOrientation: "rotateDown90" });
       return true;
+    case "home.style.cell.good":
+      fs.applySelectionStylePatch({
+        bold: true,
+        fillArgb: "FFC6EFCE",
+        fgArgb: "FF006100",
+      });
+      return true;
+    case "home.style.cell.bad":
+      fs.applySelectionStylePatch({
+        bold: true,
+        fillArgb: "FFFFC7CE",
+        fgArgb: "FF9C0006",
+      });
+      return true;
+    case "home.style.cell.neutral":
+      fs.applySelectionStylePatch({
+        bold: false,
+        fillArgb: "FFFFEB9C",
+        fgArgb: "FF9C6500",
+      });
+      return true;
+    case "home.style.cell.normal":
+      fs.applySelectionStylePatch({
+        bold: null,
+        italic: null,
+        underline: null,
+        fillArgb: null,
+        fgArgb: null,
+        fontSizePt: null,
+      });
+      return true;
+    case "home.style.cell.title":
+      fs.applySelectionStylePatch({
+        bold: true,
+        fontSizePt: 14,
+        fillArgb: null,
+        fgArgb: "FF1F497D",
+      });
+      return true;
     case "data.sort.asc":
     case "data.sort.desc": {
       if (fs.sortSelectionRowsByKeyColumn === undefined) {

@@ -1108,12 +1108,6 @@ export class SheetContextMenuPlugin extends PluginBase {
   background: #e8f5e9 !important;
   outline: none;
 }
-.fs-sheet-context-menu__item--submenu,
-.fs-sheet-context-menu__submenu-flyout .fs-sheet-context-menu__item:not(:disabled):hover,
-.fs-sheet-context-menu__submenu-flyout .fs-sheet-context-menu__item:not(:disabled):focus-visible {
-  background: #e8f5e9 !important;
-  outline: none;
-}
 .fs-sheet-context-menu__item--submenu {
   justify-content: flex-start;
 }
