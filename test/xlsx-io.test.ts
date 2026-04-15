@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Workbook, Worksheet } from "@flexsheet/core";
+import { type ConditionalFormatRule, Workbook, Worksheet } from "@flexsheet/core";
 import {
   crc32,
   exportWorkbookToXlsxBytes,
@@ -264,5 +264,66 @@ describe("xlsx export/import", () => {
     expect(sheetXml).toMatch(/<c r="B1"[^>]*\ss="/);
     expect(sheetXml).toMatch(/<c r="A2"[^>]*\ss="/);
     expect(sheetXml).toMatch(/<c r="B2"[^>]*\ss="/);
+  });
+
+  it("exports conditional formatting (color scale) for Excel worksheet OOXML", () => {
+    const wb = new Workbook();
+    const s = new Worksheet("S", 6, 6);
+    wb.addSheet(s);
+    s.getCell(0, 0).value = 1;
+    s.getCell(0, 1).value = 5;
+    const rule: ConditionalFormatRule = {
+      id: "cf-test-1",
+      range: { startRow: 0, startCol: 0, endRow: 0, endCol: 1 },
+      uiFamily: "twoColorScale",
+      classicType: "colorScale",
+      formatPreset: "none",
+      cfTwoColorMin: { type: "lowest", value: "", colorArgb: "FFFFFFFF" },
+      cfTwoColorMax: { type: "highest", value: "", colorArgb: "FF000000" },
+    };
+    s.addConditionalFormatRule(rule);
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const sheetXml = new TextDecoder().decode(map.get("xl/worksheets/sheet1.xml"));
+    expect(sheetXml).toContain("<conditionalFormatting");
+    expect(sheetXml).toContain("colorScale");
+    expect(sheetXml).toContain('sqref="A1:B1"');
+
+    const stylesXml = new TextDecoder().decode(map.get("xl/styles.xml"));
+    expect(stylesXml).toContain("<dxfs ");
+  });
+
+  it("exports classic conditional formatting with dxfs for Excel", () => {
+    const wb = new Workbook();
+    const s = new Worksheet("S");
+    wb.addSheet(s);
+    s.getCell(0, 0).value = 10;
+    const rule: ConditionalFormatRule = {
+      id: "cf-classic-1",
+      range: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 },
+      uiFamily: "classic",
+      classicType: "cellsThatContain",
+      cellsThatContainKind: "cellValue",
+      valueOperator: "greaterThan",
+      value1: "5",
+      formatPreset: "lightRedFillDarkRedText",
+    };
+    s.addConditionalFormatRule(rule);
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const sheetXml = new TextDecoder().decode(map.get("xl/worksheets/sheet1.xml"));
+    expect(sheetXml).toContain('type="cellIs"');
+    expect(sheetXml).toContain('operator="greaterThan"');
+    expect(sheetXml).toContain("dxfId=");
+
+    const stylesXml = new TextDecoder().decode(map.get("xl/styles.xml"));
+    expect(stylesXml).toMatch(/<dxfs count="[1-9]/);
+    expect(stylesXml).toContain("<dxf>");
   });
 });

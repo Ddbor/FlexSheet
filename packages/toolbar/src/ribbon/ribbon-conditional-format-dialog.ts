@@ -184,14 +184,51 @@ export type CfNewRuleDialogSeed =
   | {
       readonly kind: "highlightPreset";
       readonly highlightCommandId: string;
+    }
+  | {
+      readonly kind: "topBottomPreset";
+      readonly topBottomCommandId: string;
+    }
+  | {
+      readonly kind: "dataBarPreset";
+      readonly dataBarCommandId: string;
+    }
+  | {
+      readonly kind: "colorScalePreset";
+      readonly colorScaleCommandId: string;
     };
 
-function mapHighlightCommandToSeed(
-  id: string,
-): Pick<
-  ConditionalFormatRule,
-  "classicType" | "cellsThatContainKind" | "valueOperator" | "textOperator" | "uniqueKind"
-> | null {
+type CfColorScaleFlyoutSeed = {
+  readonly uiFamily: "twoColorScale" | "threeColorScale";
+  readonly scaleMinHex: string;
+  readonly scaleMaxHex: string;
+  readonly scaleMidHex?: string;
+};
+
+type CfDataBarFlyoutSeed = {
+  readonly fillKind: CfDataBarFillKind;
+  readonly posFillHex: string;
+  readonly negFillHex: string;
+  readonly posBorderHex: string;
+  readonly negBorderHex: string;
+};
+
+/** 对话框「经典」规则类型的初始字段（来自 Ribbon 快捷项）。 */
+type CfNewRuleClassicSeed = Partial<
+  Pick<
+    ConditionalFormatRule,
+    | "classicType"
+    | "cellsThatContainKind"
+    | "valueOperator"
+    | "textOperator"
+    | "uniqueKind"
+    | "topBottomKind"
+    | "topBottomN"
+    | "averageKind"
+  >
+> | null;
+
+function mapHighlightCommandToSeed(id: string): CfNewRuleClassicSeed {
   switch (id) {
     case "home.style.conditional.highlightCells.greaterThan":
       return {
@@ -232,6 +269,119 @@ function mapHighlightCommandToSeed(
   }
 }
 
+function mapTopBottomCommandToSeed(id: string): CfNewRuleClassicSeed {
+  switch (id) {
+    case "home.style.conditional.topBottom.top10Items":
+      return { classicType: "topBottomRanked", topBottomKind: "top", topBottomN: 10 };
+    case "home.style.conditional.topBottom.top10Percent":
+      return { classicType: "topBottomRanked", topBottomKind: "topPercent", topBottomN: 10 };
+    case "home.style.conditional.topBottom.bottom10Items":
+      return { classicType: "topBottomRanked", topBottomKind: "bottom", topBottomN: 10 };
+    case "home.style.conditional.topBottom.bottom10Percent":
+      return { classicType: "topBottomRanked", topBottomKind: "bottomPercent", topBottomN: 10 };
+    case "home.style.conditional.topBottom.aboveAverage":
+      return { classicType: "aboveBelowAverage", averageKind: "above" };
+    case "home.style.conditional.topBottom.belowAverage":
+      return { classicType: "aboveBelowAverage", averageKind: "below" };
+    default:
+      return null;
+  }
+}
+
+function mapDataBarCommandToSeed(id: string): CfDataBarFlyoutSeed | null {
+  const neg = "#ff0000";
+  const posBr = "#2f5597";
+  const negBr = "#000000";
+  const g = (pos: string): CfDataBarFlyoutSeed => ({
+    fillKind: "gradient",
+    posFillHex: pos,
+    negFillHex: neg,
+    posBorderHex: posBr,
+    negBorderHex: negBr,
+  });
+  const s = (pos: string): CfDataBarFlyoutSeed => ({
+    fillKind: "solid",
+    posFillHex: pos,
+    negFillHex: neg,
+    posBorderHex: posBr,
+    negBorderHex: negBr,
+  });
+  switch (id) {
+    case "home.style.conditional.dataBars.gradient.blue":
+      return g("#638ec6");
+    case "home.style.conditional.dataBars.gradient.green":
+      return g("#5cb85c");
+    case "home.style.conditional.dataBars.gradient.red":
+      return g("#e74c3c");
+    case "home.style.conditional.dataBars.gradient.yellow":
+      return g("#f1c40f");
+    case "home.style.conditional.dataBars.gradient.cyan":
+      return g("#17c0d8");
+    case "home.style.conditional.dataBars.gradient.pink":
+      return g("#e91e8c");
+    case "home.style.conditional.dataBars.solid.blue":
+      return s("#638ec6");
+    case "home.style.conditional.dataBars.solid.green":
+      return s("#5cb85c");
+    case "home.style.conditional.dataBars.solid.red":
+      return s("#e74c3c");
+    case "home.style.conditional.dataBars.solid.yellow":
+      return s("#f1c40f");
+    case "home.style.conditional.dataBars.solid.darkBlue":
+      return s("#2f5597");
+    case "home.style.conditional.dataBars.solid.pink":
+      return s("#e91e8c");
+    default:
+      return null;
+  }
+}
+
+function mapColorScaleCommandToSeed(id: string): CfColorScaleFlyoutSeed | null {
+  const t3 = (
+    min: string,
+    mid: string,
+    max: string,
+  ): CfColorScaleFlyoutSeed => ({
+    uiFamily: "threeColorScale",
+    scaleMinHex: min,
+    scaleMidHex: mid,
+    scaleMaxHex: max,
+  });
+  const t2 = (min: string, max: string): CfColorScaleFlyoutSeed => ({
+    uiFamily: "twoColorScale",
+    scaleMinHex: min,
+    scaleMaxHex: max,
+  });
+  switch (id) {
+    case "home.style.conditional.colorScales.gyr":
+      return t3("#63be7b", "#ffeb84", "#f8696b");
+    case "home.style.conditional.colorScales.ryg":
+      return t3("#f8696b", "#ffeb84", "#63be7b");
+    case "home.style.conditional.colorScales.gwr":
+      return t3("#63be7b", "#ffffff", "#f8696b");
+    case "home.style.conditional.colorScales.rwg":
+      return t3("#f8696b", "#ffffff", "#63be7b");
+    case "home.style.conditional.colorScales.bwr":
+      return t3("#638ec6", "#ffffff", "#f8696b");
+    case "home.style.conditional.colorScales.rwb":
+      return t3("#f8696b", "#ffffff", "#638ec6");
+    case "home.style.conditional.colorScales.whiteRed":
+      return t2("#ffffff", "#f8696b");
+    case "home.style.conditional.colorScales.redWhite":
+      return t2("#f8696b", "#ffffff");
+    case "home.style.conditional.colorScales.greenWhite":
+      return t2("#63be7b", "#ffffff");
+    case "home.style.conditional.colorScales.whiteGreen":
+      return t2("#ffffff", "#63be7b");
+    case "home.style.conditional.colorScales.greenYellow":
+      return t2("#63be7b", "#ffeb84");
+    case "home.style.conditional.colorScales.yellowGreen":
+      return t2("#ffeb84", "#63be7b");
+    default:
+      return null;
+  }
+}
+
 /**
  * 打开「新建格式规则」对话框；确定返回规则（含 `id`），取消返回 `null`。
  * `range` 为规则作用范围（通常为当前选区）。
@@ -251,9 +401,17 @@ export function showConditionalFormatNewRuleDialog(
       resolve(v);
     };
 
-    let seedPartial: ReturnType<typeof mapHighlightCommandToSeed> | null = null;
+    let seedPartial: CfNewRuleClassicSeed = null;
+    const dataBarSeedPartial: CfDataBarFlyoutSeed | null =
+      seed.kind === "dataBarPreset" ? mapDataBarCommandToSeed(seed.dataBarCommandId) : null;
+    const colorScaleSeedPartial: CfColorScaleFlyoutSeed | null =
+      seed.kind === "colorScalePreset"
+        ? mapColorScaleCommandToSeed(seed.colorScaleCommandId)
+        : null;
     if (seed.kind === "highlightPreset") {
       seedPartial = mapHighlightCommandToSeed(seed.highlightCommandId);
+    } else if (seed.kind === "topBottomPreset") {
+      seedPartial = mapTopBottomCommandToSeed(seed.topBottomCommandId);
     }
 
     const backdrop = document.createElement("div");
@@ -299,7 +457,7 @@ export function showConditionalFormatNewRuleDialog(
       { v: "twoColorScale", t: "双色刻度" },
       { v: "threeColorScale", t: "三色刻度" },
       { v: "dataBar", t: "数据条" },
-      { v: "iconSet", t: "图标集" },
+      // { v: "iconSet", t: "图标集" },
       { v: "classic", t: "经典" },
     ];
     for (const o of uiOpts) {
@@ -308,7 +466,12 @@ export function showConditionalFormatNewRuleDialog(
       op.textContent = o.t;
       selUiFamily.appendChild(op);
     }
-    selUiFamily.value = "classic";
+    selUiFamily.value =
+      colorScaleSeedPartial !== null
+        ? colorScaleSeedPartial.uiFamily
+        : dataBarSeedPartial !== null
+          ? "dataBar"
+          : "classic";
     rowStyle.appendChild(labStyle);
     rowStyle.appendChild(selUiFamily);
 
@@ -453,6 +616,7 @@ export function showConditionalFormatNewRuleDialog(
           negBorderHex: string;
           axisHex: string;
           readonly syncDataBarValueUi: () => void;
+          readonly refreshBrUi: () => void;
         };
 
     let live: CfNewRuleLive | null = null;
@@ -768,7 +932,15 @@ export function showConditionalFormatNewRuleDialog(
         num.className = "fs-cf-dialog__input fs-cf-dialog__input--narrow";
         num.min = "1";
         num.max = "1000";
-        num.value = "10";
+        sk.value = (seedPartial?.topBottomKind ?? "top") as CfTopBottomKind;
+        {
+          const rawN = seedPartial?.topBottomN;
+          const n =
+            rawN !== undefined && Number.isFinite(rawN)
+              ? Math.max(1, Math.min(1000, Math.floor(Number(rawN))))
+              : 10;
+          num.value = String(n);
+        }
         row.appendChild(sk);
         row.appendChild(num);
         dynamic.appendChild(row);
@@ -790,6 +962,7 @@ export function showConditionalFormatNewRuleDialog(
           op.textContent = o.t;
           sk.appendChild(op);
         }
+        sk.value = (seedPartial?.averageKind ?? "above") as CfAverageKind;
         dynamic.appendChild(sk);
         (dynamic as unknown as { _avgKind?: HTMLSelectElement })._avgKind = sk;
         return;
@@ -1663,6 +1836,14 @@ export function showConditionalFormatNewRuleDialog(
         wrap.appendChild(rowAxisColor);
         styleHost.appendChild(wrap);
 
+        const refreshBrUi = (): void => {
+          const en = borderSolid.checked;
+          brPos.btn.disabled = !en;
+          brNeg.btn.disabled = !en;
+          brPos.btn.style.opacity = en ? "1" : "0.45";
+          brNeg.btn.style.opacity = en ? "1" : "0.45";
+        };
+
         const dbLive: CfNewRuleLive = {
           k: "dataBar",
           sMin,
@@ -1711,6 +1892,7 @@ export function showConditionalFormatNewRuleDialog(
               sMax.inp.placeholder = "";
             }
           },
+          refreshBrUi,
         };
 
         dbLive.syncFillPos(dbLive.posFillHex);
@@ -1718,14 +1900,6 @@ export function showConditionalFormatNewRuleDialog(
         dbLive.syncBrPos(dbLive.posBorderHex);
         dbLive.syncBrNeg(dbLive.negBorderHex);
         dbLive.syncAxis(dbLive.axisHex);
-
-        const refreshBrUi = (): void => {
-          const en = borderSolid.checked;
-          brPos.btn.disabled = !en;
-          brNeg.btn.disabled = !en;
-          brPos.btn.style.opacity = en ? "1" : "0.45";
-          brNeg.btn.style.opacity = en ? "1" : "0.45";
-        };
 
         const wirePick = (
           btn: HTMLButtonElement,
@@ -1835,10 +2009,51 @@ export function showConditionalFormatNewRuleDialog(
     });
 
     const initialForm = paintStyleForm();
-    if (seedPartial !== null && initialForm?.k === "classic") {
+    if (
+      seedPartial !== null &&
+      seedPartial.classicType !== undefined &&
+      initialForm?.k === "classic"
+    ) {
       initialForm.selClassicType.value = seedPartial.classicType;
       initialForm.rebuildDynamic();
       initialForm.syncPreview();
+    }
+    if (dataBarSeedPartial !== null && initialForm?.k === "dataBar") {
+      const d = initialForm;
+      if (dataBarSeedPartial.fillKind === "gradient") {
+        d.fillGrad.checked = true;
+        d.fillSolid.checked = false;
+      } else {
+        d.fillSolid.checked = true;
+        d.fillGrad.checked = false;
+      }
+      d.posFillHex = dataBarSeedPartial.posFillHex;
+      d.negFillHex = dataBarSeedPartial.negFillHex;
+      d.posBorderHex = dataBarSeedPartial.posBorderHex;
+      d.negBorderHex = dataBarSeedPartial.negBorderHex;
+      d.syncFillPos(d.posFillHex);
+      d.syncFillNeg(d.negFillHex);
+      d.syncBrPos(d.posBorderHex);
+      d.syncBrNeg(d.negBorderHex);
+      d.refreshBrUi();
+      d.syncDataBarValueUi();
+    }
+    if (colorScaleSeedPartial !== null && initialForm?.k === "two") {
+      const t = initialForm;
+      t.scaleMinHex = colorScaleSeedPartial.scaleMinHex;
+      t.scaleMaxHex = colorScaleSeedPartial.scaleMaxHex;
+      t.sMin.syncBar(t.scaleMinHex);
+      t.sMax.syncBar(t.scaleMaxHex);
+    }
+    if (colorScaleSeedPartial !== null && initialForm?.k === "three") {
+      const t = initialForm;
+      t.scaleMinHex = colorScaleSeedPartial.scaleMinHex;
+      t.scaleMidHex = colorScaleSeedPartial.scaleMidHex ?? "#fff9c4";
+      t.scaleMaxHex = colorScaleSeedPartial.scaleMaxHex;
+      t.sMin.syncBar(t.scaleMinHex);
+      t.sMid.syncBar(t.scaleMidHex);
+      t.sMax.syncBar(t.scaleMaxHex);
+      t.syncScaleValUi();
     }
     refreshOk();
 

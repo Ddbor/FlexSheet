@@ -147,6 +147,9 @@ export class FlexSheetRibbon {
       if (t !== null && t.closest("[data-fs-floating-menu]") !== null) {
         return;
       }
+      if (t !== null && t.closest("[data-fs-conditional-flyout]") !== null) {
+        return;
+      }
       this.closeAllDropdowns();
     };
     document.addEventListener("pointerdown", this.onDocPointerDown, true);

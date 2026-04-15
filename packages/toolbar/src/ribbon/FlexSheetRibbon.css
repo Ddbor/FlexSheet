@@ -1098,6 +1098,63 @@
   min-width: 168px;
 }
 
+/* 「数据条」二级菜单：分组 + 彩色缩略图 */
+.fs-bd-menu--conditional-flyout--data-bars {
+  min-width: 204px;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 2px 0 4px;
+  box-sizing: border-box;
+}
+
+.fs-bd-menu__db-sec-head {
+  padding: 6px 8px 4px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--fs-ribbon-group-label, #605e5c);
+}
+
+.fs-bd-menu__db-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 0 5px 6px;
+}
+
+.fs-bd-menu__db-thumb-btn {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: var(--fs-ribbon-panel-bg, #fff);
+  cursor: pointer;
+}
+
+.fs-bd-menu__db-thumb-btn:hover {
+  border-color: var(--fs-ribbon-border, #e1dfdd);
+  background: var(--fs-ribbon-hover, #f3f2f1);
+}
+
+.fs-bd-menu__db-thumb-btn:focus-visible {
+  outline: 2px solid var(--fs-ribbon-accent, #217346);
+  outline-offset: 1px;
+}
+
+.fs-bd-menu__db-thumb-btn svg {
+  display: block;
+  width: 32px;
+  height: 26px;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.fs-bd-menu__db-thumb-btn svg.fs-bd-cs-flyout-thumb {
+  height: 22px;
+}
+
 /* 填充色 / 字体颜色面板 */
 .fs-color-menu {
   box-sizing: border-box;
@@ -1603,11 +1660,13 @@
   width: min(640px, calc(100vw - 32px));
   max-height: min(90vh, 640px);
   overflow: auto;
-  border-radius: 4px;
+  border-radius: 3px;
   background: var(--fs-cf-panel);
   color: var(--fs-cf-text);
   box-shadow: var(--fs-cf-shadow);
   border: 1px solid var(--fs-cf-border);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .fs-cf-dialog--manage {
@@ -1618,23 +1677,24 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px 8px;
+  padding: 7px 11px 6px;
   border-bottom: 1px solid var(--fs-cf-border);
 }
 
 .fs-cf-dialog__title {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .fs-cf-dialog__close {
   border: none;
   background: transparent;
   color: var(--fs-cf-muted);
-  font-size: 22px;
+  font-size: 18px;
   line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 0 4px;
   border-radius: 2px;
 }
 
@@ -1648,17 +1708,17 @@
 }
 
 .fs-cf-dialog__body {
-  padding: 12px 14px 8px;
+  padding: 8px 11px 6px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
 }
 
 /* 样式切换时仅此处挂载当前表单（经典 / 双色刻度互斥） */
 .fs-cf-dialog__style-host {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   min-height: 0;
 }
 
@@ -1666,7 +1726,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 5px 6px;
 }
 
 .fs-cf-dialog__row--format {
@@ -1675,8 +1735,8 @@
 
 .fs-cf-dialog__label {
   flex: 0 0 auto;
-  min-width: 4.5em;
-  font-size: 13px;
+  min-width: 4.25em;
+  font-size: 11px;
   color: var(--fs-cf-muted);
 }
 
@@ -1684,8 +1744,12 @@
   flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
-  padding: 4px 8px;
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: 26px;
+  height: 26px;
+  padding: 2px 7px;
+  font-size: 12px;
+  line-height: 1.25;
   border: 1px solid var(--fs-cf-border);
   border-radius: 2px;
   background: var(--fs-cf-panel);
@@ -1700,8 +1764,12 @@
   flex: 1 1 120px;
   min-width: 80px;
   max-width: 100%;
-  padding: 4px 8px;
-  font-size: 13px;
+  box-sizing: border-box;
+  min-height: 26px;
+  height: 26px;
+  padding: 2px 7px;
+  font-size: 12px;
+  line-height: 1.25;
   border: 1px solid var(--fs-cf-border);
   border-radius: 2px;
   background: var(--fs-cf-panel);
@@ -1709,24 +1777,24 @@
 }
 
 .fs-cf-dialog__input--narrow {
-  flex: 0 0 72px;
-  min-width: 56px;
+  flex: 0 0 64px;
+  min-width: 52px;
 }
 
 .fs-cf-dialog__panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
 }
 
 .fs-cf-dialog__dynamic {
-  min-height: 2.5em;
+  min-height: 2em;
 }
 
 .fs-cf-dialog__tip,
 .fs-cf-dialog__warn {
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--fs-cf-muted);
 }
 
@@ -1740,9 +1808,10 @@
 
 .fs-cf-dialog__preview {
   flex: 0 0 auto;
-  min-width: 140px;
-  padding: 6px 10px;
-  font-size: 12px;
+  min-width: 120px;
+  padding: 4px 8px;
+  font-size: 11px;
+  line-height: 1.3;
   border: 1px solid var(--fs-cf-border);
   border-radius: 2px;
   background: #ffffff;
@@ -1752,8 +1821,9 @@
 
 .fs-cf-dialog__btn-mini {
   flex: 0 0 auto;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.25;
   border: 1px solid var(--fs-cf-border);
   border-radius: 2px;
   background: var(--fs-cf-panel);
@@ -1768,15 +1838,17 @@
 .fs-cf-dialog__footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 10px 14px 12px;
+  gap: 6px;
+  padding: 7px 11px 9px;
   border-top: 1px solid var(--fs-cf-border);
 }
 
 .fs-cf-dialog__btn {
-  padding: 6px 20px;
-  font-size: 13px;
-  border-radius: 4px;
+  padding: 4px 14px;
+  min-height: 26px;
+  font-size: 12px;
+  line-height: 1.2;
+  border-radius: 3px;
   cursor: pointer;
   border: 1px solid transparent;
 }
@@ -1815,7 +1887,7 @@
 
 .fs-cf-dialog__scale-sep {
   height: 0;
-  margin: 4px 0 10px;
+  margin: 2px 0 6px;
   border: none;
   border-top: 1px solid var(--fs-cf-border);
 }
@@ -1823,7 +1895,7 @@
 .fs-cf-dialog__scale-columns {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px 20px;
+  gap: 10px 14px;
   align-items: start;
 }
 
@@ -1834,15 +1906,15 @@
 .fs-cf-dialog__scale-col {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
   min-width: 0;
 }
 
 .fs-cf-dialog__scale-colhead {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--fs-cf-text);
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .fs-cf-dialog__label--narrow {
@@ -1861,6 +1933,8 @@
   display: flex;
   align-items: stretch;
   min-width: 0;
+  min-height: 26px;
+  height: 26px;
   border: 1px solid var(--fs-cf-border);
   border-radius: 2px;
   overflow: hidden;
@@ -1870,18 +1944,20 @@
 .fs-cf-dialog__value-combo .fs-cf-dialog__input {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   border: none;
   border-radius: 0;
 }
 
 .fs-cf-dialog__range-pick {
-  flex: 0 0 28px;
-  width: 28px;
+  flex: 0 0 26px;
+  width: 26px;
   border: none;
   border-left: 1px solid var(--fs-cf-border);
   background: var(--fs-cf-panel);
   color: var(--fs-cf-muted);
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1;
   cursor: default;
   padding: 0;
@@ -1893,9 +1969,9 @@
   align-items: stretch;
   min-width: 0;
   max-width: 100%;
-  height: 28px;
+  height: 26px;
   padding: 0 6px 0 0;
-  gap: 6px;
+  gap: 4px;
   border: 1px solid var(--fs-cf-border);
   border-radius: 2px;
   background: var(--fs-cf-panel);
@@ -1919,56 +1995,101 @@
 .fs-cf-dialog__data-bar-panel {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 8px;
   min-width: 0;
+  padding-top: 0;
+}
+
+.fs-cf-dialog__data-bar-panel > .fs-cf-dialog__scale-sep {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.fs-cf-dialog__data-bar-panel .fs-cf-dialog__scale-columns {
+  gap: 8px 16px;
+}
+
+.fs-cf-dialog__data-bar-panel .fs-cf-dialog__scale-col {
+  gap: 5px;
+}
+
+.fs-cf-dialog__data-bar-panel .fs-cf-dialog__scale-colhead {
+  margin-bottom: 2px;
 }
 
 .fs-cf-dialog__cf-subsec {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 5px;
+}
+
+.fs-cf-dialog__data-bar-panel .fs-cf-dialog__cf-subsec {
+  gap: 6px;
 }
 
 .fs-cf-dialog__cf-subsec-title {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--fs-cf-text);
+}
+
+.fs-cf-dialog__data-bar-panel .fs-cf-dialog__cf-subsec-title {
+  padding-bottom: 1px;
+  border-bottom: 1px solid var(--fs-cf-border);
+  margin-bottom: 1px;
 }
 
 .fs-cf-dialog__row--cf-radios,
 .fs-cf-dialog__row--data-bar-fill-colors {
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px 12px;
+  gap: 5px 8px;
 }
 
 .fs-cf-dialog__row--data-bar-dir {
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: 6px 10px;
 }
 
 .fs-cf-dialog__lbl-inline {
   margin: 0 0 0 4px;
-  font: inherit;
+  font-size: 11px;
   color: var(--fs-cf-text);
   cursor: pointer;
+  user-select: none;
+}
+
+.fs-cf-dialog__row--data-bar-dir .fs-cf-dialog__select {
+  flex: 1 1 200px;
+  max-width: 280px;
 }
 
 .fs-cf-dialog__inline-radio {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  margin-right: 8px;
+  gap: 3px;
+  margin-right: 2px;
   cursor: pointer;
-  font: inherit;
+  font-size: 11px;
   color: var(--fs-cf-text);
+  user-select: none;
+}
+
+.fs-cf-dialog__inline-radio input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.fs-cf-dialog__row--data-bar-dir input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
 }
 
 .fs-cf-dialog__row--data-bar-axis {
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 5px 8px;
 }
 
 .fs-cf-dialog__select--grow {
@@ -1999,18 +2120,18 @@
 }
 
 .fs-cf-manage-empty {
-  padding: 12px 4px;
-  font-size: 13px;
+  padding: 8px 4px;
+  font-size: 11px;
   color: var(--fs-cf-muted);
 }
 
 .fs-cf-manage-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 4px;
+  gap: 6px;
+  padding: 5px 4px;
   border-bottom: 1px solid var(--fs-cf-border);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .fs-cf-manage-item__label {
@@ -2021,8 +2142,9 @@
 
 .fs-cf-manage-item__del {
   flex-shrink: 0;
-  padding: 4px 10px;
-  font-size: 12px;
+  padding: 2px 8px;
+  font-size: 11px;
+  line-height: 1.25;
   border: 1px solid var(--fs-cf-border);
   border-radius: 2px;
   background: var(--fs-cf-panel);

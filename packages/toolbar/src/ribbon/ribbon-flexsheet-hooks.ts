@@ -414,7 +414,10 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       return true;
     }
     case "home.style.conditional.newRule":
-    case "home.style.conditional.highlightCells.moreRules": {
+    case "home.style.conditional.highlightCells.moreRules":
+    case "home.style.conditional.topBottom.moreRules":
+    case "home.style.conditional.dataBars.moreRules":
+    case "home.style.conditional.colorScales.moreRules": {
       if (fs.addConditionalFormatRuleFromUi === undefined) {
         return false;
       }
@@ -451,6 +454,39 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
         void openNewConditionalFormatRule(fs, {
           kind: "highlightPreset",
           highlightCommandId: ev.id,
+        });
+        return true;
+      }
+      if (
+        ev.id.startsWith("home.style.conditional.topBottom.") &&
+        ev.id !== "home.style.conditional.topBottom" &&
+        fs.addConditionalFormatRuleFromUi !== undefined
+      ) {
+        void openNewConditionalFormatRule(fs, {
+          kind: "topBottomPreset",
+          topBottomCommandId: ev.id,
+        });
+        return true;
+      }
+      if (
+        ev.id.startsWith("home.style.conditional.dataBars.") &&
+        ev.id !== "home.style.conditional.dataBars" &&
+        fs.addConditionalFormatRuleFromUi !== undefined
+      ) {
+        void openNewConditionalFormatRule(fs, {
+          kind: "dataBarPreset",
+          dataBarCommandId: ev.id,
+        });
+        return true;
+      }
+      if (
+        ev.id.startsWith("home.style.conditional.colorScales.") &&
+        ev.id !== "home.style.conditional.colorScales" &&
+        fs.addConditionalFormatRuleFromUi !== undefined
+      ) {
+        void openNewConditionalFormatRule(fs, {
+          kind: "colorScalePreset",
+          colorScaleCommandId: ev.id,
         });
         return true;
       }

@@ -8,6 +8,11 @@ import {
 import type { Workbook } from "@flexsheet/core";
 import type { Worksheet } from "@flexsheet/core";
 import { formatCellRef } from "./a1.js";
+import {
+  buildSheetConditionalFormattingXml,
+  buildWorkbookConditionalFormatDxfIndex,
+  expandBoundsWithConditionalFormatRanges,
+} from "./export-xlsx-cf.js";
 import { escapeXml, sanitizeXml10Text } from "./xml-escape.js";
 import { buildZipArchive, type ZipEntryInput } from "./zip-writer.js";
 
@@ -93,6 +98,8 @@ interface StyleTable {
   readonly bordersXml: string[];
   readonly cellXfsXml: string[];
   readonly numFmtsXml: string[];
+  /** 条件格式用的差异格式（`styles.xml` / `dxfs`）。 */
+  readonly dxfsXml: string[];
 }
 
 /** `styleSignature` 与 `ensureStyle` 中 JSON 往返用的稳定形状。 */
@@ -134,7 +141,7 @@ function minimalStyleTable(): StyleTable {
   ];
   const bordersXml: string[] = [`<border><left/><right/><top/><bottom/><diagonal/></border>`];
   const cellXfsXml: string[] = [`<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>`];
-  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml, numFmtsXml: [] };
+  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml, numFmtsXml: [], dxfsXml: [] };
 }
 
 function ooxmlBorderStyle(kind: CellBorderKind): string {
@@ -378,7 +385,7 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     }
   }
 
-  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml, numFmtsXml };
+  return { xfBySig, fontsXml, fillsXml, bordersXml, cellXfsXml, numFmtsXml, dxfsXml: [] };
 }
 
 function buildStylesXml(table: StyleTable): string {
@@ -396,6 +403,7 @@ function buildStylesXml(table: StyleTable): string {
     `<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>` +
     `<cellXfs count="${table.cellXfsXml.length}">${table.cellXfsXml.join("")}</cellXfs>` +
     `<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>` +
+    `<dxfs count="${table.dxfsXml.length}">${table.dxfsXml.join("")}</dxfs>` +
     `</styleSheet>`
   );
 }
@@ -553,9 +561,9 @@ function usedBoundsForSheet(
     maxC = Math.max(maxC, endC);
   }
   if (!hasCell) {
-    return null;
+    return expandBoundsWithConditionalFormatRanges(sheet, null);
   }
-  return { minR, maxR, minC, maxC };
+  return expandBoundsWithConditionalFormatRanges(sheet, { minR, maxR, minC, maxC });
 }
 
 /** FlexSheet 行高为逻辑 px（与 import 互逆），OOXML `ht` 为磅。 */
@@ -717,6 +725,7 @@ function buildSheetXml(
   sst: Map<string, number>,
   xfBySig: Map<string, number>,
   opts: XlsxExportOptions,
+  cfDxfIndex: ReturnType<typeof buildWorkbookConditionalFormatDxfIndex>,
 ): string {
   const b = usedBoundsForSheet(sheet, opts);
   const dim =
@@ -779,6 +788,11 @@ function buildSheetXml(
   }
 
   const mergeXml = mergeCellsXml(sheet);
+  const cfXml = buildSheetConditionalFormattingXml(
+    sheetIndex,
+    sheet.getConditionalFormatRules(),
+    cfDxfIndex,
+  );
 
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -789,6 +803,7 @@ function buildSheetXml(
     colsXml +
     `<sheetData>${rowXml.join("")}</sheetData>` +
     mergeXml +
+    cfXml +
     `</worksheet>`
   );
 }
@@ -813,7 +828,12 @@ export function exportWorkbookToXlsxBytes(
     throw new Error("工作簿至少需一张工作表");
   }
 
-  const styleTable = buildStyleTable(workbook, options);
+  const cfDxfIndex = buildWorkbookConditionalFormatDxfIndex(workbook);
+  const styleTableBase = buildStyleTable(workbook, options);
+  const styleTable: StyleTable = {
+    ...styleTableBase,
+    dxfsXml: [...styleTableBase.dxfsXml, ...cfDxfIndex.dxfXmlList],
+  };
   const stylesXml = buildStylesXml(styleTable);
   const { xml: sstXml, index: sstMap } = buildSharedStrings(workbook, options);
 
@@ -823,7 +843,7 @@ export function exportWorkbookToXlsxBytes(
     if (sh === undefined) {
       continue;
     }
-    sheetParts.push(buildSheetXml(sh, i, sstMap, styleTable.xfBySig, options));
+    sheetParts.push(buildSheetXml(sh, i, sstMap, styleTable.xfBySig, options, cfDxfIndex));
   }
 
   const sheetNames = sheetParts.map((_, i) => {
