@@ -1,7 +1,9 @@
 import {
   formatCellDisplayWithStyle,
+  type CellHorizontalAlign,
   type CellStyle,
   type CellTextOrientation,
+  type CellVerticalAlign,
   type ConditionalFormattingOverlay,
   type Worksheet,
 } from "@flexsheet/core";
@@ -9,7 +11,7 @@ import type { SheetTheme } from "@flexsheet/theme";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import {
   argbToCss,
-  buildCellCanvasFont,
+  buildCellCanvasFontWithLogicalPx,
   cellStyleLogicalFontSizeBasePx,
   paintAutoFilterDropdownGlyph,
   scaledColWidthAt,
@@ -247,14 +249,35 @@ function strokeCellTextUnderline(
   ctx.restore();
 }
 
-function resolvedHAlign(st: CellStyle | null | undefined): "left" | "center" | "right" {
-  const h = st?.hAlign;
-  return h === "center" || h === "right" ? h : "left";
+function resolvedHAlign(st: CellStyle | null | undefined): CellHorizontalAlign {
+  const h = st?.hAlign as CellHorizontalAlign | undefined;
+  if (
+    h === "center" ||
+    h === "right" ||
+    h === "fill" ||
+    h === "justify" ||
+    h === "distributed" ||
+    h === "centerContinuous"
+  ) {
+    return h;
+  }
+  return "left";
 }
 
-function resolvedVAlign(st: CellStyle | null | undefined): "top" | "middle" | "bottom" {
-  const v = st?.vAlign;
-  return v === "top" || v === "bottom" ? v : "middle";
+function resolvedVAlign(st: CellStyle | null | undefined): CellVerticalAlign {
+  const v = st?.vAlign as CellVerticalAlign | undefined;
+  if (v === "top" || v === "bottom" || v === "justify" || v === "distributed") {
+    return v;
+  }
+  return "middle";
+}
+
+function resolvedRotationDegrees(st: CellStyle | null | undefined): number | null {
+  const d = st?.textRotationDegrees;
+  if (d === undefined || !Number.isFinite(d) || d === 0) {
+    return null;
+  }
+  return Math.max(-90, Math.min(90, d));
 }
 
 function resolvedTextOrientation(st: CellStyle | null | undefined): CellTextOrientation {
@@ -320,18 +343,127 @@ function clampIndentLevel(raw: number | undefined): number {
 }
 
 function textLineLeftInBox(
-  hAlign: "left" | "center" | "right",
+  hAlign: CellHorizontalAlign,
   boxLeft: number,
   innerW: number,
   lineWidth: number,
 ): number {
-  if (hAlign === "center") {
-    return boxLeft + (innerW - lineWidth) / 2;
-  }
   if (hAlign === "right") {
     return boxLeft + innerW - lineWidth;
   }
+  if (hAlign === "center" || hAlign === "centerContinuous") {
+    return boxLeft + (innerW - lineWidth) / 2;
+  }
   return boxLeft;
+}
+
+function paintArbitraryRotatedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  drawW: number,
+  rowH: number,
+  degrees: number,
+  _fontPx: number,
+): void {
+  const cx = x + drawW / 2;
+  const cy = y + rowH / 2;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.save();
+  ctx.translate(cx, cy);
+  /** OOXML / Excel：textRotation 逆时针为正；Canvas 2D 正角为顺时针，故取反与单元格一致。 */
+  ctx.rotate((-degrees * Math.PI) / 180);
+  ctx.fillText(text, 0, 0);
+  ctx.restore();
+}
+
+function buildFillCellText(ctx: CanvasRenderingContext2D, text: string, innerW: number): string {
+  if (text === "" || innerW <= 1) {
+    return text;
+  }
+  const w0 = ctx.measureText(text).width;
+  if (w0 <= 0) {
+    return text;
+  }
+  let out = text;
+  while (ctx.measureText(out + text).width <= innerW) {
+    out += text;
+  }
+  while (out.length > text.length && ctx.measureText(out).width > innerW) {
+    out = out.slice(0, -1);
+  }
+  return out;
+}
+
+function paintDistributedLine(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  boxLeft: number,
+  innerW: number,
+  baselineY: number,
+): void {
+  const chars = Array.from(text);
+  if (chars.length === 0) {
+    return;
+  }
+  if (chars.length === 1) {
+    const ch = chars[0]!;
+    const w = ctx.measureText(ch).width;
+    ctx.fillText(ch, boxLeft + (innerW - w) / 2, baselineY);
+    return;
+  }
+  let total = 0;
+  const widths = chars.map((ch) => {
+    const w = ctx.measureText(ch).width;
+    total += w;
+    return w;
+  });
+  const gap = (innerW - total) / (chars.length - 1);
+  if (gap < 0) {
+    ctx.fillText(text, boxLeft, baselineY);
+    return;
+  }
+  let xx = boxLeft;
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!;
+    ctx.fillText(ch, xx, baselineY);
+    xx += widths[i]! + gap;
+  }
+}
+
+function paintJustifiedLine(
+  ctx: CanvasRenderingContext2D,
+  line: string,
+  boxLeft: number,
+  innerW: number,
+  baselineY: number,
+): void {
+  const parts = line.trim().split(/\s+/).filter((s) => s.length > 0);
+  if (parts.length <= 1) {
+    ctx.fillText(line, boxLeft, baselineY);
+    return;
+  }
+  let total = 0;
+  const ws = parts.map((w) => {
+    const m = ctx.measureText(w).width;
+    total += m;
+    return m;
+  });
+  const spaceW = ctx.measureText(" ").width;
+  const gaps = parts.length - 1;
+  const extra = innerW - total - gaps * spaceW;
+  const add = gaps > 0 ? extra / gaps : 0;
+  let xx = boxLeft;
+  for (let i = 0; i < parts.length; i++) {
+    const w = parts[i]!;
+    ctx.fillText(w, xx, baselineY);
+    xx += ws[i]!;
+    if (i < parts.length - 1) {
+      xx += spaceW + add;
+    }
+  }
 }
 
 function paintBodyCellTexts(
@@ -413,14 +545,14 @@ function paintBodyCellTexts(
         fgArgb !== undefined && fgArgb !== ""
           ? (argbToCss(fgArgb) ?? env.theme.cellColor)
           : env.theme.cellColor;
-      ctx.font = buildCellCanvasFont(cell.style, env.viewZoom);
-      const fontPx = scaledFontSizePx(cellStyleLogicalFontSizeBasePx(cell.style), env.viewZoom);
       ctx.textAlign = "left";
       const pad = 4;
       const hAlign = resolvedHAlign(cell.style);
       const vAlign = resolvedVAlign(cell.style);
+      const baseLog = cellStyleLogicalFontSizeBasePx(cell.style);
+      const baseFontPx = scaledFontSizePx(baseLog, env.viewZoom);
       const indentLv = clampIndentLevel(cell.style?.indentLevel);
-      const indentUnit = Math.max(6, fontPx * 0.55);
+      const indentUnit = Math.max(6, baseFontPx * 0.55);
       let indentPx = indentLv * indentUnit;
       const maxIndentPx = Math.max(0, colW - 2 * pad - 4);
       if (indentPx > maxIndentPx) {
@@ -431,9 +563,17 @@ function paintBodyCellTexts(
 
       const wrap = cell.style?.wrapText === true;
       const orient = resolvedTextOrientation(cell.style);
-      const orientActive = orient !== "horizontal";
+      const rotDeg = resolvedRotationDegrees(cell.style);
+      const isVerticalStack = orient === "verticalStack";
+      const fixedOrientActive = !isVerticalStack && orient !== "horizontal" && rotDeg === null;
+      const rotAngleActive = rotDeg !== null;
+
+      ctx.font = buildCellCanvasFontWithLogicalPx(cell.style, baseLog, env.viewZoom);
       let lines: string[];
-      if (orientActive) {
+      if (isVerticalStack || fixedOrientActive) {
+        const raw = text.includes("\n") ? (text.split("\n")[0] ?? "") : text;
+        lines = [raw];
+      } else if (rotAngleActive) {
         const raw = text.includes("\n") ? (text.split("\n")[0] ?? "") : text;
         lines = [raw];
       } else if (wrap) {
@@ -444,8 +584,35 @@ function paintBodyCellTexts(
         lines = [text];
       }
 
-      const onlySingleLineVisual = orientActive || lines.length === 1;
-      const drawW = onlySingleLineVisual && !orientActive ? extendedTextWidth(r, c, colW) : colW;
+      let logicalFontPx = baseLog;
+      if (
+        cell.style?.shrinkToFit === true &&
+        !wrap &&
+        !isVerticalStack &&
+        !fixedOrientActive &&
+        !rotAngleActive
+      ) {
+        let log = baseLog;
+        const minLog = Math.max(4, baseLog * 0.35);
+        const probe = lines[0] ?? text;
+        while (log >= minLog) {
+          ctx.font = buildCellCanvasFontWithLogicalPx(cell.style, log, env.viewZoom);
+          if (probe === "" || ctx.measureText(probe).width <= innerW) {
+            break;
+          }
+          log -= 0.5;
+        }
+        logicalFontPx = log;
+      }
+      ctx.font = buildCellCanvasFontWithLogicalPx(cell.style, logicalFontPx, env.viewZoom);
+      const fontPx = scaledFontSizePx(logicalFontPx, env.viewZoom);
+
+      const onlySingleLineVisual =
+        isVerticalStack || fixedOrientActive || rotAngleActive || lines.length === 1;
+      const drawW =
+        onlySingleLineVisual && !fixedOrientActive && !isVerticalStack && !rotAngleActive
+          ? extendedTextWidth(r, c, colW)
+          : colW;
       const underlineKind = cell.style?.underline;
       const ink = String(ctx.fillStyle);
       ctx.save();
@@ -494,19 +661,48 @@ function paintBodyCellTexts(
           const lineLeft = textLineLeftInBox(hAlign, boxLeft, innerW, lineW);
           ctx.textBaseline = "alphabetic";
           const baselineY = yy + ascent;
-          ctx.fillText(line, lineLeft, baselineY);
-          if (underlineKind === "single" || underlineKind === "double") {
+          if (hAlign === "justify" && li < lines.length - 1) {
+            paintJustifiedLine(ctx, line, boxLeft, innerW, baselineY);
+          } else if (hAlign === "distributed") {
+            paintDistributedLine(ctx, line, boxLeft, innerW, baselineY);
+          } else {
+            ctx.fillText(line, lineLeft, baselineY);
+          }
+          if (
+            (underlineKind === "single" || underlineKind === "double") &&
+            hAlign !== "justify" &&
+            hAlign !== "distributed"
+          ) {
             strokeCellTextUnderline(ctx, line, lineLeft, baselineY, underlineKind, ink, fontPx);
           }
           yy += lineH;
         }
-      } else if (orientActive) {
+      } else if (isVerticalStack || fixedOrientActive) {
         const line = lines[0] ?? "";
         if (line !== "") {
-          paintOrientedBodyText(ctx, line, x, y, drawW, rowH, orient, fontPx);
+          paintOrientedBodyText(
+            ctx,
+            line,
+            x,
+            y,
+            drawW,
+            rowH,
+            orient as Exclude<CellTextOrientation, "horizontal">,
+            fontPx,
+          );
+        }
+      } else if (rotAngleActive && rotDeg !== null) {
+        const line = lines[0] ?? "";
+        if (line !== "") {
+          paintArbitraryRotatedText(ctx, line, x, y, drawW, rowH, rotDeg, fontPx);
         }
       } else {
-        const m = ctx.measureText(text);
+        const line = lines[0] ?? "";
+        let display = line;
+        if (hAlign === "fill" && !wrap) {
+          display = buildFillCellText(ctx, line, innerW);
+        }
+        const m = ctx.measureText(display);
         const ascent = m.actualBoundingBoxAscent ?? fontPx * 0.72;
         const descent = m.actualBoundingBoxDescent ?? fontPx * 0.22;
         const textLeft = textLineLeftInBox(hAlign, boxLeft, innerW, m.width);
@@ -521,9 +717,16 @@ function paintBodyCellTexts(
           ctx.textBaseline = "middle";
           baselineY = y + rowH / 2;
         }
-        ctx.fillText(text, textLeft, baselineY);
-        if (underlineKind === "single" || underlineKind === "double") {
-          strokeCellTextUnderline(ctx, text, textLeft, baselineY, underlineKind, ink, fontPx);
+        if (hAlign === "distributed") {
+          paintDistributedLine(ctx, display, boxLeft, innerW, baselineY);
+        } else {
+          ctx.fillText(display, textLeft, baselineY);
+        }
+        if (
+          (underlineKind === "single" || underlineKind === "double") &&
+          hAlign !== "distributed"
+        ) {
+          strokeCellTextUnderline(ctx, display, textLeft, baselineY, underlineKind, ink, fontPx);
         }
       }
       ctx.restore();

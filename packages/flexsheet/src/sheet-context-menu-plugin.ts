@@ -14,6 +14,7 @@ import { iconCopy, iconCut, iconPaste } from "@flexsheet/toolbar";
 
 import type { FlexSheet, FlexSheetSurfaceHit, SelectionCellDeleteMode } from "./flex-sheet.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
+import { mountFormatCellsDialog } from "./format-cells-dialog.js";
 
 /** 选区为整表宽的连续行块，且命中行落在该块内（行标题拖动多选后右键应保留选区）。 */
 function isRowHeaderHitInsideEntireRowBlockSelection(
@@ -147,6 +148,7 @@ function buildClipboardGroupEntries(flex: FlexSheet): readonly ContextMenuEntry[
 interface BuiltinMenuActions {
   readonly openCellInsertSubmenu: () => void;
   readonly openCellDeleteDialog: () => void;
+  readonly openFormatCellsDialog: () => void;
   readonly openRowHeightPrompt: () => void;
   readonly openColWidthPrompt: () => void;
   readonly openColumnFilterFromCell?: () => void;
@@ -280,6 +282,12 @@ function buildBuiltinItems(
         : [];
     return [
       ...buildClipboardGroupEntries(flex),
+      {
+        id: "cell.formatCells",
+        label: "设置单元格格式",
+        order: -2,
+        onSelect: actions.openFormatCellsDialog,
+      },
       { id: "insert", label: "插入", order: 0, onSelect: actions.openCellInsertSubmenu },
       {
         id: "cell.delete",
@@ -449,6 +457,9 @@ export class SheetContextMenuPlugin extends PluginBase {
       },
       openCellDeleteDialog: () => {
         this.openCellDeleteDialog(flex);
+      },
+      openFormatCellsDialog: () => {
+        this.openFormatCellsDialog(flex);
       },
       openRowHeightPrompt: () => {
         this.openRowHeightPrompt(flex);
@@ -929,6 +940,20 @@ export class SheetContextMenuPlugin extends PluginBase {
       },
     ];
     this.showMenu(clientX + 8, clientY, subItems);
+  }
+
+  private openFormatCellsDialog(flex: FlexSheet): void {
+    this.closePrompt();
+    this.ensureMenuStyles();
+    const overlay = mountFormatCellsDialog({
+      flex,
+      onClose: () => {
+        if (this.promptRoot === overlay) {
+          this.promptRoot = null;
+        }
+      },
+    });
+    this.promptRoot = overlay;
   }
 
   private openCellDeleteDialog(flex: FlexSheet): void {

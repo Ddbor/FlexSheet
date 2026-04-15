@@ -1,6 +1,7 @@
 import {
   normalizeSelectionRange,
   PLUGIN_SERVICE_KEYS,
+  selectionRangesEqualNormalized,
   Workbook,
   Workspace,
   Worksheet,
@@ -33,6 +34,8 @@ import {
   computeColumnAutoWidth,
   computeRowAutoHeight,
   computeScrollLimits,
+  expandSelectionRangeForMergePaint,
+  SELECTION_OUTLINE_VISUAL_SCALE,
   type CanvasRenderer,
   type HeadingHit,
 } from "@flexsheet/renderer";
@@ -78,6 +81,7 @@ import { openColumnFilterPanel } from "./column-filter-panel.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
 import { useUndoRedo } from "./undo-redo-plugin.js";
+import { AutofillExtendCommand } from "./autofill-extend-command.js";
 
 /** 指针命中画布表面时的区域类型（供右键菜单等扩展使用）。 */
 export type FlexSheetSurfaceHit =
@@ -161,6 +165,12 @@ export class FlexSheet {
     | { readonly kind: "column"; readonly originCol: number }
     | { readonly kind: "row"; readonly originRow: number }
     | null = null;
+  /** 填充柄拖拽：源矩形（含合并外扩）与当前预览角格。 */
+  private fillDrag: {
+    readonly sourceRange: SelectionRange;
+    previewRow: number;
+    previewCol: number;
+  } | null = null;
   private workbookUnsub: (() => void) | null = null;
   private lastWorkbookActiveIndex = 0;
   private activeSheetFormattingUnsub: (() => void) | null = null;
@@ -199,11 +209,22 @@ export class FlexSheet {
           return null;
         }
         const cell = this.selection.getActiveCell();
-        return {
+        const base = {
           range: this.selection.getNormalizedRange(),
           activeRow: cell.row,
           activeCol: cell.col,
         };
+        if (this.fillDrag !== null) {
+          return {
+            ...base,
+            fillPreviewRange: this.computeFillPreviewRange(
+              this.fillDrag.sourceRange,
+              this.fillDrag.previewRow,
+              this.fillDrag.previewCol,
+            ),
+          };
+        }
+        return base;
       },
       getClipboardMarqueeRange: () => this.clipboardMarqueeRange,
     });
@@ -1264,6 +1285,35 @@ export class FlexSheet {
       return;
     }
 
+    if (this.fillDrag !== null) {
+      this.cancelDragAutoscrollRaf();
+      const fd = this.fillDrag;
+      this.fillDrag = null;
+      this.dragPointerId = null;
+      this.detachDocumentDragListeners();
+      if (ev !== undefined) {
+        try {
+          this.canvas.releasePointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      const activeSheet = this.workbook.getActiveSheet();
+      if (activeSheet !== undefined) {
+        const F = this.computeFillPreviewRange(fd.sourceRange, fd.previewRow, fd.previewCol);
+        const S = normalizeSelectionRange(fd.sourceRange);
+        if (!selectionRangesEqualNormalized(F, S)) {
+          this.workspace.commands.execute(new AutofillExtendCommand(activeSheet, S, F));
+        }
+        this.selection.setNormalizedRange(F);
+      }
+      this.afterSelectionChanged();
+      if (ev !== undefined) {
+        this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
+      }
+      return;
+    }
+
     if (!this.dragSelecting) {
       return;
     }
@@ -1287,7 +1337,7 @@ export class FlexSheet {
 
   private readonly onLostPointerCapture = (ev: PointerEvent): void => {
     if (
-      (!this.dragSelecting && !this.resizing && this.headingDrag === null) ||
+      (!this.dragSelecting && !this.resizing && this.headingDrag === null && this.fillDrag === null) ||
       ev.pointerId !== this.dragPointerId
     ) {
       return;
@@ -1296,7 +1346,12 @@ export class FlexSheet {
   };
 
   private readonly onCanvasPointerMove = (ev: PointerEvent): void => {
-    if (this.resizing || this.dragSelecting || this.headingDrag !== null) {
+    if (this.resizing || this.dragSelecting || this.headingDrag !== null || this.fillDrag !== null) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet !== undefined && this.tryHitFillHandle(ev.clientX, ev.clientY)) {
+      this.applyPointerCursor("crosshair");
       return;
     }
     this.syncHeadingCursorFromClient(ev.clientX, ev.clientY);
@@ -1322,7 +1377,7 @@ export class FlexSheet {
   }
 
   private readonly onCanvasPointerLeave = (): void => {
-    if (this.resizing || this.dragSelecting || this.headingDrag !== null) {
+    if (this.resizing || this.dragSelecting || this.headingDrag !== null || this.fillDrag !== null) {
       return;
     }
     this.hoverResizeKind = null;
@@ -1335,6 +1390,21 @@ export class FlexSheet {
     }
     if (this.resizing) {
       this.handleResizingPointerMove(ev);
+      return;
+    }
+    if (this.fillDrag !== null) {
+      this.lastDragClientX = ev.clientX;
+      this.lastDragClientY = ev.clientY;
+      const hit = this.hitTestClient(ev.clientX, ev.clientY, { clampToBody: true });
+      if (hit === null) {
+        return;
+      }
+      this.fillDrag = {
+        sourceRange: this.fillDrag.sourceRange,
+        previewRow: hit.row,
+        previewCol: hit.col,
+      };
+      this.renderer.requestRedraw();
       return;
     }
     if (this.headingDrag !== null) {
@@ -1550,6 +1620,34 @@ export class FlexSheet {
         this.cellEditor.cancelWithoutCommit();
       }
       this.openColumnFilterUi(bodyFilterCol, ev.clientX, ev.clientY);
+      return;
+    }
+
+    if (this.tryHitFillHandle(ev.clientX, ev.clientY)) {
+      ev.preventDefault();
+      if (this.cellEditor.isEditing()) {
+        this.cellEditor.cancelWithoutCommit();
+      }
+      const sourceRange = expandSelectionRangeForMergePaint(
+        sheet,
+        normalizeSelectionRange(this.selection.getNormalizedRange()),
+      );
+      this.fillDrag = {
+        sourceRange,
+        previewRow: sourceRange.endRow,
+        previewCol: sourceRange.endCol,
+      };
+      this.lastDragClientX = ev.clientX;
+      this.lastDragClientY = ev.clientY;
+      this.dragPointerId = ev.pointerId;
+      this.attachDocumentDragListeners();
+      try {
+        this.canvas.setPointerCapture(ev.pointerId);
+      } catch {
+        /* ignore */
+      }
+      this.applyPointerCursor("crosshair");
+      this.renderer.requestRedraw();
       return;
     }
 
@@ -1971,6 +2069,43 @@ export class FlexSheet {
     );
   }
 
+  private computeFillPreviewRange(
+    source: SelectionRange,
+    hitRow: number,
+    hitCol: number,
+  ): SelectionRange {
+    const S = normalizeSelectionRange(source);
+    return normalizeSelectionRange({
+      startRow: Math.min(S.startRow, hitRow),
+      startCol: Math.min(S.startCol, hitCol),
+      endRow: Math.max(S.endRow, hitRow),
+      endCol: Math.max(S.endCol, hitCol),
+    });
+  }
+
+  private tryHitFillHandle(clientX: number, clientY: number): boolean {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined || this.cellEditor.isEditing()) {
+      return false;
+    }
+    const span = expandSelectionRangeForMergePaint(
+      sheet,
+      normalizeSelectionRange(this.selection.getNormalizedRange()),
+    );
+    const rect = this.renderer.getCellRectInCanvasPixels(span.endRow, span.endCol);
+    if (rect === null) {
+      return false;
+    }
+    const { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const z = this.renderer.viewZoom;
+    const handleSize = Math.max(4, 6 * SELECTION_OUTLINE_VISUAL_SCALE * z);
+    const half = handleSize / 2;
+    const pad = 3;
+    const cx = rect.x + rect.width;
+    const cy = rect.y + rect.height;
+    return Math.abs(x - cx) <= half + pad && Math.abs(y - cy) <= half + pad;
+  }
+
   private applyHeadingDragSelectionFromClient(clientX: number, clientY: number): void {
     const drag = this.headingDrag;
     if (drag === null) {
@@ -1998,7 +2133,9 @@ export class FlexSheet {
     if (heading?.kind === "columnHeader") {
       return heading.col;
     }
-    let { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const pt = this.clientToCanvasXY(clientX, clientY);
+    let x = pt.x;
+    const y = pt.y;
     const corner = this.renderer.getCornerSize();
     const layout = buildFrozenLayout(
       sheet,
@@ -2041,7 +2178,9 @@ export class FlexSheet {
     if (heading?.kind === "rowHeader") {
       return heading.row;
     }
-    let { x, y } = this.clientToCanvasXY(clientX, clientY);
+    const pt = this.clientToCanvasXY(clientX, clientY);
+    const x = pt.x;
+    let y = pt.y;
     const corner = this.renderer.getCornerSize();
     const layout = buildFrozenLayout(
       sheet,

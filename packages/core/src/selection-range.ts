@@ -15,6 +15,10 @@ export interface SelectionPaintSnapshot {
   readonly range: SelectionRange;
   readonly activeRow: number;
   readonly activeCol: number;
+  /**
+   * 拖拽填充柄时，当前预览的外包矩形（与 `range` 取并集后规范化；无预览为 `undefined`）。
+   */
+  readonly fillPreviewRange?: SelectionRange | null;
 }
 
 export function normalizeSelectionRange(range: SelectionRange): SelectionRange {

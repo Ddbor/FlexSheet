@@ -101,6 +101,26 @@ function parseTextOrientationFromOoxml(n: number): CellTextOrientation | undefin
   return undefined;
 }
 
+/** OOXML `textRotation` → 画布用角度（°），逆时针为正。 */
+function ooxmlTextRotationToDegrees(n: number): number | undefined {
+  if (!Number.isFinite(n)) {
+    return undefined;
+  }
+  if (n === 0) {
+    return 0;
+  }
+  if (n > 0 && n <= 90) {
+    return n;
+  }
+  if (n > 90 && n < 180) {
+    return -(n - 90);
+  }
+  if (n === 180) {
+    return -90;
+  }
+  return undefined;
+}
+
 function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
   const align = firstLocal(xf, "alignment");
   if (align === undefined) {
@@ -108,7 +128,15 @@ function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
   }
   const out: Partial<CellStyle> = {};
   const h = align.getAttribute("horizontal");
-  if (h === "left" || h === "center" || h === "right") {
+  if (
+    h === "left" ||
+    h === "center" ||
+    h === "right" ||
+    h === "fill" ||
+    h === "justify" ||
+    h === "distributed" ||
+    h === "centerContinuous"
+  ) {
     out.hAlign = h;
   }
   const v = align.getAttribute("vertical");
@@ -118,6 +146,10 @@ function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
     out.vAlign = "middle";
   } else if (v === "bottom") {
     out.vAlign = "bottom";
+  } else if (v === "justify") {
+    out.vAlign = "justify";
+  } else if (v === "distributed") {
+    out.vAlign = "distributed";
   }
   const ind = align.getAttribute("indent");
   if (ind !== null && ind !== "") {
@@ -132,13 +164,25 @@ function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
   if (align.getAttribute("wrapText") === "1") {
     out.wrapText = true;
   }
+  if (align.getAttribute("shrinkToFit") === "1") {
+    out.shrinkToFit = true;
+  }
   const tr = align.getAttribute("textRotation");
   if (tr !== null && tr !== "") {
     const n = Number(tr);
     if (Number.isFinite(n)) {
-      const o = parseTextOrientationFromOoxml(n);
-      if (o !== undefined) {
-        out.textOrientation = o;
+      if (n === 255) {
+        out.textOrientation = "verticalStack";
+      } else {
+        const o = parseTextOrientationFromOoxml(n);
+        if (o !== undefined) {
+          out.textOrientation = o;
+        } else {
+          const deg = ooxmlTextRotationToDegrees(n);
+          if (deg !== undefined && deg !== 0) {
+            out.textRotationDegrees = deg;
+          }
+        }
       }
     }
   }

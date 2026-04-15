@@ -39,4 +39,18 @@ describe("CellStyle alignment patch", () => {
       indentLevel: 1,
     });
   });
+
+  it("textRotationDegrees clears preset orientation and vice versa", () => {
+    expect(
+      applyCellStylePatch({ textOrientation: "angleUp45" }, { textRotationDegrees: -30 }),
+    ).toEqual({ textRotationDegrees: -30 });
+    expect(
+      applyCellStylePatch({ textRotationDegrees: 12 }, { textOrientation: "verticalStack" }),
+    ).toEqual({ textOrientation: "verticalStack" });
+  });
+
+  it("applies shrinkToFit", () => {
+    expect(applyCellStylePatch(null, { shrinkToFit: true })).toEqual({ shrinkToFit: true });
+    expect(applyCellStylePatch({ shrinkToFit: true }, { shrinkToFit: null })).toBeNull();
+  });
 });

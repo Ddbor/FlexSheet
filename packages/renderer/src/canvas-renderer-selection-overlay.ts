@@ -1,4 +1,8 @@
-import type { SelectionPaintSnapshot } from "@flexsheet/core";
+import {
+  normalizeSelectionRange,
+  selectionRangesEqualNormalized,
+  type SelectionPaintSnapshot,
+} from "@flexsheet/core";
 import type { Worksheet } from "@flexsheet/core";
 import { expandSelectionRangeForMergePaint } from "./canvas-renderer-selection-span.js";
 import type { SheetTheme } from "@flexsheet/theme";
@@ -150,12 +154,64 @@ export function drawSelectionOverlay(
     drawBorderPass(p.clipX, p.clipY, p.clipW, p.clipH, p.r0, p.r1, p.c0, p.c1);
   }
 
+  const fillPreviewRaw = snap.fillPreviewRange ?? null;
+  const fillPreview =
+    fillPreviewRaw === null
+      ? null
+      : expandSelectionRangeForMergePaint(sheet, normalizeSelectionRange(fillPreviewRaw));
+  if (fillPreview !== null && !selectionRangesEqualNormalized(fillPreview, range)) {
+    const drawDashedBorderPass = (
+      clipX: number,
+      clipY: number,
+      clipW: number,
+      clipH: number,
+      pr0: number,
+      pr1: number,
+      pc0: number,
+      pc1: number,
+    ): void => {
+      const r0 = Math.max(pr0, fillPreview.startRow);
+      const r1 = Math.min(pr1, fillPreview.endRow);
+      const c0 = Math.max(pc0, fillPreview.startCol);
+      const c1 = Math.min(pc1, fillPreview.endCol);
+      if (r0 > r1 || c0 > c1) {
+        return;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(clipX, clipY, clipW, clipH);
+      ctx.clip();
+      const x0 = cellLeftX(sheet, layout, c0, env.viewZoom, env.scrollX);
+      const y0 = cellTopY(sheet, layout, r0, env.viewZoom, env.scrollY);
+      let bw = 0;
+      for (let c = c0; c <= c1; c++) {
+        bw += scaledColWidthAt(sheet, c, env.viewZoom);
+      }
+      let bh = 0;
+      for (let r = r0; r <= r1; r++) {
+        bh += scaledRowHeightAt(sheet, r, env.viewZoom);
+      }
+      ctx.strokeStyle = env.theme.selectionBorderColor;
+      ctx.lineWidth = viewScaledSelectionOutlineWidth(env.viewZoom);
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(x0 + 0.5, y0 + 0.5, bw - 1, bh - 1);
+      ctx.setLineDash([]);
+      ctx.restore();
+    };
+    for (const p of passes) {
+      drawDashedBorderPass(p.clipX, p.clipY, p.clipW, p.clipH, p.r0, p.r1, p.c0, p.c1);
+    }
+  }
+
+  const handleRange = fillPreview !== null && !selectionRangesEqualNormalized(fillPreview, range)
+    ? fillPreview
+    : range;
   const handleCenterX =
-    cellLeftX(sheet, layout, range.endCol, env.viewZoom, env.scrollX) +
-    scaledColWidthAt(sheet, range.endCol, env.viewZoom);
+    cellLeftX(sheet, layout, handleRange.endCol, env.viewZoom, env.scrollX) +
+    scaledColWidthAt(sheet, handleRange.endCol, env.viewZoom);
   const handleCenterY =
-    cellTopY(sheet, layout, range.endRow, env.viewZoom, env.scrollY) +
-    scaledRowHeightAt(sheet, range.endRow, env.viewZoom);
+    cellTopY(sheet, layout, handleRange.endRow, env.viewZoom, env.scrollY) +
+    scaledRowHeightAt(sheet, handleRange.endRow, env.viewZoom);
   const handleSize = Math.max(4, 6 * SELECTION_OUTLINE_VISUAL_SCALE * env.viewZoom);
   const handleHalf = handleSize / 2;
   const bodyX = headerW;

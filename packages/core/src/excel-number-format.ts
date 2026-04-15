@@ -10,6 +10,11 @@ function pad2(n: number): string {
 }
 
 function formatDateLikeExcel(value: number, format: string): string {
+  let fmt = format.trim();
+  while (fmt.startsWith("*")) {
+    fmt = fmt.slice(1).trim();
+  }
+  fmt = fmt.replace(/^[a-z]\s+/i, "").trim();
   const d = excelSerialToUtcDate(value);
   const y = d.getUTCFullYear();
   const m = d.getUTCMonth() + 1;
@@ -18,20 +23,20 @@ function formatDateLikeExcel(value: number, format: string): string {
   const min = d.getUTCMinutes();
   const s = d.getUTCSeconds();
 
-  if (/[hH]:/.test(format) || format.includes("秒") || format.includes("mm:ss")) {
+  if (/[hH]:/.test(fmt) || fmt.includes("秒") || fmt.includes("mm:ss")) {
     const hh = pad2(h);
     const mm = pad2(min);
     const ss = pad2(s);
-    if (format.includes("秒") || format.split(":").length >= 3) {
+    if (fmt.includes("秒") || fmt.split(":").length >= 3) {
       return `${hh}:${mm}:${ss}`;
     }
     return `${hh}:${mm}`;
   }
 
-  if (format.includes("年") && format.includes("月")) {
+  if (fmt.includes("年") && fmt.includes("月")) {
     return `${y}年${m}月${day}日`;
   }
-  if (/y{2,4}.*m{1,2}.*d{1,2}/i.test(format) || format.includes("短")) {
+  if (/y{2,4}.*m{1,2}.*d{1,2}/i.test(fmt) || fmt.includes("短")) {
     return `${y}/${m}/${day}`;
   }
   return `${y}/${m}/${day}`;
@@ -153,7 +158,97 @@ function inferFractionDigitsFromPattern(part: string): number {
   return c;
 }
 
-/** 将数值按 Excel 格式串显示（子集：常规、百分比、千分位、货币符号、科学计数、日期/时间、文本 @）。 */
+function splitExcelFormatSections(formatCode: string): string[] {
+  return formatCode.split(";").map((s) => s.trim());
+}
+
+function pickExcelNumberFormatSection(formatCode: string, value: number): string {
+  const parts = splitExcelFormatSections(formatCode);
+  if (parts.length === 1) {
+    return parts[0] ?? "";
+  }
+  if (value > 0) {
+    return parts[0] ?? "";
+  }
+  if (value < 0) {
+    return parts.length >= 2 ? (parts[1] ?? parts[0] ?? "") : (parts[0] ?? "");
+  }
+  return parts.length >= 3 ? (parts[2] ?? parts[0] ?? "") : (parts[0] ?? "");
+}
+
+/** 剥掉段首的 `[...]`（颜色、条件、地区等），便于解析数字/货币主体。 */
+function stripExcelSectionLeadingTokens(section: string): string {
+  let s = section.trim();
+  for (;;) {
+    const m = s.match(/^\[[^\]]+\]/);
+    if (m === null) {
+      break;
+    }
+    s = s.slice(m[0].length).trim();
+  }
+  return s;
+}
+
+/**
+ * 多段格式下：负数括号段、无减号红色段等 → 调整参与格式化的数值与模式。
+ */
+function resolveSignedSectionPattern(
+  value: number,
+  formatCode: string,
+): { readonly v: number; readonly pattern: string; readonly wrapParens: boolean } {
+  const parts = splitExcelFormatSections(formatCode);
+  const raw = pickExcelNumberFormatSection(formatCode, value);
+  const stripped = stripExcelSectionLeadingTokens(raw);
+  if (value < 0 && stripped.startsWith("(") && stripped.endsWith(")")) {
+    return { v: Math.abs(value), pattern: stripped.slice(1, -1), wrapParens: true };
+  }
+  if (
+    value < 0 &&
+    parts.length >= 2 &&
+    !stripped.startsWith("-") &&
+    !stripped.startsWith("(")
+  ) {
+    return { v: Math.abs(value), pattern: stripped, wrapParens: false };
+  }
+  return { v: value, pattern: stripped, wrapParens: false };
+}
+
+function formatPercentSection(value: number, pattern: string): string {
+  const first = pattern.trim();
+  const { body, hasPct } = stripPercentSuffix(first);
+  if (!hasPct) {
+    return formatWithCommaPattern(value, inferFractionDigitsFromPattern(body.replace(/,/g, "")), body.includes(","));
+  }
+  const beforePct = body;
+  const fd = inferFractionDigitsFromPattern(beforePct);
+  const useComma = beforePct.includes(",");
+  const scaled = value * 100;
+  const opts: Intl.NumberFormatOptions = {
+    minimumFractionDigits: fd,
+    maximumFractionDigits: fd,
+    useGrouping: useComma,
+  };
+  return `${new Intl.NumberFormat("zh-CN", opts).format(scaled)}%`;
+}
+
+function formatCurrencySection(value: number, pattern: string): string {
+  const first = pattern.trim();
+  const fd = inferFractionDigitsFromPattern(first.replace(/[¥$￥,]/g, ""));
+  const sym = first.includes("¥") || first.includes("￥") ? "¥" : "$";
+  const opts: Intl.NumberFormatOptions = {
+    style: "currency",
+    currency: sym === "¥" ? "CNY" : "USD",
+    minimumFractionDigits: fd,
+    maximumFractionDigits: fd,
+  };
+  try {
+    return new Intl.NumberFormat("zh-CN", opts).format(value);
+  } catch {
+    return `${sym}${formatWithCommaPattern(value, fd, true)}`;
+  }
+}
+
+/** 将数值按 Excel 格式串显示（子集：常规、百分比、千分位、货币符号、科学计数、日期/时间、文本 @；含简单多段正/负/零）。 */
 export function formatNumberWithExcelCode(value: number, formatCode: string): string {
   const fmt = formatCode.trim();
   if (fmt === "" || fmt === "General") {
@@ -163,46 +258,30 @@ export function formatNumberWithExcelCode(value: number, formatCode: string): st
     return String(value);
   }
 
-  const lower = fmt.toLowerCase();
-  if (lower.includes("e") && (lower.includes("0.00e") || lower.includes("0e"))) {
-    const fd = inferFractionDigitsFromPattern(fmt.split(";")[0] ?? fmt);
+  if (/DBNum1/i.test(fmt)) {
+    return formatChineseLowerInteger(value);
+  }
+  if (/DBNum2/i.test(fmt)) {
+    return formatChineseUpperInteger(value);
+  }
+
+  const firstSection = (splitExcelFormatSections(fmt)[0] ?? "").trim();
+  const lowerFirst = firstSection.toLowerCase();
+  if (lowerFirst.includes("e") && (lowerFirst.includes("0.00e") || lowerFirst.includes("0e"))) {
+    const fd = inferFractionDigitsFromPattern(firstSection);
     return formatNumberScientific(value, Math.max(2, fd));
   }
 
   if (fmt.includes("%")) {
-    const first = (fmt.split(";")[0] ?? fmt).trim();
-    const beforePct = first.endsWith("%") ? first.slice(0, -1) : first;
-    const fd = inferFractionDigitsFromPattern(beforePct);
-    const useComma = beforePct.includes(",");
-    const scaled = value * 100;
-    const opts: Intl.NumberFormatOptions = {
-      minimumFractionDigits: fd,
-      maximumFractionDigits: fd,
-      useGrouping: useComma,
-    };
-    return `${new Intl.NumberFormat("zh-CN", opts).format(scaled)}%`;
+    const { v, pattern, wrapParens } = resolveSignedSectionPattern(value, fmt);
+    const inner = formatPercentSection(v, pattern);
+    return wrapParens ? `(${inner})` : inner;
   }
 
-  if (fmt.includes("¥") || fmt.includes("$") || fmt.includes("￥")) {
-    const first = (fmt.split(";")[0] ?? fmt).trim();
-    const fd = inferFractionDigitsFromPattern(first.replace(/[¥$￥,]/g, ""));
-    const sym = fmt.includes("¥") || fmt.includes("￥") ? "¥" : "$";
-    const opts: Intl.NumberFormatOptions = {
-      style: "currency",
-      currency: sym === "¥" ? "CNY" : "USD",
-      minimumFractionDigits: fd,
-      maximumFractionDigits: fd,
-    };
-    try {
-      return new Intl.NumberFormat("zh-CN", opts).format(value);
-    } catch {
-      return `${sym}${formatWithCommaPattern(value, fd, true)}`;
-    }
-  }
-
-  if (/[yYmMdDhHsS]/.test(fmt) || fmt.includes("年")) {
+  const secForDate = stripExcelSectionLeadingTokens(pickExcelNumberFormatSection(fmt, value));
+  if (/[yYmMdDhHsS]/.test(secForDate) || secForDate.includes("年") || secForDate.includes("时")) {
     if (value > 0 && value < 1000000 && Number.isFinite(value)) {
-      return formatDateLikeExcel(value, fmt);
+      return formatDateLikeExcel(value, secForDate);
     }
   }
 
@@ -210,10 +289,17 @@ export function formatNumberWithExcelCode(value: number, formatCode: string): st
     return approximateFraction(value);
   }
 
-  const first = (fmt.split(";")[0] ?? fmt).trim();
-  const useComma = first.includes(",");
-  const fd = inferFractionDigitsFromPattern(first.replace(/,/g, ""));
-  return formatWithCommaPattern(value, fd, useComma);
+  const { v, pattern, wrapParens } = resolveSignedSectionPattern(value, fmt);
+  const symPart = pattern;
+  if (symPart.includes("¥") || symPart.includes("$") || symPart.includes("￥")) {
+    const inner = formatCurrencySection(v, symPart);
+    return wrapParens ? `(${inner})` : inner;
+  }
+
+  const useComma = symPart.includes(",");
+  const fd = inferFractionDigitsFromPattern(symPart.replace(/,/g, ""));
+  const inner = formatWithCommaPattern(v, fd, useComma);
+  return wrapParens ? `(${inner})` : inner;
 }
 
 function approximateFraction(x: number): string {
@@ -248,6 +334,107 @@ function gcd(a: number, b: number): number {
     y = t;
   }
   return x || 1;
+}
+
+const ZH_LOWER_DIGITS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"] as const;
+const ZH_UPPER_DIGITS = ["零", "壹", "贰", "叁", "肆", "伍", "陆", "柒", "捌", "玖"] as const;
+const ZH_LOWER_UNITS = ["", "十", "百", "千"] as const;
+const ZH_UPPER_UNITS = ["", "拾", "佰", "仟"] as const;
+
+function formatFourDigitsChinese(
+  k: number,
+  digits: readonly string[],
+  units: readonly string[],
+  embedded: boolean,
+): string {
+  if (k === 0) {
+    return "";
+  }
+  if (k < 10) {
+    return digits[k]!;
+  }
+  if (k < 20) {
+    if (!embedded && k === 10) {
+      return units[1];
+    }
+    if (!embedded) {
+      return `${units[1]}${k > 10 ? digits[k % 10]! : ""}`;
+    }
+    return `${digits[1]!}${units[1]}${k > 10 ? digits[k % 10]! : ""}`;
+  }
+  if (k < 100) {
+    const tens = Math.floor(k / 10);
+    const ones = k % 10;
+    return `${digits[tens]!}${units[1]}${ones > 0 ? digits[ones]! : ""}`;
+  }
+  if (k < 1000) {
+    const h = Math.floor(k / 100);
+    const rest = k % 100;
+    let out = `${digits[h]!}${units[2]}`;
+    if (rest === 0) {
+      return out;
+    }
+    if (rest < 10) {
+      return `${out}${digits[0]}${digits[rest]!}`;
+    }
+    return `${out}${formatFourDigitsChinese(rest, digits, units, true)}`;
+  }
+  const t = Math.floor(k / 1000);
+  const rest = k % 1000;
+  let out = `${digits[t]!}${units[3]}`;
+  if (rest === 0) {
+    return out;
+  }
+  if (rest < 100) {
+    return `${out}${digits[0]}${formatFourDigitsChinese(rest, digits, units, true)}`;
+  }
+  return `${out}${formatFourDigitsChinese(rest, digits, units, true)}`;
+}
+
+function formatChineseIntegerWithTables(
+  value: number,
+  digits: readonly string[],
+  units: readonly string[],
+): string {
+  const sign = value < 0 ? "负" : "";
+  const n = Math.trunc(Math.abs(value));
+  if (n === 0) {
+    return `${sign}${digits[0]}`;
+  }
+  const yi = Math.floor(n / 100000000);
+  const rest1 = n % 100000000;
+  const wan = Math.floor(rest1 / 10000);
+  const low = rest1 % 10000;
+  let s = "";
+  if (yi > 0) {
+    s += `${formatFourDigitsChinese(yi, digits, units, false)}亿`;
+  }
+  if (wan > 0) {
+    if (yi > 0 && wan < 1000) {
+      s += digits[0];
+    }
+    s += `${formatFourDigitsChinese(wan, digits, units, false)}万`;
+  } else if (yi > 0 && low > 0) {
+    s += digits[0];
+  }
+  if (low > 0) {
+    if (wan > 0 && low < 1000) {
+      s += digits[0];
+    }
+    s += formatFourDigitsChinese(low, digits, units, yi > 0 || wan > 0);
+  }
+  if (s === "") {
+    s = digits[0]!;
+  }
+  return `${sign}${s}`;
+}
+
+function formatChineseLowerInteger(value: number): string {
+  return formatChineseIntegerWithTables(value, ZH_LOWER_DIGITS, ZH_LOWER_UNITS);
+}
+
+function formatChineseUpperInteger(value: number): string {
+  return formatChineseIntegerWithTables(value, ZH_UPPER_DIGITS, ZH_UPPER_UNITS);
 }
 
 /**

@@ -129,6 +129,8 @@ function isCellStyle(v: unknown): v is CellStyle {
     "vAlign",
     "indentLevel",
     "wrapText",
+    "textRotationDegrees",
+    "shrinkToFit",
     "textOrientation",
     "numberFormat",
   ]);
@@ -165,7 +167,11 @@ function isCellStyle(v: unknown): v is CellStyle {
     v.hAlign !== undefined &&
     v.hAlign !== "left" &&
     v.hAlign !== "center" &&
-    v.hAlign !== "right"
+    v.hAlign !== "right" &&
+    v.hAlign !== "fill" &&
+    v.hAlign !== "justify" &&
+    v.hAlign !== "distributed" &&
+    v.hAlign !== "centerContinuous"
   ) {
     return false;
   }
@@ -173,7 +179,9 @@ function isCellStyle(v: unknown): v is CellStyle {
     v.vAlign !== undefined &&
     v.vAlign !== "top" &&
     v.vAlign !== "middle" &&
-    v.vAlign !== "bottom"
+    v.vAlign !== "bottom" &&
+    v.vAlign !== "justify" &&
+    v.vAlign !== "distributed"
   ) {
     return false;
   }
@@ -187,6 +195,18 @@ function isCellStyle(v: unknown): v is CellStyle {
     return false;
   }
   if (v.wrapText !== undefined && typeof v.wrapText !== "boolean") {
+    return false;
+  }
+  if (
+    v.textRotationDegrees !== undefined &&
+    (typeof v.textRotationDegrees !== "number" ||
+      !Number.isFinite(v.textRotationDegrees) ||
+      v.textRotationDegrees < -90 ||
+      v.textRotationDegrees > 90)
+  ) {
+    return false;
+  }
+  if (v.shrinkToFit !== undefined && typeof v.shrinkToFit !== "boolean") {
     return false;
   }
   if (v.textOrientation !== undefined) {

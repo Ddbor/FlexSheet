@@ -55,8 +55,10 @@ function firstFontNameFromStack(stack: string | undefined): string {
  * 与画布 `resolvedVAlign` 一致：未设置或非 top/bottom 时视为 middle。
  * 导出时必须写入 OOXML `vertical`，否则 Excel 按默认底部对齐，与 FlexSheet 显示不一致。
  */
-function resolveVAlignForExport(v: string | undefined): "top" | "middle" | "bottom" {
-  if (v === "top" || v === "bottom") {
+function resolveVAlignForExport(
+  v: string | undefined,
+): "top" | "middle" | "bottom" | "justify" | "distributed" {
+  if (v === "top" || v === "bottom" || v === "justify" || v === "distributed") {
     return v;
   }
   return "middle";
@@ -83,6 +85,13 @@ function styleSignature(st: CellStyle | null | undefined): string {
     ind: st.indentLevel ?? 0,
     wx: st.wrapText === true,
     tor: tor !== undefined && tor !== "horizontal" ? tor : "",
+    trd:
+      st.textRotationDegrees !== undefined &&
+      Number.isFinite(st.textRotationDegrees) &&
+      st.textRotationDegrees !== 0
+        ? Math.round(st.textRotationDegrees)
+        : 0,
+    sh: st.shrinkToFit === true,
     bt: borderSideSig(st.borderTop),
     bl: borderSideSig(st.borderLeft),
     bb: borderSideSig(st.borderBottom),
@@ -116,6 +125,9 @@ interface StyleSignaturePayload {
   readonly va: string;
   readonly ind?: number;
   readonly wx?: boolean;
+  /** 非 0 时为 `textRotationDegrees`（与 `tor` 互斥导出）。 */
+  readonly trd?: number;
+  readonly sh?: boolean;
   /** 非空时为 `CellTextOrientation`（不含 horizontal）。 */
   readonly tor?: string;
   readonly bt?: string;
@@ -201,6 +213,20 @@ function ooxmlTextRotationFromTor(tor: string): number | undefined {
     default:
       return undefined;
   }
+}
+
+function ooxmlTextRotationFromDegrees(deg: number): number {
+  const n = Math.round(deg);
+  if (n === 0) {
+    return 0;
+  }
+  if (n > 0 && n <= 90) {
+    return n;
+  }
+  if (n < 0 && n >= -90) {
+    return 90 - n;
+  }
+  return Math.max(0, Math.min(180, n));
 }
 
 function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTable {
@@ -313,14 +339,23 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
      * 未写 horizontal 时等价于常规对齐，Excel 会忽略 indent；与画布默认 `resolvedHAlign` 为 left 一致。
      */
     let ha = st.ha;
-    if (ha !== "left" && ha !== "center" && ha !== "right") {
+    const ind = st.ind ?? 0;
+    const validHa = new Set([
+      "left",
+      "center",
+      "right",
+      "fill",
+      "justify",
+      "distributed",
+      "centerContinuous",
+    ]);
+    if (!validHa.has(ha)) {
       ha = "";
     }
-    const ind = st.ind ?? 0;
     if (ind > 0 && ha !== "center" && ha !== "right") {
       ha = "left";
     }
-    if (ha === "left" || ha === "center" || ha === "right") {
+    if (ha !== "") {
       alignAttrs.push(`horizontal="${ha}"`);
     }
     const vAlign = resolveVAlignForExport(st.va);
@@ -331,8 +366,14 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     if (st.wx === true) {
       alignAttrs.push(`wrapText="1"`);
     }
+    if (st.sh === true) {
+      alignAttrs.push(`shrinkToFit="1"`);
+    }
+    const trd = typeof st.trd === "number" && st.trd !== 0 ? st.trd : 0;
     const tor = st.tor ?? "";
-    if (tor !== "") {
+    if (trd !== 0) {
+      alignAttrs.push(`textRotation="${ooxmlTextRotationFromDegrees(trd)}"`);
+    } else if (tor !== "") {
       const tr = ooxmlTextRotationFromTor(tor);
       if (tr !== undefined) {
         alignAttrs.push(`textRotation="${tr}"`);

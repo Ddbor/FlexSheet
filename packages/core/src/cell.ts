@@ -13,11 +13,19 @@ export interface CellAddress {
 
 export type CellScalar = string | number | boolean | null;
 
-/** 水平对齐（与 Ribbon / XLSX 常用子集一致；未设置视为左对齐）。 */
-export type CellHorizontalAlign = "left" | "center" | "right";
+/** 水平对齐（与 Ribbon / OOXML `horizontal` 子集一致；未设置视为常规/左对齐）。 */
+export type CellHorizontalAlign =
+  | "left"
+  | "center"
+  | "right"
+  | "fill"
+  | "justify"
+  | "distributed"
+  /** 跨列居中（OOXML `centerContinuous`）。单格内与居中表现一致。 */
+  | "centerContinuous";
 
-/** 垂直对齐（未设置视为垂直居中，与默认绘制一致）。 */
-export type CellVerticalAlign = "top" | "middle" | "bottom";
+/** 垂直对齐（与 OOXML `vertical` 子集一致；未设置视为垂直居中）。 */
+export type CellVerticalAlign = "top" | "middle" | "bottom" | "justify" | "distributed";
 
 /**
  * 文本方向（与 Ribbon「方向」及 OOXML `alignment/@textRotation` 子集对应）。
@@ -69,6 +77,13 @@ export interface CellStyle {
   indentLevel?: number;
   /** 自动换行（单元格内按列宽折行）。 */
   wrapText?: boolean;
+  /**
+   * 任意旋转角（度），逆时针为正、顺时针为负（约 -90°～90°）。
+   * 与 `textOrientation` 互斥：设置本字段时渲染优先按角度绘制，并忽略非 `horizontal` 的 `textOrientation`。
+   */
+  textRotationDegrees?: number;
+  /** 缩小字体填充，使内容在单元格宽度内显示。 */
+  shrinkToFit?: boolean;
   /** 文本方向；未设置为水平。 */
   textOrientation?: CellTextOrientation;
   /** 单元格上/左/下/右边框（合并格仅存于主格）。 */
@@ -98,6 +113,8 @@ export type CellStylePatch = {
   readonly vAlign?: CellVerticalAlign | null;
   readonly indentLevel?: number | null;
   readonly wrapText?: boolean | null;
+  readonly textRotationDegrees?: number | null;
+  readonly shrinkToFit?: boolean | null;
   readonly textOrientation?: CellTextOrientation | null;
   readonly borderTop?: CellBorderSide | null;
   readonly borderLeft?: CellBorderSide | null;
@@ -193,11 +210,36 @@ export function applyCellStylePatch(
       next.wrapText = patch.wrapText;
     }
   }
+  if (patch.textRotationDegrees !== undefined) {
+    if (patch.textRotationDegrees === null) {
+      delete next.textRotationDegrees;
+    } else {
+      const d = Math.round(patch.textRotationDegrees);
+      if (!Number.isFinite(d) || d === 0) {
+        delete next.textRotationDegrees;
+      } else {
+        next.textRotationDegrees = Math.max(-90, Math.min(90, d));
+      }
+      if (next.textRotationDegrees !== undefined) {
+        delete next.textOrientation;
+      }
+    }
+  }
+  if (patch.shrinkToFit !== undefined) {
+    if (patch.shrinkToFit === null) {
+      delete next.shrinkToFit;
+    } else {
+      next.shrinkToFit = patch.shrinkToFit;
+    }
+  }
   if (patch.textOrientation !== undefined) {
     if (patch.textOrientation === null) {
       delete next.textOrientation;
     } else {
       next.textOrientation = patch.textOrientation;
+      if (patch.textOrientation !== "horizontal") {
+        delete next.textRotationDegrees;
+      }
     }
   }
   if (patch.borderTop !== undefined) {

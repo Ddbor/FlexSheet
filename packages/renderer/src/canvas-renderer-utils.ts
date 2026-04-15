@@ -88,10 +88,19 @@ export function cellStyleFontFamilyCss(style: CellStyle | null | undefined): str
 
 /** 供 `ctx.font` 与单元格内联编辑器同步。 */
 export function buildCellCanvasFont(style: CellStyle | null | undefined, viewZoom: number): string {
+  const basePx = cellStyleLogicalFontSizeBasePx(style);
+  return buildCellCanvasFontWithLogicalPx(style, basePx, viewZoom);
+}
+
+/** 指定逻辑字号（px）构造 `ctx.font`（用于缩小字体填充等）。 */
+export function buildCellCanvasFontWithLogicalPx(
+  style: CellStyle | null | undefined,
+  logicalPx: number,
+  viewZoom: number,
+): string {
   const italic = style?.italic === true ? "italic " : "";
   const weight = style?.bold === true ? "600" : "400";
-  const basePx = cellStyleLogicalFontSizeBasePx(style);
-  const px = scaledFontSizePx(basePx, viewZoom);
+  const px = scaledFontSizePx(logicalPx, viewZoom);
   const family = cellStyleFontFamilyCss(style);
   return `${italic}${weight} ${px}px ${family}`;
 }
