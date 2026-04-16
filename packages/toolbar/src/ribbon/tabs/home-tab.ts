@@ -14,6 +14,7 @@ import {
   iconBold,
   iconBorderAll,
   iconCellStyle,
+  iconClear,
   iconCommaStyle,
   iconConditionalFormatting,
   iconCopy,
@@ -35,6 +36,7 @@ import {
   iconFormatScientific,
   iconFormatText,
   iconFormatTime,
+  iconFunction,
   iconIncreaseDecimal,
   iconIncreaseIndent,
   iconItalic,
@@ -51,6 +53,8 @@ import {
 import { mountAlignMergeMenu } from "../align-merge-menu.js";
 import { mountAlignOrientationMenu } from "../align-orientation-menu.js";
 import { mountCellStyleRibbonMenu } from "../cell-styles-ribbon-menu.js";
+import { mountHomeClearMenu } from "../home-clear-menu.js";
+import { mountHomeFillMenu } from "../home-fill-menu.js";
 import { mountConditionalFormatMenu, mountTableFormatStyleMenu } from "../home-styles-menus.js";
 import {
   RIBBON_FONT_FAMILY_DEFAULT_PREVIEW,
@@ -417,13 +421,25 @@ export function mountHomeTab(
     );
     leftGrid.appendChild(
       createToolbarButton(
-        { id: "home.align.middle", tab: TAB, label: "", icon: iconAlignMiddle(), title: "垂直居中" },
+        {
+          id: "home.align.middle",
+          tab: TAB,
+          label: "",
+          icon: iconAlignMiddle(),
+          title: "垂直居中",
+        },
         emit,
       ).element,
     );
     leftGrid.appendChild(
       createToolbarButton(
-        { id: "home.align.bottom", tab: TAB, label: "", icon: iconAlignBottom(), title: "底端对齐" },
+        {
+          id: "home.align.bottom",
+          tab: TAB,
+          label: "",
+          icon: iconAlignBottom(),
+          title: "底端对齐",
+        },
         emit,
       ).element,
     );
@@ -572,9 +588,39 @@ export function mountHomeTab(
     );
     cellStylesBtn.element.id = "fs-ribbon-home-style-cell-styles";
     mountCellStyleRibbonMenu(cellStylesBtn.element, emit, TAB);
+    const sep = document.createElement("div");
+    sep.className = "fs-ribbon-styles__sep";
+    sep.setAttribute("aria-hidden", "true");
+    const cellsOps = document.createElement("div");
+    cellsOps.className = "fs-ribbon-styles__cells-ops";
+    const makeCellOpBtn = (id: string, label: string, icon: SVGSVGElement): HTMLButtonElement => {
+      const btn = createToolbarButton(
+        {
+          id,
+          tab: TAB,
+          label,
+          icon,
+          menuTrigger: true,
+          title: label,
+        },
+        emit,
+      );
+      return btn.element;
+    };
+    cellsOps.appendChild(makeCellOpBtn("home.cells.autoSum", "自动求和", iconFunction()));
+    const fillBtn = makeCellOpBtn("home.cells.fill", "填充", iconFillColor());
+    fillBtn.id = "fs-ribbon-home-cells-fill";
+    mountHomeFillMenu(fillBtn, emit, TAB);
+    cellsOps.appendChild(fillBtn);
+    const clearBtn = makeCellOpBtn("home.cells.clear", "清除", iconClear());
+    clearBtn.id = "fs-ribbon-home-cells-clear";
+    mountHomeClearMenu(clearBtn, emit, TAB);
+    cellsOps.appendChild(clearBtn);
     content.appendChild(conditionalBtn.element);
     content.appendChild(tableFormatBtn.element);
     content.appendChild(cellStylesBtn.element);
+    content.appendChild(sep);
+    content.appendChild(cellsOps);
     inner.appendChild(root);
   }
 

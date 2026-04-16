@@ -281,12 +281,58 @@ export function iconBorderTopDoubleBottom(): SVGSVGElement {
 export function iconFillColor(): SVGSVGElement {
   return svgElMarkup(
     "0 0 16 16",
-    '<g fill="none" fill-rule="nonzero">' +
-      '<path fill="currentColor" fill-opacity="0.34" d="M0 12h16v4H0z"/>' +
-      '<path fill="currentColor" d="M1 13v2h14v-2zm-1-1h16v4H0z"/>' +
-      '<path fill="currentColor" fill-opacity="0.3" d="M6.993 3.33 2.331 7.994l3.676 3.676 4.662-4.662z"/>' +
-      '<path fill="currentColor" d="M6.644 3.68 2.33 7.994l3.676 3.676 4.662-4.662L7.592 3.93v2.525l.006.044L8.1 7l-1 1.002L6.1 7l.544-.544zm0-1.33v-.84c0-.323-.204-.547-.493-.553H6.06c-.28 0-.511.24-.511.553v1.935zM4.6 4.393V1.51c0-.324.1-.636.282-.893q.145-.205.346-.35C5.47.094 5.758 0 6.06 0h.073c.255 0 .5.067.715.192.458.266.744.769.744 1.318V2.6L12 7.007 6.007 13 1 7.993z"/>' +
-      '<path fill="currentColor" fill-opacity="0.48" d="M11.739 9.267c0 1.181.248 2.142.638 2.733 0-.628.14-1.035.53-1.773.922-1.514 1.594-2.733.603-3.988Q12.518 4.983 10 5s1.393 1.595 1.739 1.977c.142.628 0 1.108 0 2.29"/>' +
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-opacity="0.08" d="M1 4h14v11H1z"/>' +
+      '<path fill="currentColor" fill-opacity="0.82" d="M16 4v12H0V0h16zm-1 0H1v11h14z"/>' +
+      '<path fill="currentColor" fill-rule="nonzero" d="m8 14 4-4H9V5H7v5H4z"/>' +
+      "</g>",
+  );
+}
+
+/** 向下填充（16×16，单色） */
+export function iconFillDown(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 16 16",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-opacity="0.26" d="M1 1h14v14H1z"/>' +
+      '<path fill="currentColor" d="M2 2v12h12V2zm13-1v14H1V1z"/>' +
+      '<path fill="currentColor" fill-rule="nonzero" d="m8 13 3-3H9V4H7v6H5z"/>' +
+      "</g>",
+  );
+}
+
+/** 向右填充（16×16，单色） */
+export function iconFillRight(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 16 16",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-opacity="0.26" d="M1 1h14v14H1z"/>' +
+      '<path fill="currentColor" d="M2 2v12h12V2zm13-1v14H1V1z"/>' +
+      '<path fill="currentColor" fill-rule="nonzero" d="m13 8-3-3v2H4v2h6v2z"/>' +
+      "</g>",
+  );
+}
+
+/** 向上填充（16×16，单色） */
+export function iconFillUp(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 16 16",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-opacity="0.26" d="M1 1h14v14H1z"/>' +
+      '<path fill="currentColor" d="M2 2v12h12V2zm13-1v14H1V1z"/>' +
+      '<path fill="currentColor" fill-rule="nonzero" d="m8 3-3 3h2v6h2V6h2z"/>' +
+      "</g>",
+  );
+}
+
+/** 向左填充（16×16，单色） */
+export function iconFillLeft(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 16 16",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-opacity="0.26" d="M1 1h14v14H1z"/>' +
+      '<path fill="currentColor" d="M2 2v12h12V2zm13-1v14H1V1z"/>' +
+      '<path fill="currentColor" fill-rule="nonzero" d="m3 8 3 3V9h6V7H6V5z"/>' +
       "</g>",
   );
 }
@@ -688,7 +734,18 @@ export function iconPrintTitles(): SVGSVGElement {
 }
 
 export function iconFunction(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<path d="M4 19c0-4 2-6 6-6s6 2 6 6"/><path d="M10 13V9a2 2 0 1 1 4 0v4"/>');
+  return svgElMarkup(
+    "0 0 16 16",
+    '<path fill="currentColor" fill-rule="nonzero" d="M1 1h14v4.375h-1.077L12.846 2.75H6.45l3.866 4.489-4.426 5.136h6.957l1.077-1.75H15V15H1l6.03-7z"/>',
+  );
+}
+
+/** 清除（16×16，单色） */
+export function iconClear(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 16 16",
+    '<path fill="currentColor" fill-rule="evenodd" d="m2.721 7.612 5.667 5.667-.935.935a2.685 2.685 0 0 1-3.797 0l-1.87-1.87a2.685 2.685 0 0 1 0-3.797zm.945-.945L9.333 1 15 6.667l-5.667 5.667z"/>',
+  );
 }
 
 export function iconAudit(): SVGSVGElement {

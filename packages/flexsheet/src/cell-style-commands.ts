@@ -134,14 +134,16 @@ export class ApplyFormatAsTableCommand implements ICommand {
   readonly id = "cell.applyFormatAsTable";
   readonly label = "套用表格格式";
   private readonly snapshots: CellStyleSnapshot[];
+  private readonly normalizedRange: SelectionRange;
 
   constructor(
     private readonly sheet: Worksheet,
     range: SelectionRange,
-    parsed: ParsedTableStyleCommand,
-    hasHeaders: boolean,
+    private readonly parsed: ParsedTableStyleCommand,
+    private readonly hasHeaders: boolean,
   ) {
     const n = normalizeSelectionRange(range);
+    this.normalizedRange = n;
     const palette = TABLE_ACCENT_PALETTES[parsed.col];
     const list: CellStyleSnapshot[] = [];
     for (let r = n.startRow; r <= n.endRow; r++) {
@@ -162,9 +164,11 @@ export class ApplyFormatAsTableCommand implements ICommand {
     for (const s of this.snapshots) {
       this.sheet.setCellStyle(s.row, s.col, s.after === null ? null : { ...s.after });
     }
+    this.sheet.registerTableStyleRegion(this.normalizedRange, this.parsed, this.hasHeaders);
   }
 
   undo(): void {
+    this.sheet.unregisterTableStyleRegion(this.normalizedRange);
     for (const s of this.snapshots) {
       this.sheet.setCellStyle(s.row, s.col, cloneCellStyle(s.before));
     }
@@ -317,6 +321,42 @@ export class ApplySelectionIndentStepCommand implements ICommand {
   undo(): void {
     for (const s of this.snapshots) {
       this.sheet.setCellStyle(s.row, s.col, s.before === null ? null : { ...s.before });
+    }
+  }
+}
+
+/** 清除选区内所有单元格格式（保留值/公式，可撤销）。 */
+export class ClearSelectionFormatsCommand implements ICommand {
+  readonly id = "cell.clearSelectionFormats";
+  readonly label = "清除格式";
+  readonly hasChanges: boolean;
+  private readonly snapshots: CellStyleSnapshot[];
+
+  constructor(
+    private readonly sheet: Worksheet,
+    range: SelectionRange,
+  ) {
+    const n = normalizeSelectionRange(range);
+    const list: CellStyleSnapshot[] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        const before = cloneCellStyle(this.sheet.getCell(r, c).style);
+        list.push({ row: r, col: c, before, after: null });
+      }
+    }
+    this.snapshots = list;
+    this.hasChanges = list.some((s) => s.before !== null);
+  }
+
+  execute(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, null);
+    }
+  }
+
+  undo(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, cloneCellStyle(s.before));
     }
   }
 }

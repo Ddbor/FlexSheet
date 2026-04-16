@@ -68,6 +68,7 @@ import {
   ApplySelectionFormatCellsDialogCommand,
   ApplySelectionFontSizeStepCommand,
   ApplySelectionIndentStepCommand,
+  ClearSelectionFormatsCommand,
   isRibbonBorderCommandId,
 } from "./cell-style-commands.js";
 import type { FormatCellsBorderState } from "./format-cells-border.js";
@@ -82,6 +83,7 @@ import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
 import { openColumnFilterPanel } from "./column-filter-panel.js";
 import { showFormatAsTableDialog } from "./format-as-table-dialog.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
+import { showFillSeriesDialog } from "./fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./new-table-style-dialog.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
 import { mountFormatCellsDialog } from "./format-cells-dialog.js";
@@ -741,6 +743,70 @@ export class FlexSheet {
     this.refresh();
   }
 
+  /** Ribbon「填充」：按方向扩展一个选区跨度并执行平铺填充（可撤销）。 */
+  applySelectionFillDirection(dir: "down" | "right" | "up" | "left"): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const source = normalizeSelectionRange(this.selection.getNormalizedRange());
+    const rowSpan = source.endRow - source.startRow + 1;
+    const colSpan = source.endCol - source.startCol + 1;
+    const lastRow = sheet.rowCount - 1;
+    const lastCol = sheet.colCount - 1;
+    let fill = source;
+
+    if (dir === "down") {
+      if (source.endRow >= lastRow) {
+        return;
+      }
+      fill = {
+        startRow: source.startRow,
+        startCol: source.startCol,
+        endRow: Math.min(lastRow, source.endRow + rowSpan),
+        endCol: source.endCol,
+      };
+    } else if (dir === "right") {
+      if (source.endCol >= lastCol) {
+        return;
+      }
+      fill = {
+        startRow: source.startRow,
+        startCol: source.startCol,
+        endRow: source.endRow,
+        endCol: Math.min(lastCol, source.endCol + colSpan),
+      };
+    } else if (dir === "up") {
+      if (source.startRow <= 0) {
+        return;
+      }
+      fill = {
+        startRow: Math.max(0, source.startRow - rowSpan),
+        startCol: source.startCol,
+        endRow: source.endRow,
+        endCol: source.endCol,
+      };
+    } else {
+      if (source.startCol <= 0) {
+        return;
+      }
+      fill = {
+        startRow: source.startRow,
+        startCol: Math.max(0, source.startCol - colSpan),
+        endRow: source.endRow,
+        endCol: source.endCol,
+      };
+    }
+
+    if (selectionRangesEqualNormalized(fill, source)) {
+      return;
+    }
+    this.workspace.commands.execute(new AutofillExtendCommand(sheet, source, fill));
+    this.selection.setNormalizedRange(fill);
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
   /**
    * Ribbon「合并后居中 / 跨越合并 / 合并单元格 / 取消合并」：对当前选区生效，可撤销。
    */
@@ -956,6 +1022,33 @@ export class FlexSheet {
     this.renderer.requestRedraw();
   }
 
+  /** 清空当前选区内单元格格式，保留值与公式。 */
+  clearSelectionFormats(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.clearClipboardMarquee();
+    const cmd = new ClearSelectionFormatsCommand(sheet, this.selection.getNormalizedRange());
+    if (cmd.hasChanges) {
+      this.workspace.commands.execute(cmd);
+    }
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** 清空当前选区内单元格内容与格式。 */
+  clearSelectionAll(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    this.clearSelectionContents();
+    this.clearSelectionFormats();
+  }
+
   /**
    * 按当前选区的行范围排序，排序关键字列为 `sortCol`（通常为右键列或活动列）。
    * 与 Excel 右键「排序」子菜单行为一致。
@@ -1166,6 +1259,14 @@ export class FlexSheet {
       return;
     }
     showNewTableStyleDialog(this);
+  }
+
+  /** Ribbon「填充 -> 系列」：打开系列填充对话框。 */
+  openFillSeriesDialog(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    showFillSeriesDialog(this);
   }
 
   /**

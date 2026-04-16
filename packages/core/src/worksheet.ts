@@ -16,6 +16,12 @@ import {
   selectionRangesIntersect,
   type SelectionRange,
 } from "./selection-range.js";
+import {
+  TABLE_ACCENT_PALETTES,
+  computeTableFormatCellStyle,
+  tableStyleUsesDistinctHeaderRow,
+  type ParsedTableStyleCommand,
+} from "./table-style-presets.js";
 
 /** 列筛选按钮绘制位置：列标题栏或选区上一行的表体单元格。 */
 export type ColumnAutoFilterUiKind = "header" | "body";
@@ -35,6 +41,12 @@ interface ColumnAutoFilterMutable {
   bodyAnchorRow: number;
   /** 由「升序/降序/按颜色排序」写入；清除筛选时随条目删除。 */
   lastSortDirection: ColumnAutoFilterSortHint;
+}
+
+interface TableStyleRegion {
+  readonly range: SelectionRange;
+  readonly parsed: ParsedTableStyleCommand;
+  readonly hasHeaders: boolean;
 }
 
 function cloneColumnAutoFilterState(st: ColumnAutoFilterMutable): ColumnAutoFilterMutable {
@@ -78,6 +90,7 @@ export class Worksheet {
   /** 由列自动筛选临时隐藏的行（与手动 `hiddenRows` 叠加）。 */
   private readonly autoFilterConcealedRows = new Set<number>();
   private readonly autoFilterByCol = new Map<number, ColumnAutoFilterMutable>();
+  private tableStyleRegions: TableStyleRegion[] = [];
 
   /** 合并区域：主格键 `row,col` → 跨度（≥2 格）。 */
   private mergeRegionsByMaster = new Map<
@@ -226,6 +239,7 @@ export class Worksheet {
     } else {
       this.hiddenRows.delete(row);
     }
+    this.refreshRegisteredTableStyles();
     this.touchData();
   }
 
@@ -414,6 +428,33 @@ export class Worksheet {
       return;
     }
     this.refreshAutoFilterConcealment();
+  }
+
+  /** 注册「套用表格格式」区域，供排序/筛选后重新计算条纹与表头样式。 */
+  registerTableStyleRegion(
+    range: SelectionRange,
+    parsed: ParsedTableStyleCommand,
+    hasHeaders: boolean,
+  ): void {
+    const n = normalizeSelectionRange(range);
+    const nextRegion: TableStyleRegion = {
+      range: n,
+      parsed: { ...parsed },
+      hasHeaders,
+    };
+    this.tableStyleRegions = this.tableStyleRegions.filter(
+      (it) => !selectionRangesEqualNormalized(it.range, n),
+    );
+    this.tableStyleRegions.push(nextRegion);
+    this.reapplyTableStyleRegion(nextRegion);
+  }
+
+  /** 取消「套用表格格式」区域注册（通常在撤销时调用）。 */
+  unregisterTableStyleRegion(range: SelectionRange): void {
+    const n = normalizeSelectionRange(range);
+    this.tableStyleRegions = this.tableStyleRegions.filter(
+      (it) => !selectionRangesEqualNormalized(it.range, n),
+    );
   }
 
   /** 列中曾出现过的字体前景色 ARGB（去重，用于「按颜色」子菜单）；仅扫描该列筛选作用行范围。 */
@@ -1144,6 +1185,7 @@ export class Worksheet {
   private refreshAutoFilterConcealment(): void {
     this.autoFilterConcealedRows.clear();
     if (this.autoFilterByCol.size === 0) {
+      this.refreshRegisteredTableStyles();
       this.touchData();
       return;
     }
@@ -1152,7 +1194,47 @@ export class Worksheet {
         this.autoFilterConcealedRows.add(r);
       }
     }
+    this.refreshRegisteredTableStyles();
     this.touchData();
+  }
+
+  private refreshRegisteredTableStyles(): void {
+    for (const region of this.tableStyleRegions) {
+      this.reapplyTableStyleRegion(region);
+    }
+  }
+
+  private reapplyTableStyleRegion(region: TableStyleRegion): void {
+    const palette = TABLE_ACCENT_PALETTES[region.parsed.col];
+    if (palette === undefined) {
+      return;
+    }
+    const n = normalizeSelectionRange(region.range);
+    const distinctHeader = tableStyleUsesDistinctHeaderRow(region.parsed);
+    const firstBodyOffset = region.hasHeaders && distinctHeader ? 1 : 0;
+    let visibleBodyIndex = 0;
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      const isHeaderRow = region.hasHeaders && distinctHeader && r === n.startRow;
+      const virtualRow = isHeaderRow ? n.startRow : n.startRow + firstBodyOffset + visibleBodyIndex;
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        if (this.isMergeCoveredCell(r, c)) {
+          continue;
+        }
+        const nextStyle = computeTableFormatCellStyle(
+          region.parsed,
+          palette,
+          n,
+          region.hasHeaders,
+          virtualRow,
+          c,
+        );
+        const cell = this.getCell(r, c);
+        cell.style = nextStyle;
+      }
+      if (!isHeaderRow && !this.isRowHidden(r)) {
+        visibleBodyIndex++;
+      }
+    }
   }
 
   private rowPassesAllAutoFilters(row: number): boolean {

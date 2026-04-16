@@ -379,8 +379,16 @@
         color: #ffffff;
       }
       .fs-excel-status-bar__msg {
+        flex-shrink: 0;
+        color: #ffffff;
+      }
+      .fs-excel-status-bar__stats {
         flex: 1;
         min-width: 0;
+        text-align: right;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
         color: #ffffff;
       }
       .fs-excel-status-bar__zoom-wrap {
@@ -463,29 +471,34 @@
       .fs-excel-sheet-menu {
         position: fixed;
         z-index: 10000;
-        min-width: 140px;
-        padding: 4px 0;
+        min-width: 112px;
+        padding: 3px;
         margin: 0;
-        border: 1px solid #c8c6c4;
-        border-radius: 2px;
+        border: 1px solid #d2d0ce;
+        border-radius: 6px;
         background: #fff;
-        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.16);
       }
       .fs-excel-sheet-menu__item {
         display: block;
         width: 100%;
-        padding: 6px 12px;
+        padding: 4px 8px;
         border: none;
+        border-radius: 4px;
         background: #fff;
-        font: inherit;
+        font-size: 12px;
+        line-height: 1.35;
+        color: #323130;
         text-align: left;
         cursor: pointer;
+        transition: background-color 0.12s ease;
       }
       .fs-excel-sheet-menu__item:hover:not(:disabled) {
-        background: #edebe9;
+        background: #f3f2f1;
       }
       .fs-excel-sheet-menu__item:disabled {
-        opacity: 0.45;
+        color: #a19f9d;
+        background: transparent;
         cursor: default;
       }
       .fs-formula-bar {

@@ -1,4 +1,4 @@
-import { Workbook, Worksheet } from "@flexsheet/core";
+import { Workbook, Worksheet, type SelectionRange } from "@flexsheet/core";
 import { recalcWorksheet } from "@flexsheet/formula";
 
 import type { FlexSheet } from "./flex-sheet.js";
@@ -15,9 +15,44 @@ const DEFAULT_GRID_HSCROLL_PANE_PX = 168;
 const HSCROLL_MIN_THUMB_PX = 22;
 const HSCROLL_STEP_PX = 56;
 
+interface SelectionStats {
+  readonly nonEmptyCount: number;
+  readonly numericCount: number;
+  readonly sum: number;
+}
+
 export interface MountExcelBottomBarOptions {
   readonly container: HTMLElement;
   readonly flexSheet: FlexSheet;
+}
+
+function computeSelectionStats(sheet: Worksheet, range: SelectionRange): SelectionStats {
+  let nonEmptyCount = 0;
+  let numericCount = 0;
+  let sum = 0;
+  for (let r = range.startRow; r <= range.endRow; r++) {
+    for (let c = range.startCol; c <= range.endCol; c++) {
+      const cell = sheet.getCell(r, c);
+      const value = cell.value;
+      if (value !== null && !(typeof value === "string" && value.trim().length === 0)) {
+        nonEmptyCount++;
+      }
+      if (typeof value === "number" && Number.isFinite(value)) {
+        numericCount++;
+        sum += value;
+      }
+    }
+  }
+  return { nonEmptyCount, numericCount, sum };
+}
+
+function formatStatNumber(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0";
+  }
+  return new Intl.NumberFormat("zh-CN", {
+    maximumFractionDigits: 8,
+  }).format(value);
 }
 
 function nextDefaultSheetName(wb: Workbook): string {
@@ -131,6 +166,9 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
   statusLeft.className = "fs-excel-status-bar__msg";
   statusLeft.textContent = "就绪";
 
+  const statusStats = document.createElement("span");
+  statusStats.className = "fs-excel-status-bar__stats";
+
   const zoomWrap = document.createElement("div");
   zoomWrap.className = "fs-excel-status-bar__zoom-wrap";
 
@@ -158,7 +196,7 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
   zoomReadout.className = "fs-excel-status-bar__zoom-readout";
 
   zoomWrap.append(zoomOutBtn, zoomRange, zoomInBtn, zoomReadout);
-  statusBar.append(statusLeft, zoomWrap);
+  statusBar.append(statusLeft, statusStats, zoomWrap);
   container.append(sheetBar, statusBar);
 
   const renderer = flexSheet.getRenderer();
@@ -172,7 +210,24 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
     zoomRange.value = String(pct);
   };
 
+  const syncSelectionStats = (): void => {
+    const sheet = flexSheet.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      statusStats.textContent = "";
+      return;
+    }
+    const range = flexSheet.selection.getNormalizedRange();
+    const stats = computeSelectionStats(sheet, range);
+    if (stats.nonEmptyCount <= 1) {
+      statusStats.textContent = "";
+      return;
+    }
+    const avg = stats.numericCount > 0 ? stats.sum / stats.numericCount : 0;
+    statusStats.textContent = `平均值: ${formatStatNumber(avg)}    计数: ${formatStatNumber(stats.nonEmptyCount)}    求和: ${formatStatNumber(stats.sum)}`;
+  };
+
   syncZoomUi();
+  syncSelectionStats();
 
   let gridHScrollPanePx = DEFAULT_GRID_HSCROLL_PANE_PX;
 
@@ -456,8 +511,8 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
     const pad = 4;
     let x = clientX;
     let y = clientY;
-    const mw = 160;
-    const mh = 72;
+    const mw = menu.offsetWidth || 120;
+    const mh = menu.offsetHeight || 64;
     if (x + mw > window.innerWidth - pad) {
       x = window.innerWidth - mw - pad;
     }
@@ -551,6 +606,9 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
   const unsubScroll = renderer.subscribeScroll(() => {
     syncGridHScrollbar();
   });
+  const unsubStats = flexSheet.subscribeFormattingChrome(() => {
+    syncSelectionStats();
+  });
 
   const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateScrollArrows) : null;
   ro?.observe(stripScroll);
@@ -571,6 +629,7 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
     unsubWb();
     unsubZoom();
     unsubScroll();
+    unsubStats();
     ro?.disconnect();
     roSheetBar?.disconnect();
     container.replaceChildren();

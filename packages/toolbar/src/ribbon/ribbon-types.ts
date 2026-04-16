@@ -77,6 +77,8 @@ export interface FlexSheetLike {
   applySelectionStylePatch(patch: CellStylePatch): void;
   applySelectionFontSizeStep(dir: 1 | -1): void;
   applySelectionIndentStep(dir: 1 | -1): void;
+  /** Ribbon「开始 -> 填充」：按方向扩展并填充当前选区。 */
+  applySelectionFillDirection?(dir: "down" | "right" | "up" | "left"): void;
   /** Ribbon「开始」对齐组：合并/取消合并（与 `home.align.merge*` 命令对应）。 */
   applySelectionMerge?(kind: "mergeCells" | "mergeAcross" | "mergeCenter" | "unmerge"): void;
   /** Ribbon「开始」字体组边框按钮及下拉（`home.font.border*`）。 */
@@ -118,6 +120,14 @@ export interface FlexSheetLike {
   openFormatAsTableFromRibbon?(ribbonCommandId: string): void;
   /** Ribbon「套用表格格式」：打开“新建表样式”对话框。 */
   openNewTableStyleDialog?(): void;
+  /** Ribbon「填充 -> 系列」：打开系列填充对话框。 */
+  openFillSeriesDialog?(): void;
+  /** Ribbon「清除」：清除当前选区内容（保留格式）。 */
+  clearSelectionContents?(): void;
+  /** Ribbon「清除」：清除当前选区格式（保留内容）。 */
+  clearSelectionFormats?(): void;
+  /** Ribbon「清除」：清除当前选区内容与格式。 */
+  clearSelectionAll?(): void;
   /** Ribbon「套用表格格式」：读取“自定义”分组样式项。 */
   getCustomTableStyleEntries?(): readonly RibbonCustomTableStyleEntry[];
 }

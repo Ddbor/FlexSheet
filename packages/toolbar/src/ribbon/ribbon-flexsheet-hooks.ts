@@ -283,6 +283,45 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.applySelectionStylePatch({ numberFormat: next === "" ? null : next });
       return true;
     }
+    case "home.cells.fill.down":
+    case "home.cells.fill.right":
+    case "home.cells.fill.up":
+    case "home.cells.fill.left": {
+      if (fs.applySelectionFillDirection === undefined) {
+        return false;
+      }
+      const dir = ev.id.slice("home.cells.fill.".length) as "down" | "right" | "up" | "left";
+      fs.applySelectionFillDirection(dir);
+      return true;
+    }
+    case "home.cells.fill.series": {
+      if (fs.openFillSeriesDialog === undefined) {
+        return false;
+      }
+      fs.openFillSeriesDialog();
+      return true;
+    }
+    case "home.cells.clear.contents": {
+      if (fs.clearSelectionContents === undefined) {
+        return false;
+      }
+      fs.clearSelectionContents();
+      return true;
+    }
+    case "home.cells.clear.formats": {
+      if (fs.clearSelectionFormats === undefined) {
+        return false;
+      }
+      fs.clearSelectionFormats();
+      return true;
+    }
+    case "home.cells.clear.all": {
+      if (fs.clearSelectionAll === undefined) {
+        return false;
+      }
+      fs.clearSelectionAll();
+      return true;
+    }
     case "home.align.top":
       fs.applySelectionStylePatch({ vAlign: "top" });
       return true;

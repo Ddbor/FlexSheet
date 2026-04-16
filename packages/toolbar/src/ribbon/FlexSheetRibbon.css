@@ -317,6 +317,67 @@
   font-size: 11px;
 }
 
+.fs-ribbon-styles__sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 66px;
+  margin: 2px 4px;
+  background: rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+.fs-ribbon[data-theme="dark"] .fs-ribbon-styles__sep {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.fs-ribbon-styles__cells-ops {
+  --fs-ribbon-styles-op-row: 22px;
+  display: grid;
+  grid-template-rows: repeat(3, var(--fs-ribbon-styles-op-row));
+  gap: 3px;
+  align-content: center;
+  min-width: 88px;
+}
+
+.fs-ribbon-styles__cells-ops .fs-tb-btn--ribbon-menu {
+  width: 100%;
+  min-width: 0;
+  height: var(--fs-ribbon-styles-op-row);
+  border-radius: 2px;
+}
+
+.fs-ribbon-styles__cells-ops .fs-tb-btn--ribbon-menu > .fs-tb-btn__row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  min-width: 0;
+  width: 100%;
+  padding: 0 4px 0 3px;
+}
+
+.fs-ribbon-styles__cells-ops .fs-tb-btn__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.fs-ribbon-styles__cells-ops .fs-tb-btn__icon {
+  width: 14px;
+  height: 14px;
+}
+
+.fs-ribbon-styles__cells-ops .fs-tb-btn--ribbon-menu .fs-tb-btn__menu-chev-wrap {
+  margin-left: auto;
+  padding-left: 2px;
+}
+
+.fs-ribbon-styles__cells-ops .fs-tb-btn--ribbon-menu .fs-tb-btn__menu-chev {
+  width: 8px;
+  height: 8px;
+}
+
 /* 开始 -> 字体分组布局（底行图标区与「对齐方式」同款：固定行高、grid、border-box、均分填充） */
 .fs-ribbon-font .fs-ribbon-stack {
   width: 100%;
