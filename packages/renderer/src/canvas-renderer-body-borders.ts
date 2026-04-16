@@ -1,5 +1,5 @@
+import { resolveCellBorderStroke } from "@flexsheet/core";
 import type {
-  CellBorderKind,
   CellBorderSide,
   CellStyle,
   ConditionalFormattingOverlay,
@@ -98,24 +98,6 @@ function borderCssColor(side: CellBorderSide, fallback: string): string {
   return fallback;
 }
 
-function lineWidths(kind: CellBorderKind, viewZoom: number): { w: number; gap: number } {
-  const z = Math.max(0.25, viewZoom);
-  switch (kind) {
-    case "hairline":
-      return { w: Math.max(0.5, 0.5 * z), gap: 0 };
-    case "thin":
-      return { w: Math.max(1, z), gap: 0 };
-    case "medium":
-      return { w: Math.max(2, 2 * z), gap: 0 };
-    case "thick":
-      return { w: Math.max(3, 3 * z), gap: 0 };
-    case "double":
-      return { w: Math.max(1, z), gap: Math.max(2, 2 * z) };
-    default:
-      return { w: Math.max(1, z), gap: 0 };
-  }
-}
-
 function strokeHorizontal(
   ctx: CanvasRenderingContext2D,
   x1: number,
@@ -125,12 +107,14 @@ function strokeHorizontal(
   viewZoom: number,
 ): void {
   const color = borderCssColor(side, "#000000");
-  const { w, gap } = lineWidths(side.kind, viewZoom);
+  const sty = resolveCellBorderStroke(side, viewZoom);
   const ys = snapLine(y);
   ctx.strokeStyle = color;
-  if (side.kind === "double") {
-    const half = gap / 2;
-    ctx.lineWidth = w;
+  ctx.lineCap = sty.lineCap;
+  if (sty.double) {
+    const half = sty.gap / 2;
+    ctx.lineWidth = sty.lineWidth;
+    ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(x1, ys - half);
     ctx.lineTo(x2, ys - half);
@@ -140,11 +124,17 @@ function strokeHorizontal(
     ctx.lineTo(x2, ys + half);
     ctx.stroke();
   } else {
-    ctx.lineWidth = w;
+    ctx.lineWidth = sty.lineWidth;
+    if (sty.lineDash !== null) {
+      ctx.setLineDash([...sty.lineDash]);
+    } else {
+      ctx.setLineDash([]);
+    }
     ctx.beginPath();
     ctx.moveTo(x1, ys);
     ctx.lineTo(x2, ys);
     ctx.stroke();
+    ctx.setLineDash([]);
   }
 }
 
@@ -157,12 +147,14 @@ function strokeVertical(
   viewZoom: number,
 ): void {
   const color = borderCssColor(side, "#000000");
-  const { w, gap } = lineWidths(side.kind, viewZoom);
+  const sty = resolveCellBorderStroke(side, viewZoom);
   const xs = snapLine(x);
   ctx.strokeStyle = color;
-  if (side.kind === "double") {
-    const half = gap / 2;
-    ctx.lineWidth = w;
+  ctx.lineCap = sty.lineCap;
+  if (sty.double) {
+    const half = sty.gap / 2;
+    ctx.lineWidth = sty.lineWidth;
+    ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(xs - half, y1);
     ctx.lineTo(xs - half, y2);
@@ -172,11 +164,17 @@ function strokeVertical(
     ctx.lineTo(xs + half, y2);
     ctx.stroke();
   } else {
-    ctx.lineWidth = w;
+    ctx.lineWidth = sty.lineWidth;
+    if (sty.lineDash !== null) {
+      ctx.setLineDash([...sty.lineDash]);
+    } else {
+      ctx.setLineDash([]);
+    }
     ctx.beginPath();
     ctx.moveTo(xs, y1);
     ctx.lineTo(xs, y2);
     ctx.stroke();
+    ctx.setLineDash([]);
   }
 }
 

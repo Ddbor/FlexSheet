@@ -26,4 +26,5 @@ export {
 } from "./viewport.js";
 export { computeColumnAutoWidth, computeRowAutoHeight } from "./cell-auto-fit.js";
 export { expandSelectionRangeForMergePaint, getClampedSelectionSpan } from "./canvas-renderer-selection-span.js";
+export { paintCellFillPatternOverlay } from "./canvas-cell-fill-pattern.js";
 export { SELECTION_OUTLINE_VISUAL_SCALE } from "./canvas-renderer-constants.js";

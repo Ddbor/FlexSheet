@@ -108,7 +108,7 @@ export class FlexSheetRibbon {
       panel.dataset.tabId = id;
       switch (id) {
         case "home": {
-          const homeHandles = mountHomeTab(panel, emit);
+          const homeHandles = mountHomeTab(panel, emit, () => this.flexSheet);
           options.onHomeTabMounted?.(homeHandles);
           break;
         }

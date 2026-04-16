@@ -50,11 +50,8 @@ import {
 } from "../../toolbar/icons.js";
 import { mountAlignMergeMenu } from "../align-merge-menu.js";
 import { mountAlignOrientationMenu } from "../align-orientation-menu.js";
-import {
-  mountCellStyleRibbonMenu,
-  mountConditionalFormatMenu,
-  mountTableFormatStyleMenu,
-} from "../home-styles-menus.js";
+import { mountCellStyleRibbonMenu } from "../cell-styles-ribbon-menu.js";
+import { mountConditionalFormatMenu, mountTableFormatStyleMenu } from "../home-styles-menus.js";
 import {
   RIBBON_FONT_FAMILY_DEFAULT_PREVIEW,
   RIBBON_FONT_FAMILY_ITEMS,
@@ -85,7 +82,7 @@ const NUMBER_FORMAT_DROPDOWN_ICONS: Record<
   "home.number.format.text": () => iconFormatText(),
 };
 import { createRibbonGroup } from "../ribbon-group.js";
-import type { RibbonTabId } from "../ribbon-types.js";
+import type { FlexSheetLike, RibbonTabId } from "../ribbon-types.js";
 
 const TAB: RibbonTabId = "home";
 
@@ -97,7 +94,11 @@ export interface HomeTabHandles {
   syncNumberFormatChrome(state: RibbonHomeNumberFormatChromeState): void;
 }
 
-export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandles {
+export function mountHomeTab(
+  panel: HTMLElement,
+  emit: RibbonEmit,
+  getFlexSheet?: () => FlexSheetLike | undefined,
+): HomeTabHandles {
   const inner = document.createElement("div");
   inner.className = "fs-ribbon-panel__inner";
   panel.appendChild(inner);
@@ -554,7 +555,9 @@ export function mountHomeTab(panel: HTMLElement, emit: RibbonEmit): HomeTabHandl
       emit,
     );
     tableFormatBtn.element.id = "fs-ribbon-home-style-table-format";
-    mountTableFormatStyleMenu(tableFormatBtn.element, emit, TAB);
+    mountTableFormatStyleMenu(tableFormatBtn.element, emit, TAB, {
+      getCustomTableStyles: () => getFlexSheet?.()?.getCustomTableStyleEntries?.() ?? [],
+    });
     const cellStylesBtn = createToolbarButton(
       {
         id: "home.style.cellStyles",

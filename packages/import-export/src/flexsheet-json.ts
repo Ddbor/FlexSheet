@@ -2,7 +2,14 @@
  * FlexSheet 工作簿 JSON：纯数据交换格式，供本软件导出/导入与校验。
  */
 
-import { Cell, Workbook, Worksheet, type CellScalar, type CellStyle } from "@flexsheet/core";
+import {
+  Cell,
+  Workbook,
+  Worksheet,
+  isCellFillPatternType,
+  type CellScalar,
+  type CellStyle,
+} from "@flexsheet/core";
 import { recalcWorksheet } from "@flexsheet/formula";
 
 /** 根对象上的格式标识（导入时强校验）。 */
@@ -125,6 +132,8 @@ function isCellStyle(v: unknown): v is CellStyle {
     "underline",
     "fgArgb",
     "fillArgb",
+    "fillPatternType",
+    "fillPatternFgArgb",
     "hAlign",
     "vAlign",
     "indentLevel",
@@ -133,6 +142,8 @@ function isCellStyle(v: unknown): v is CellStyle {
     "shrinkToFit",
     "textOrientation",
     "numberFormat",
+    "locked",
+    "formulaHidden",
   ]);
   for (const k of keys) {
     if (!allowed.has(k)) {
@@ -162,6 +173,20 @@ function isCellStyle(v: unknown): v is CellStyle {
   }
   if (v.fillArgb !== undefined && typeof v.fillArgb !== "string") {
     return false;
+  }
+  if (v.fillPatternType !== undefined) {
+    if (typeof v.fillPatternType !== "string" || !isCellFillPatternType(v.fillPatternType)) {
+      return false;
+    }
+  }
+  if (v.fillPatternFgArgb !== undefined) {
+    if (typeof v.fillPatternFgArgb !== "string") {
+      return false;
+    }
+    const t = v.fillPatternFgArgb.trim();
+    if (t !== "" && !/^[\dA-Fa-f]{8}$/.test(t)) {
+      return false;
+    }
   }
   if (
     v.hAlign !== undefined &&
@@ -222,6 +247,12 @@ function isCellStyle(v: unknown): v is CellStyle {
     }
   }
   if (v.numberFormat !== undefined && typeof v.numberFormat !== "string") {
+    return false;
+  }
+  if (v.locked !== undefined && typeof v.locked !== "boolean") {
+    return false;
+  }
+  if (v.formulaHidden !== undefined && typeof v.formulaHidden !== "boolean") {
     return false;
   }
   return true;

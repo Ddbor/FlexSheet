@@ -7,10 +7,45 @@ import {
   type CellVerticalAlign,
   formatCellDisplayWithStyle,
 } from "@flexsheet/core";
-import { RIBBON_NUMBER_FORMAT_PRESETS } from "@flexsheet/toolbar";
-
+import {
+  appendRibbonColorPaletteContent,
+  RIBBON_NUMBER_FORMAT_PRESETS,
+  RIBBON_FONT_FAMILY_DEFAULT_PREVIEW,
+  RIBBON_FONT_FAMILY_ITEMS,
+  argb8ToCssHex6,
+  cellStyleToRibbonHomeFontChrome,
+  cssHexToFillArgb,
+  showRibbonColorDialog,
+} from "@flexsheet/toolbar";
+import { paintCellFillPatternOverlay } from "@flexsheet/renderer";
 import type { FlexSheet } from "./flex-sheet.js";
+import {
+  FORMAT_CELLS_LINE_STYLES,
+  type FormatCellsBorderState,
+  formatCellsBorderStateEqual,
+  inferFormatCellsBorderState,
+} from "./format-cells-border.js";
+import {
+  createFormatCellsBorderPreviewSvg,
+  createFormatCellsLineSwatchHost,
+} from "./format-cells-line-swatch.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
+import {
+  fillPatchIfChanged,
+  FORMAT_CELLS_PATTERN_GRID_ORDER,
+  inferFormatCellsFillState,
+  type FormatCellsFillState,
+} from "./format-cells-fill.js";
+import {
+  inferFormatCellsProtectionState,
+  inferFormatCellsProtectionUiState,
+  protectionPatchIfChanged,
+  type FormatCellsProtectionState,
+  type FormatCellsProtectionUiState,
+} from "./format-cells-protection.js";
+
+/** 可变的样式补丁对象，用于在对话框内逐步写入（`CellStylePatch` 字段为 readonly）。 */
+type CellStylePatchMutable = { -readonly [K in keyof CellStylePatch]: CellStylePatch[K] };
 
 export type FormatCellsMainTabId =
   | "number"
@@ -171,11 +206,30 @@ const CATEGORY_HELP: Record<NumberCategoryId, string> = {
   custom: "以现有格式为基础，生成自定义的数字格式。",
 };
 
-const PLACEHOLDER_TAB_TEXT =
-  "此选项卡尚未实现，后续版本将提供字体、边框、填充与保护等选项。";
+const PROTECTION_TAB_DESC =
+  "要锁定单元格或隐藏公式，请保护工作表。在「审阅」选项卡上，单击「保护工作表」。";
+
+const FILL_TAB_DESC = "设置单元格背景色与图案样式；图案颜色可为自动或自定义。示例预览反映当前选择。";
 
 const ALIGNMENT_TAB_DESC =
   "设置单元格内文本的水平与垂直对齐、缩进、方向，以及自动换行、缩小字体填充等选项。";
+
+const FONT_TAB_DESC =
+  "设置单元格内文字的字体、字号、字形、下划线、颜色，以及删除线与上标、下标等效果。";
+
+const BORDER_TAB_DESC =
+  "单击线型和颜色，然后单击预设边框图案或各个边框按钮。您还可以通过在预览框中单击来应用边框。";
+
+function formatCellsBorderPreviewColor(state: FormatCellsBorderState): string {
+  if (state.colorAuto) {
+    return "#323130";
+  }
+  const a = state.colorArgb?.trim();
+  if (a !== undefined && /^[\dA-Fa-f]{8}$/i.test(a)) {
+    return argb8ToCssHex6(a);
+  }
+  return "#323130";
+}
 
 type AlignmentHorizontalUi =
   | "general"
@@ -284,7 +338,7 @@ function alignmentPatchIfChanged(
   cur: FormatCellsAlignmentState,
   ini: FormatCellsAlignmentState,
 ): CellStylePatch {
-  const p = {} as CellStylePatch;
+  const p: CellStylePatchMutable = {};
   if (cur.horizontal !== ini.horizontal) {
     p.hAlign = cur.horizontal === "general" ? null : (cur.horizontal as CellHorizontalAlign);
   }
@@ -315,6 +369,157 @@ function alignmentPatchIfChanged(
     }
   }
   return p;
+}
+
+interface FormatCellsFontState {
+  normalFont: boolean;
+  selectedFontItemIndex: number;
+  customFontFamilyStack: string;
+  fontSizePt: number;
+  bold: boolean;
+  italic: boolean;
+  underline: "none" | "single" | "double";
+  fgArgb: string | null;
+  strikethrough: boolean;
+  fontScript: "none" | "superscript" | "subscript";
+}
+
+const FONT_SIZE_CHOICES: readonly number[] = [
+  8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72,
+];
+
+const UNDERLINE_OPTIONS: readonly { readonly id: "none" | "single" | "double"; readonly label: string }[] =
+  [
+    { id: "none", label: "无" },
+    { id: "single", label: "单下划线" },
+    { id: "double", label: "双下划线" },
+  ];
+
+function hasExplicitFontStyle(style: CellStyle | null): boolean {
+  if (style === null) {
+    return false;
+  }
+  const fg = style.fgArgb?.trim();
+  return (
+    style.bold === true ||
+    style.italic === true ||
+    (style.fontFamily !== undefined && String(style.fontFamily).trim() !== "") ||
+    style.fontSizePt !== undefined ||
+    style.underline !== undefined ||
+    (fg !== undefined && fg !== "") ||
+    style.strikethrough === true ||
+    (style.fontScript !== undefined && style.fontScript !== null)
+  );
+}
+
+function inferFormatCellsFontState(style: CellStyle | null): FormatCellsFontState {
+  const chrome = cellStyleToRibbonHomeFontChrome(style);
+  const idx = RIBBON_FONT_FAMILY_ITEMS.findIndex((it) => it.label === chrome.fontLabel);
+  const rawFam = style?.fontFamily?.trim();
+  const u = style?.underline;
+  const underline: "none" | "single" | "double" =
+    u === "double" ? "double" : u === "single" ? "single" : "none";
+  const fs = style?.fontScript;
+  const fontScript: FormatCellsFontState["fontScript"] =
+    fs === "superscript" ? "superscript" : fs === "subscript" ? "subscript" : "none";
+  return {
+    normalFont: !hasExplicitFontStyle(style),
+    selectedFontItemIndex: idx,
+    customFontFamilyStack: rawFam !== undefined && rawFam !== "" ? rawFam : chrome.fontPreviewCss,
+    fontSizePt: style?.fontSizePt ?? (Number(chrome.sizeLabel) || 11),
+    bold: style?.bold === true,
+    italic: style?.italic === true,
+    underline,
+    fgArgb: style?.fgArgb?.trim() && /^[\dA-Fa-f]{8}$/.test(style.fgArgb.trim())
+      ? style.fgArgb.trim().toUpperCase()
+      : null,
+    strikethrough: style?.strikethrough === true,
+    fontScript,
+  };
+}
+
+function resolveFontFamilyCss(state: FormatCellsFontState): string {
+  if (state.selectedFontItemIndex >= 0) {
+    const it = RIBBON_FONT_FAMILY_ITEMS[state.selectedFontItemIndex]!;
+    if (it.previewFontFamily !== undefined && it.previewFontFamily !== "") {
+      return it.previewFontFamily;
+    }
+    return `"${it.label}", sans-serif`;
+  }
+  const t = state.customFontFamilyStack.trim();
+  return t !== "" ? t : RIBBON_FONT_FAMILY_DEFAULT_PREVIEW;
+}
+
+function fontPatchIfChanged(
+  cur: FormatCellsFontState,
+  ini: FormatCellsFontState,
+): CellStylePatch {
+  if (cur.normalFont) {
+    if (!ini.normalFont) {
+      return {
+        bold: null,
+        italic: null,
+        fontFamily: null,
+        fontSizePt: null,
+        underline: null,
+        fgArgb: null,
+        strikethrough: null,
+        fontScript: null,
+      };
+    }
+    return {};
+  }
+  if (ini.normalFont) {
+    const p: CellStylePatchMutable = {};
+    p.bold = cur.bold ? true : null;
+    p.italic = cur.italic ? true : null;
+    p.fontFamily = resolveFontFamilyCss(cur);
+    p.fontSizePt = cur.fontSizePt;
+    p.underline = cur.underline === "none" ? null : cur.underline;
+    p.fgArgb = cur.fgArgb;
+    p.strikethrough = cur.strikethrough ? true : null;
+    p.fontScript = cur.fontScript === "none" ? null : cur.fontScript;
+    return p;
+  }
+  const p: CellStylePatchMutable = {};
+  if (resolveFontFamilyCss(cur) !== resolveFontFamilyCss(ini)) {
+    p.fontFamily = resolveFontFamilyCss(cur);
+  }
+  if (cur.fontSizePt !== ini.fontSizePt) {
+    p.fontSizePt = cur.fontSizePt;
+  }
+  if (cur.bold !== ini.bold) {
+    p.bold = cur.bold ? true : null;
+  }
+  if (cur.italic !== ini.italic) {
+    p.italic = cur.italic ? true : null;
+  }
+  if (cur.underline !== ini.underline) {
+    p.underline = cur.underline === "none" ? null : cur.underline;
+  }
+  if (cur.fgArgb !== ini.fgArgb) {
+    p.fgArgb = cur.fgArgb;
+  }
+  if (cur.strikethrough !== ini.strikethrough) {
+    p.strikethrough = cur.strikethrough ? true : null;
+  }
+  if (cur.fontScript !== ini.fontScript) {
+    p.fontScript = cur.fontScript === "none" ? null : cur.fontScript;
+  }
+  return p;
+}
+
+function stylePresetLabel(bold: boolean, italic: boolean): string {
+  if (bold && italic) {
+    return "加粗 倾斜";
+  }
+  if (bold) {
+    return "加粗";
+  }
+  if (italic) {
+    return "倾斜";
+  }
+  return "常规";
 }
 
 /**
@@ -373,7 +578,7 @@ function ensureFormatCellsDialogStyles(): void {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 .fs-format-cells {
-  width: min(560px, calc(100vw - 24px));
+  width: min(600px, calc(100vw - 24px));
   max-height: min(520px, calc(100vh - 24px));
   box-sizing: border-box;
   background: #f3f2f1;
@@ -760,6 +965,464 @@ function ensureFormatCellsDialogStyles(): void {
 .fs-format-cells__checkbox-row input:disabled + span {
   color: #a19f9d;
 }
+.fs-format-cells__font-outer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 260px;
+}
+.fs-format-cells__font-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.75fr) minmax(0, 0.55fr);
+  gap: 10px 12px;
+  align-items: start;
+}
+.fs-format-cells__font-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.fs-format-cells__font-col-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #323130;
+}
+.fs-format-cells__font-field {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+.fs-format-cells__font-field:disabled {
+  background: #f3f2f1;
+  color: #605e5c;
+}
+.fs-format-cells__font-listbox {
+  min-height: 120px;
+  max-height: 160px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  overflow-y: auto;
+  background: #fff;
+}
+.fs-format-cells__font-listbox button {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fs-format-cells__font-listbox button:hover {
+  background: #e8f5e9;
+}
+.fs-format-cells__font-listbox button.fs-format-cells__font-sel {
+  background: #c8e6c9;
+}
+.fs-format-cells__font-listbox--name button {
+  font-size: 12px;
+}
+.fs-format-cells__font-row2 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  font-size: 13px;
+  color: #323130;
+}
+.fs-format-cells__font-row2 label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fs-format-cells__font-preview-box {
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  min-height: 52px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #201f1e;
+}
+.fs-format-cells__border-wrap {
+  display: grid;
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr);
+  gap: 14px 18px;
+  align-items: start;
+  min-height: 260px;
+}
+.fs-format-cells__border-line-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #323130;
+  margin-bottom: 6px;
+}
+.fs-format-cells__border-line-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  margin-bottom: 12px;
+  border: 1px solid #c8c6c4;
+  background: #fff;
+  box-sizing: border-box;
+}
+.fs-format-cells__border-line-grid > .fs-format-cells__border-line-btn {
+  border-right: 1px solid #e1dfdd;
+  border-bottom: 1px solid #e1dfdd;
+  margin: 0;
+}
+.fs-format-cells__border-line-grid > .fs-format-cells__border-line-btn:nth-child(2n) {
+  border-right: none;
+}
+.fs-format-cells__border-line-grid > .fs-format-cells__border-line-btn:nth-child(n + 13) {
+  border-bottom: none;
+}
+.fs-format-cells__border-line-btn {
+  min-height: 28px;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 0;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fs-format-cells__border-line-btn:hover:not(:disabled) {
+  background: #f3f2f1;
+}
+.fs-format-cells__border-line-btn--active {
+  outline: 1px dotted #000000;
+  outline-offset: -1px;
+  background: #ffffff;
+}
+.fs-format-cells__border-line-swatch {
+  display: block;
+  width: 100%;
+  max-width: 96px;
+  min-height: 16px;
+  box-sizing: border-box;
+}
+.fs-format-cells__border-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fs-format-cells__border-presets-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #323130;
+}
+.fs-format-cells__border-presets-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fs-format-cells__border-preset {
+  min-width: 72px;
+  padding: 10px 8px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  color: #323130;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.fs-format-cells__border-preset:hover:not(:disabled) {
+  background: #e8f5e9;
+}
+.fs-format-cells__border-preset:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.fs-format-cells__border-preset-icon {
+  width: 36px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 1px solid #a19f9d;
+}
+.fs-format-cells__border-preset-icon--none {
+  border-style: dashed;
+  border-color: #c8c6c4;
+}
+.fs-format-cells__border-preset-icon--outline {
+  border-width: 2px;
+  border-color: #323130;
+}
+.fs-format-cells__border-preset-icon--inside {
+  background: linear-gradient(#323130, #323130) center/100% 1px no-repeat,
+    linear-gradient(#323130, #323130) center/1px 100% no-repeat;
+  border-width: 1px;
+}
+.fs-format-cells__border-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #323130;
+  margin-bottom: 6px;
+}
+.fs-format-cells__border-preview-shell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.fs-format-cells__border-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fs-format-cells__border-edge-fab {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 11px;
+  color: #323130;
+  line-height: 1;
+}
+.fs-format-cells__border-edge-fab:hover:not(:disabled) {
+  background: #e8f5e9;
+}
+.fs-format-cells__border-edge-fab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.fs-format-cells__border-edge-fab--on {
+  background: #c8e6c9;
+  border-color: #217346;
+}
+.fs-format-cells__border-preview {
+  width: 132px;
+  height: 88px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #201f1e;
+  background: #fff;
+  cursor: pointer;
+  user-select: none;
+}
+.fs-format-cells__border-bottom-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  max-width: 280px;
+}
+.fs-format-cells__fill-outer {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 260px;
+}
+.fs-format-cells__protection-outer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 200px;
+}
+.fs-format-cells__protection-tip {
+  font-size: 13px;
+  color: #323130;
+  line-height: 1.5;
+  max-width: 440px;
+}
+/* 纵向排列三行：背景色、图案颜色、图案样式（单列避免窄屏漏项） */
+.fs-format-cells__fill-top {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.fs-format-cells__fill-dd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #323130;
+}
+.fs-format-cells__fill-dd-row > label {
+  min-width: 64px;
+  flex-shrink: 0;
+}
+.fs-format-cells__fill-dd {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.fs-format-cells__fill-dd:hover {
+  background: #f3f2f1;
+}
+.fs-format-cells__fill-swatch {
+  width: 22px;
+  height: 16px;
+  border: 1px solid #a19f9d;
+  border-radius: 2px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.fs-format-cells__fill-swatch--empty {
+  background: linear-gradient(
+    to top right,
+    transparent calc(50% - 0.5px),
+    #c50f1f calc(50% - 0.5px),
+    #c50f1f calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+  background-color: #fff;
+}
+.fs-format-cells__fill-dd-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-format-cells__fill-dd-arrow {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #217346;
+  flex-shrink: 0;
+}
+.fs-format-cells__fill-dd canvas {
+  pointer-events: none;
+}
+.fs-format-cells__fill-popover.fs-color-menu {
+  position: fixed;
+  z-index: 10005;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 48px));
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  /* 覆盖 Ribbon .fs-color-menu 的 padding，保证左右内边距 */
+  padding: 10px 14px;
+  box-sizing: border-box;
+}
+.fs-format-cells__fill-popover .fs-color-menu__heading {
+  padding: 6px 2px 4px;
+  font-size: 11px;
+  color: #605e5c;
+}
+.fs-format-cells__fill-popover .fs-color-menu__row--top,
+.fs-format-cells__fill-popover .fs-color-menu__row--standard {
+  padding: 0 2px;
+  box-sizing: border-box;
+}
+.fs-format-cells__fill-popover .fs-color-menu__grid {
+  padding: 0 2px 8px;
+  box-sizing: border-box;
+}
+.fs-format-cells__fill-tip {
+  padding: 8px 0 10px;
+  font-size: 13px;
+  color: #323130;
+  line-height: 1.45;
+  max-width: 280px;
+}
+.fs-format-cells__fill-auto-btn {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin: 4px 0;
+  padding: 6px 8px;
+  border: 1px solid #edebe9;
+  border-radius: 4px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+.fs-format-cells__fill-auto-btn:hover {
+  background: #e8f5e9;
+}
+.fs-format-cells__fill-pattern-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+  padding: 4px 0 8px;
+  margin: 0;
+  box-sizing: border-box;
+}
+.fs-format-cells__fill-pattern-btn {
+  width: 100%;
+  aspect-ratio: 1.15;
+  min-height: 26px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 2px;
+  background: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.fs-format-cells__fill-pattern-btn:hover {
+  outline: 1px solid #217346;
+}
+.fs-format-cells__fill-pattern-btn--on {
+  outline: 2px solid #217346;
+  outline-offset: 0;
+}
+.fs-format-cells__fill-sample-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid #edebe9;
+}
+.fs-format-cells__fill-sample-wrap > label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #323130;
+}
+.fs-format-cells__fill-sample {
+  width: 100%;
+  height: 88px;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  display: block;
+}
 `;
   document.head.appendChild(style);
 }
@@ -1002,14 +1665,31 @@ function previewDisplay(sample: number, formatCode: string | null): { readonly t
 export interface MountFormatCellsDialogOptions {
   readonly flex: FlexSheet;
   readonly onClose?: () => void;
+  /** 仅渲染给定标签页；未传时显示全部。 */
+  readonly visibleTabs?: readonly FormatCellsMainTabId[];
+  /** 隐藏底部帮助说明文字（仍保留按钮区域）。 */
+  readonly hideDescription?: boolean;
+  /**
+   * 自定义「确定」行为；未传时应用到当前选区（默认行为）。
+   * 用于“新建表样式”等只需复用弹窗 UI 的场景。
+   */
+  readonly onApply?: (payload: {
+    readonly basePatch: CellStylePatch;
+    readonly border: { readonly apply: boolean; readonly state: FormatCellsBorderState };
+    readonly mergeCellsChanged: boolean;
+    readonly mergeCells: boolean;
+  }) => void;
 }
 
 /** 挂载「设置单元格格式」对话框，返回 overlay 根节点（供与右键菜单 prompt 生命周期对齐）。 */
 export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): HTMLDivElement {
   ensureFormatCellsDialogStyles();
-  const { flex, onClose } = options;
+  const { flex, onClose, hideDescription = false, onApply } = options;
+  const visibleTabSet = new Set<FormatCellsMainTabId>(options.visibleTabs ?? MAIN_TAB_LABELS.map((t) => t.id));
+  const visibleTabs = MAIN_TAB_LABELS.filter((t) => visibleTabSet.has(t.id));
+  const mainTabs = visibleTabs.length > 0 ? visibleTabs : MAIN_TAB_LABELS;
   const initialNf = flex.getActiveCellStyle()?.numberFormat ?? undefined;
-  let mainTab: FormatCellsMainTabId = "number";
+  let mainTab: FormatCellsMainTabId = mainTabs[0]?.id ?? "number";
   let numState = inferInitialNumberState(initialNf);
 
   const overlay = document.createElement("div");
@@ -1039,7 +1719,7 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
   const tabsRow = document.createElement("div");
   tabsRow.className = "fs-format-cells__tabs";
   const tabButtons = new Map<FormatCellsMainTabId, HTMLButtonElement>();
-  for (const t of MAIN_TAB_LABELS) {
+  for (const t of mainTabs) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "fs-format-cells__tab";
@@ -1056,6 +1736,9 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
   footer.className = "fs-format-cells__footer";
   const descEl = document.createElement("div");
   descEl.className = "fs-format-cells__desc";
+  if (hideDescription) {
+    descEl.hidden = true;
+  }
   const actions = document.createElement("div");
   actions.className = "fs-format-cells__actions";
   const cancelBtn = document.createElement("button");
@@ -1083,6 +1766,112 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
 
   const initialAlignState = inferAlignmentState(flex.getActiveCellStyle(), flex);
   let alignState: FormatCellsAlignmentState = { ...initialAlignState };
+
+  const initialFontState = inferFormatCellsFontState(flex.getActiveCellStyle());
+  let fontState: FormatCellsFontState = { ...initialFontState };
+  const fontRoot = document.createElement("div");
+  fontRoot.className = "fs-format-cells__font-outer";
+
+  const borderRoot = document.createElement("div");
+  borderRoot.className = "fs-format-cells__border-wrap";
+
+  const fillRoot = document.createElement("div");
+  fillRoot.className = "fs-format-cells__fill-outer";
+
+  const initialFillState = inferFormatCellsFillState(flex.getActiveCellStyle());
+  let fillState: FormatCellsFillState = { ...initialFillState };
+  let fillPopoverCleanup: (() => void) | null = null;
+  let fillSampleResizeObserver: ResizeObserver | null = null;
+
+  const closeFillPopover = (): void => {
+    if (fillPopoverCleanup !== null) {
+      fillPopoverCleanup();
+      fillPopoverCleanup = null;
+    }
+  };
+
+  const normSel0 = flex.selection.getNormalizedRange();
+  const selectionMultiCell =
+    normSel0.endRow > normSel0.startRow || normSel0.endCol > normSel0.startCol;
+
+  const sheetForFormat = flex.workbook.getActiveSheet();
+  const initialProtectionState: FormatCellsProtectionState =
+    sheetForFormat !== undefined
+      ? inferFormatCellsProtectionState(sheetForFormat, normSel0)
+      : {
+          locked: true,
+          lockedMixed: false,
+          hidden: false,
+          hiddenMixed: false,
+        };
+  let protectionUi: FormatCellsProtectionUiState =
+    sheetForFormat !== undefined
+      ? inferFormatCellsProtectionUiState(sheetForFormat, normSel0)
+      : {
+          locked: true,
+          lockedIndeterminate: false,
+          hidden: false,
+          hiddenIndeterminate: false,
+        };
+
+  const protectionRoot = document.createElement("div");
+  protectionRoot.className = "fs-format-cells__protection-outer";
+
+  const rebuildProtectionPanel = (): void => {
+    protectionRoot.replaceChildren();
+    const tip = document.createElement("div");
+    tip.className = "fs-format-cells__protection-tip";
+    tip.textContent = PROTECTION_TAB_DESC;
+    const row1 = document.createElement("label");
+    row1.className = "fs-format-cells__checkbox-row";
+    const cbLocked = document.createElement("input");
+    cbLocked.type = "checkbox";
+    cbLocked.className = "fs-format-cells__checkbox";
+    cbLocked.checked = protectionUi.locked;
+    cbLocked.indeterminate = protectionUi.lockedIndeterminate;
+    cbLocked.addEventListener("change", () => {
+      protectionUi = {
+        ...protectionUi,
+        locked: cbLocked.checked,
+        lockedIndeterminate: false,
+      };
+    });
+    const sp1 = document.createElement("span");
+    sp1.textContent = "锁定";
+    row1.appendChild(cbLocked);
+    row1.appendChild(sp1);
+    const row2 = document.createElement("label");
+    row2.className = "fs-format-cells__checkbox-row";
+    const cbHidden = document.createElement("input");
+    cbHidden.type = "checkbox";
+    cbHidden.className = "fs-format-cells__checkbox";
+    cbHidden.checked = protectionUi.hidden;
+    cbHidden.indeterminate = protectionUi.hiddenIndeterminate;
+    cbHidden.addEventListener("change", () => {
+      protectionUi = {
+        ...protectionUi,
+        hidden: cbHidden.checked,
+        hiddenIndeterminate: false,
+      };
+    });
+    const sp2 = document.createElement("span");
+    sp2.textContent = "隐藏";
+    row2.appendChild(cbHidden);
+    row2.appendChild(sp2);
+    protectionRoot.appendChild(tip);
+    protectionRoot.appendChild(row1);
+    protectionRoot.appendChild(row2);
+  };
+
+  const initialBorderState = inferFormatCellsBorderState(flex.getActiveCellStyle());
+  let borderState: FormatCellsBorderState = {
+    ...initialBorderState,
+    edges: { ...initialBorderState.edges },
+  };
+
+  /** 防止「其他颜色」在异步未结束时重复点击叠多个取色遮罩 */
+  let otherColorDialogBusy = false;
+  let borderOtherColorBusy = false;
 
   const numberLayout = document.createElement("div");
   numberLayout.className = "fs-format-cells__number-layout";
@@ -1115,10 +1904,6 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
   numberLayout.appendChild(catCol);
   numberLayout.appendChild(detail);
 
-  const placeholderEl = document.createElement("div");
-  placeholderEl.className = "fs-format-cells__placeholder";
-  placeholderEl.textContent = PLACEHOLDER_TAB_TEXT;
-
   const syncCategoryHighlight = (): void => {
     for (const [id, b] of catItemBtns) {
       b.classList.toggle("fs-format-cells__cat-item--active", id === numState.category);
@@ -1132,12 +1917,28 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
   };
 
   const updateDesc = (): void => {
+    if (hideDescription) {
+      descEl.textContent = "";
+      return;
+    }
     if (mainTab === "number") {
       descEl.textContent = CATEGORY_HELP[numState.category] ?? "";
       return;
     }
     if (mainTab === "alignment") {
       descEl.textContent = ALIGNMENT_TAB_DESC;
+      return;
+    }
+    if (mainTab === "font") {
+      descEl.textContent = FONT_TAB_DESC;
+      return;
+    }
+    if (mainTab === "border") {
+      descEl.textContent = BORDER_TAB_DESC;
+      return;
+    }
+    if (mainTab === "fill") {
+      descEl.textContent = FILL_TAB_DESC;
       return;
     }
     descEl.textContent = "";
@@ -1858,7 +2659,1046 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
     alignmentRoot.appendChild(ctrl);
   };
 
+  const updateFontPreview = (): void => {
+    const el = fontRoot.querySelector("[data-role='font-preview']");
+    if (!(el instanceof HTMLElement)) {
+      return;
+    }
+    el.style.textDecoration = "none";
+    el.style.verticalAlign = "baseline";
+    if (fontState.normalFont) {
+      el.textContent = "AaBbYyZz";
+      el.style.fontFamily = RIBBON_FONT_FAMILY_DEFAULT_PREVIEW;
+      el.style.fontSize = "11pt";
+      el.style.fontWeight = "400";
+      el.style.fontStyle = "normal";
+      el.style.color = "#000000";
+      return;
+    }
+    el.textContent = "AaBbYyZz";
+    el.style.fontFamily = resolveFontFamilyCss(fontState);
+    el.style.fontSize = `${fontState.fontSizePt}pt`;
+    el.style.fontWeight = fontState.bold ? "700" : "400";
+    el.style.fontStyle = fontState.italic ? "italic" : "normal";
+    let deco = "";
+    if (fontState.underline === "single") {
+      deco = "underline";
+    } else if (fontState.underline === "double") {
+      deco = "underline double";
+    }
+    if (fontState.strikethrough) {
+      deco = deco === "" ? "line-through" : `${deco} line-through`;
+    }
+    el.style.textDecoration = deco === "" ? "none" : deco;
+    el.style.color =
+      fontState.fgArgb !== null ? argb8ToCssHex6(fontState.fgArgb) : "#000000";
+    if (fontState.fontScript === "superscript") {
+      el.style.fontSize = `${Math.max(6, fontState.fontSizePt * 0.65)}pt`;
+      el.style.verticalAlign = "super";
+    } else if (fontState.fontScript === "subscript") {
+      el.style.fontSize = `${Math.max(6, fontState.fontSizePt * 0.65)}pt`;
+      el.style.verticalAlign = "sub";
+    }
+  };
+
+  const rebuildFontPanel = (): void => {
+    fontRoot.replaceChildren();
+    const disabled = fontState.normalFont;
+
+    const grid = document.createElement("div");
+    grid.className = "fs-format-cells__font-grid";
+
+    const colFont = document.createElement("div");
+    colFont.className = "fs-format-cells__font-col";
+    const lf = document.createElement("div");
+    lf.className = "fs-format-cells__font-col-label";
+    lf.textContent = "字体(F):";
+    const fontNameInput = document.createElement("input");
+    fontNameInput.type = "text";
+    fontNameInput.className = "fs-format-cells__font-field";
+    fontNameInput.disabled = disabled;
+    fontNameInput.autocomplete = "off";
+    fontNameInput.value =
+      fontState.selectedFontItemIndex >= 0
+        ? RIBBON_FONT_FAMILY_ITEMS[fontState.selectedFontItemIndex]!.label
+        : fontState.customFontFamilyStack.split(",")[0]!.replace(/^["']|["']$/g, "").trim();
+    fontNameInput.addEventListener("change", () => {
+      fontState = {
+        ...fontState,
+        normalFont: false,
+        selectedFontItemIndex: -1,
+        customFontFamilyStack: fontNameInput.value.trim() || RIBBON_FONT_FAMILY_DEFAULT_PREVIEW,
+      };
+      rebuildFontPanel();
+    });
+    const fontList = document.createElement("div");
+    fontList.className = "fs-format-cells__font-listbox fs-format-cells__font-listbox--name";
+    for (let i = 0; i < RIBBON_FONT_FAMILY_ITEMS.length; i++) {
+      const it = RIBBON_FONT_FAMILY_ITEMS[i]!;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = it.label;
+      const preview =
+        it.previewFontFamily !== undefined && it.previewFontFamily !== ""
+          ? it.previewFontFamily
+          : `"${it.label}", sans-serif`;
+      b.style.fontFamily = preview;
+      if (i === fontState.selectedFontItemIndex) {
+        b.classList.add("fs-format-cells__font-sel");
+      }
+      b.addEventListener("click", () => {
+        fontState = {
+          ...fontState,
+          normalFont: false,
+          selectedFontItemIndex: i,
+          customFontFamilyStack: preview,
+        };
+        rebuildFontPanel();
+      });
+      fontList.appendChild(b);
+    }
+    colFont.appendChild(lf);
+    colFont.appendChild(fontNameInput);
+    colFont.appendChild(fontList);
+
+    const colShape = document.createElement("div");
+    colShape.className = "fs-format-cells__font-col";
+    const ls = document.createElement("div");
+    ls.className = "fs-format-cells__font-col-label";
+    ls.textContent = "字形(O):";
+    const shapeInput = document.createElement("input");
+    shapeInput.type = "text";
+    shapeInput.className = "fs-format-cells__font-field";
+    shapeInput.readOnly = true;
+    shapeInput.disabled = disabled;
+    shapeInput.value = stylePresetLabel(fontState.bold, fontState.italic);
+    const shapeList = document.createElement("div");
+    shapeList.className = "fs-format-cells__font-listbox";
+    const shapeRows: readonly { readonly bold: boolean; readonly italic: boolean; readonly label: string }[] = [
+      { bold: false, italic: false, label: "常规" },
+      { bold: false, italic: true, label: "倾斜" },
+      { bold: true, italic: false, label: "加粗" },
+      { bold: true, italic: true, label: "加粗 倾斜" },
+    ];
+    for (const sr of shapeRows) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = sr.label;
+      if (fontState.bold === sr.bold && fontState.italic === sr.italic) {
+        b.classList.add("fs-format-cells__font-sel");
+      }
+      b.addEventListener("click", () => {
+        fontState = {
+          ...fontState,
+          normalFont: false,
+          bold: sr.bold,
+          italic: sr.italic,
+        };
+        rebuildFontPanel();
+      });
+      shapeList.appendChild(b);
+    }
+    colShape.appendChild(ls);
+    colShape.appendChild(shapeInput);
+    colShape.appendChild(shapeList);
+
+    const colSize = document.createElement("div");
+    colSize.className = "fs-format-cells__font-col";
+    const lz = document.createElement("div");
+    lz.className = "fs-format-cells__font-col-label";
+    lz.textContent = "字号:";
+    const sizeInput = document.createElement("input");
+    sizeInput.type = "number";
+    sizeInput.className = "fs-format-cells__font-field";
+    sizeInput.min = "1";
+    sizeInput.max = "409";
+    sizeInput.disabled = disabled;
+    sizeInput.value = String(fontState.fontSizePt);
+    sizeInput.addEventListener("change", () => {
+      let n = Math.round(Number(sizeInput.value) || 11);
+      n = Math.max(1, Math.min(409, n));
+      fontState = { ...fontState, normalFont: false, fontSizePt: n };
+      rebuildFontPanel();
+    });
+    const sizeList = document.createElement("div");
+    sizeList.className = "fs-format-cells__font-listbox";
+    for (const sz of FONT_SIZE_CHOICES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = String(sz);
+      if (sz === fontState.fontSizePt) {
+        b.classList.add("fs-format-cells__font-sel");
+      }
+      b.addEventListener("click", () => {
+        fontState = { ...fontState, normalFont: false, fontSizePt: sz };
+        rebuildFontPanel();
+      });
+      sizeList.appendChild(b);
+    }
+    colSize.appendChild(lz);
+    colSize.appendChild(sizeInput);
+    colSize.appendChild(sizeList);
+
+    grid.appendChild(colFont);
+    grid.appendChild(colShape);
+    grid.appendChild(colSize);
+
+    const row2 = document.createElement("div");
+    row2.className = "fs-format-cells__font-row2";
+
+    const ulLab = document.createElement("div");
+    ulLab.style.display = "flex";
+    ulLab.style.alignItems = "center";
+    ulLab.style.gap = "6px";
+    const ulSpan = document.createElement("span");
+    ulSpan.textContent = "下划线(U):";
+    const ulSel = document.createElement("select");
+    ulSel.className = "fs-format-cells__select";
+    ulSel.disabled = disabled;
+    ulSel.style.minWidth = "120px";
+    for (const u of UNDERLINE_OPTIONS) {
+      const o = document.createElement("option");
+      o.value = u.id;
+      o.textContent = u.label;
+      ulSel.appendChild(o);
+    }
+    ulSel.value = fontState.underline;
+    ulSel.addEventListener("change", () => {
+      const v = ulSel.value === "double" ? "double" : ulSel.value === "single" ? "single" : "none";
+      fontState = { ...fontState, normalFont: false, underline: v };
+      rebuildFontPanel();
+    });
+    ulLab.appendChild(ulSpan);
+    ulLab.appendChild(ulSel);
+
+    const colorWrap = document.createElement("div");
+    colorWrap.style.display = "flex";
+    colorWrap.style.alignItems = "center";
+    colorWrap.style.gap = "6px";
+    const cSpan = document.createElement("span");
+    cSpan.textContent = "颜色(C):";
+    const colorInp = document.createElement("input");
+    colorInp.type = "color";
+    colorInp.disabled = disabled;
+    colorInp.style.width = "44px";
+    colorInp.style.height = "26px";
+    colorInp.style.padding = "0";
+    colorInp.style.border = "1px solid #c8c6c4";
+    colorInp.style.borderRadius = "4px";
+    colorInp.value = argb8ToCssHex6(fontState.fgArgb ?? "FF000000");
+    colorInp.addEventListener("input", () => {
+      fontState = {
+        ...fontState,
+        normalFont: false,
+        fgArgb: cssHexToFillArgb(colorInp.value),
+      };
+      updateFontPreview();
+    });
+    const moreColBtn = document.createElement("button");
+    moreColBtn.type = "button";
+    moreColBtn.className = "fs-format-cells__btn fs-format-cells__btn--secondary";
+    moreColBtn.textContent = "其他颜色…";
+    moreColBtn.disabled = disabled;
+    moreColBtn.addEventListener("click", () => {
+      if (otherColorDialogBusy || disabled) {
+        return;
+      }
+      otherColorDialogBusy = true;
+      moreColBtn.disabled = true;
+      void (async () => {
+        try {
+          const picked = await showRibbonColorDialog(
+            argb8ToCssHex6(fontState.fgArgb ?? "FF000000"),
+          );
+          if (picked !== null) {
+            fontState = {
+              ...fontState,
+              normalFont: false,
+              fgArgb: cssHexToFillArgb(picked),
+            };
+            rebuildFontPanel();
+          }
+        } finally {
+          otherColorDialogBusy = false;
+          moreColBtn.disabled = disabled;
+        }
+      })();
+    });
+    colorWrap.appendChild(cSpan);
+    colorWrap.appendChild(colorInp);
+    colorWrap.appendChild(moreColBtn);
+
+    const nfRow = document.createElement("label");
+    const nfCb = document.createElement("input");
+    nfCb.type = "checkbox";
+    nfCb.className = "fs-format-cells__checkbox";
+    nfCb.checked = fontState.normalFont;
+    nfCb.addEventListener("change", () => {
+      if (nfCb.checked) {
+        fontState = { ...inferFormatCellsFontState(null), normalFont: true };
+      } else {
+        fontState = { ...fontState, normalFont: false };
+      }
+      rebuildFontPanel();
+    });
+    const nfSp = document.createElement("span");
+    nfSp.textContent = "普通字体(N)";
+    nfRow.appendChild(nfCb);
+    nfRow.appendChild(nfSp);
+
+    row2.appendChild(ulLab);
+    row2.appendChild(colorWrap);
+    row2.appendChild(nfRow);
+
+    const fxTitle = document.createElement("div");
+    fxTitle.className = "fs-format-cells__control-title";
+    fxTitle.textContent = "效果";
+    const fxRow = document.createElement("div");
+    fxRow.className = "fs-format-cells__font-row2";
+
+    const mkFx = (key: "strike" | "sup" | "sub", lab: string): HTMLElement => {
+      const labEl = document.createElement("label");
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "fs-format-cells__checkbox";
+      cb.disabled = disabled;
+      if (key === "strike") {
+        cb.checked = fontState.strikethrough;
+        cb.addEventListener("change", () => {
+          fontState = { ...fontState, normalFont: false, strikethrough: cb.checked };
+          rebuildFontPanel();
+        });
+      } else if (key === "sup") {
+        cb.checked = fontState.fontScript === "superscript";
+        cb.addEventListener("change", () => {
+          const on = cb.checked;
+          fontState = {
+            ...fontState,
+            normalFont: false,
+            fontScript: on ? "superscript" : "none",
+          };
+          rebuildFontPanel();
+        });
+      } else {
+        cb.checked = fontState.fontScript === "subscript";
+        cb.addEventListener("change", () => {
+          const on = cb.checked;
+          fontState = {
+            ...fontState,
+            normalFont: false,
+            fontScript: on ? "subscript" : "none",
+          };
+          rebuildFontPanel();
+        });
+      }
+      const sp = document.createElement("span");
+      sp.textContent = lab;
+      labEl.appendChild(cb);
+      labEl.appendChild(sp);
+      return labEl;
+    };
+    fxRow.appendChild(mkFx("strike", "删除线"));
+    fxRow.appendChild(mkFx("sup", "上标"));
+    fxRow.appendChild(mkFx("sub", "下标"));
+
+    const prevLab = document.createElement("div");
+    prevLab.className = "fs-format-cells__font-col-label";
+    prevLab.textContent = "预览";
+    const prevBox = document.createElement("div");
+    prevBox.className = "fs-format-cells__font-preview-box";
+    prevBox.dataset.role = "font-preview";
+
+    fontRoot.appendChild(grid);
+    fontRoot.appendChild(row2);
+    fontRoot.appendChild(fxTitle);
+    fontRoot.appendChild(fxRow);
+    fontRoot.appendChild(prevLab);
+    fontRoot.appendChild(prevBox);
+    updateFontPreview();
+  };
+
+  const rebuildBorderPanel = (): void => {
+    borderRoot.replaceChildren();
+
+    const leftCol = document.createElement("div");
+    const lineLab = document.createElement("div");
+    lineLab.className = "fs-format-cells__border-line-label";
+    lineLab.textContent = "线型:";
+
+    const lineGrid = document.createElement("div");
+    lineGrid.className = "fs-format-cells__border-line-grid";
+
+    for (let i = 0; i < FORMAT_CELLS_LINE_STYLES.length; i++) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "fs-format-cells__border-line-btn";
+      if (i === borderState.lineStyleIndex) {
+        b.classList.add("fs-format-cells__border-line-btn--active");
+      }
+      const entry = FORMAT_CELLS_LINE_STYLES[i]!;
+      const sw = createFormatCellsLineSwatchHost(entry.swatch);
+      b.appendChild(sw);
+      b.addEventListener("click", () => {
+        borderState = { ...borderState, lineStyleIndex: i };
+        rebuildBorderPanel();
+      });
+      lineGrid.appendChild(b);
+    }
+
+    leftCol.appendChild(lineLab);
+    leftCol.appendChild(lineGrid);
+
+    const colorRow = document.createElement("div");
+    colorRow.className = "fs-format-cells__row";
+    colorRow.style.flexWrap = "wrap";
+    const cl = document.createElement("label");
+    cl.textContent = "线条颜色:";
+    const selCol = document.createElement("select");
+    selCol.className = "fs-format-cells__select";
+    selCol.style.minWidth = "100px";
+    const optAuto = document.createElement("option");
+    optAuto.value = "auto";
+    optAuto.textContent = "自动";
+    const optCustom = document.createElement("option");
+    optCustom.value = "custom";
+    optCustom.textContent = "自定义";
+    selCol.appendChild(optAuto);
+    selCol.appendChild(optCustom);
+    selCol.value = borderState.colorAuto ? "auto" : "custom";
+
+    const colorInp = document.createElement("input");
+    colorInp.type = "color";
+    colorInp.style.width = "44px";
+    colorInp.style.height = "26px";
+    colorInp.style.padding = "0";
+    colorInp.style.border = "1px solid #c8c6c4";
+    colorInp.style.borderRadius = "4px";
+    colorInp.disabled = borderState.colorAuto;
+    colorInp.value = argb8ToCssHex6(borderState.colorArgb ?? "FF000000");
+
+    selCol.addEventListener("change", () => {
+      if (selCol.value === "auto") {
+        borderState = { ...borderState, colorAuto: true, colorArgb: null };
+      } else {
+        borderState = {
+          ...borderState,
+          colorAuto: false,
+          colorArgb: cssHexToFillArgb(colorInp.value),
+        };
+      }
+      rebuildBorderPanel();
+    });
+    colorInp.addEventListener("input", () => {
+      borderState = {
+        ...borderState,
+        colorAuto: false,
+        colorArgb: cssHexToFillArgb(colorInp.value),
+      };
+      selCol.value = "custom";
+      rebuildBorderPanel();
+    });
+
+    const moreColBtn = document.createElement("button");
+    moreColBtn.type = "button";
+    moreColBtn.className = "fs-format-cells__btn fs-format-cells__btn--secondary";
+    moreColBtn.textContent = "其他颜色…";
+    moreColBtn.addEventListener("click", () => {
+      if (borderOtherColorBusy) {
+        return;
+      }
+      borderOtherColorBusy = true;
+      void (async () => {
+        try {
+          const picked = await showRibbonColorDialog(
+            argb8ToCssHex6(borderState.colorArgb ?? "FF000000"),
+          );
+          if (picked !== null) {
+            borderState = {
+              ...borderState,
+              colorAuto: false,
+              colorArgb: cssHexToFillArgb(picked),
+            };
+            rebuildBorderPanel();
+          }
+        } finally {
+          borderOtherColorBusy = false;
+        }
+      })();
+    });
+
+    colorRow.appendChild(cl);
+    colorRow.appendChild(selCol);
+    colorRow.appendChild(colorInp);
+    colorRow.appendChild(moreColBtn);
+    leftCol.appendChild(colorRow);
+
+    const rightCol = document.createElement("div");
+    rightCol.style.display = "flex";
+    rightCol.style.flexDirection = "column";
+    rightCol.style.gap = "12px";
+    rightCol.style.minWidth = "0";
+
+    const pres = document.createElement("div");
+    pres.className = "fs-format-cells__border-presets";
+    const pl = document.createElement("div");
+    pl.className = "fs-format-cells__border-presets-label";
+    pl.textContent = "预设:";
+    const prow = document.createElement("div");
+    prow.className = "fs-format-cells__border-presets-row";
+
+    const mkPreset = (
+      label: string,
+      iconClass: string,
+      onClick: () => void,
+      disabled: boolean,
+    ): void => {
+      const pb = document.createElement("button");
+      pb.type = "button";
+      pb.className = "fs-format-cells__border-preset";
+      pb.disabled = disabled;
+      const ic = document.createElement("div");
+      ic.className = `fs-format-cells__border-preset-icon ${iconClass}`;
+      const tx = document.createElement("span");
+      tx.textContent = label;
+      pb.appendChild(ic);
+      pb.appendChild(tx);
+      pb.addEventListener("click", onClick);
+      prow.appendChild(pb);
+    };
+
+    mkPreset(
+      "无",
+      "fs-format-cells__border-preset-icon--none",
+      () => {
+        borderState = {
+          ...borderState,
+          edges: {
+            top: false,
+            bottom: false,
+            left: false,
+            right: false,
+            insideH: false,
+            insideV: false,
+          },
+        };
+        rebuildBorderPanel();
+      },
+      false,
+    );
+
+    mkPreset(
+      "外边框",
+      "fs-format-cells__border-preset-icon--outline",
+      () => {
+        borderState = {
+          ...borderState,
+          edges: {
+            ...borderState.edges,
+            top: true,
+            bottom: true,
+            left: true,
+            right: true,
+            insideH: false,
+            insideV: false,
+          },
+        };
+        rebuildBorderPanel();
+      },
+      false,
+    );
+
+    mkPreset(
+      "内部",
+      "fs-format-cells__border-preset-icon--inside",
+      () => {
+        borderState = {
+          ...borderState,
+          edges: {
+            ...borderState.edges,
+            top: false,
+            bottom: false,
+            left: false,
+            right: false,
+            insideH: true,
+            insideV: true,
+          },
+        };
+        rebuildBorderPanel();
+      },
+      !selectionMultiCell,
+    );
+
+    pres.appendChild(pl);
+    pres.appendChild(prow);
+    rightCol.appendChild(pres);
+
+    const toggleEdge = (key: keyof FormatCellsBorderState["edges"]): void => {
+      const line = FORMAT_CELLS_LINE_STYLES[borderState.lineStyleIndex];
+      const hasKind = line?.kind != null;
+      const next = { ...borderState.edges };
+      if (!hasKind) {
+        next[key] = false;
+      } else {
+        next[key] = !next[key];
+      }
+      borderState = { ...borderState, edges: next };
+      rebuildBorderPanel();
+    };
+
+    const blab = document.createElement("div");
+    blab.className = "fs-format-cells__border-field-label";
+    blab.textContent = "边框:";
+
+    const hasPen = FORMAT_CELLS_LINE_STYLES[borderState.lineStyleIndex]?.kind != null;
+    const pvColor = formatCellsBorderPreviewColor(borderState);
+    const pvSwatch = FORMAT_CELLS_LINE_STYLES[borderState.lineStyleIndex]?.swatch ?? "none";
+
+    const pv = document.createElement("div");
+    pv.className = "fs-format-cells__border-preview";
+    pv.style.position = "relative";
+    pv.style.overflow = "hidden";
+    if (hasPen) {
+      pv.appendChild(
+        createFormatCellsBorderPreviewSvg({
+          swatch: pvSwatch,
+          colorCss: pvColor,
+          top: borderState.edges.top,
+          bottom: borderState.edges.bottom,
+          left: borderState.edges.left,
+          right: borderState.edges.right,
+          insideH: borderState.edges.insideH,
+          insideV: borderState.edges.insideV,
+          multiCell: selectionMultiCell,
+        }),
+      );
+    }
+    const pvText = document.createElement("span");
+    pvText.textContent = "文本";
+    pvText.style.position = "relative";
+    pvText.style.zIndex = "1";
+    pv.appendChild(pvText);
+
+    pv.addEventListener("click", (ev) => {
+      const t = ev.currentTarget as HTMLElement;
+      const r = t.getBoundingClientRect();
+      const x = ev.clientX - r.left;
+      const y = ev.clientY - r.top;
+      const ew = 14;
+      const { width: W, height: H } = r;
+      if (y < ew) {
+        toggleEdge("top");
+      } else if (y > H - ew) {
+        toggleEdge("bottom");
+      } else if (x < ew) {
+        toggleEdge("left");
+      } else if (x > W - ew) {
+        toggleEdge("right");
+      } else if (selectionMultiCell) {
+        const mx = x / W;
+        const my = y / H;
+        if (Math.abs(mx - 0.5) < 0.14) {
+          toggleEdge("insideV");
+        }
+        if (Math.abs(my - 0.5) < 0.14) {
+          toggleEdge("insideH");
+        }
+      }
+    });
+
+    const mkFab = (
+      label: string,
+      title: string,
+      edge: keyof FormatCellsBorderState["edges"],
+      disabled: boolean,
+    ): HTMLButtonElement => {
+      const fb = document.createElement("button");
+      fb.type = "button";
+      fb.className = "fs-format-cells__border-edge-fab";
+      fb.textContent = label;
+      fb.title = title;
+      fb.disabled = disabled;
+      fb.classList.toggle(
+        "fs-format-cells__border-edge-fab--on",
+        !disabled && borderState.edges[edge] && hasPen,
+      );
+      fb.addEventListener("click", () => {
+        if (!disabled) {
+          toggleEdge(edge);
+        }
+      });
+      return fb;
+    };
+
+    const rowMid = document.createElement("div");
+    rowMid.className = "fs-format-cells__border-preview-row";
+    const vstack = document.createElement("div");
+    vstack.style.display = "flex";
+    vstack.style.flexDirection = "column";
+    vstack.style.gap = "4px";
+    vstack.appendChild(mkFab("上", "上框线", "top", false));
+    vstack.appendChild(mkFab("—", "内部横线", "insideH", !selectionMultiCell));
+    vstack.appendChild(mkFab("下", "下框线", "bottom", false));
+
+    rowMid.appendChild(vstack);
+    rowMid.appendChild(pv);
+
+    const bottomCtr = document.createElement("div");
+    bottomCtr.className = "fs-format-cells__border-bottom-controls";
+    const d1 = document.createElement("button");
+    d1.type = "button";
+    d1.className = "fs-format-cells__border-edge-fab";
+    d1.textContent = "╲";
+    d1.title = "斜线边框（暂不支持）";
+    d1.disabled = true;
+    bottomCtr.appendChild(d1);
+    bottomCtr.appendChild(mkFab("左", "左边框", "left", false));
+    bottomCtr.appendChild(mkFab("│", "内部竖线", "insideV", !selectionMultiCell));
+    bottomCtr.appendChild(mkFab("右", "右边框", "right", false));
+    const d2 = document.createElement("button");
+    d2.type = "button";
+    d2.className = "fs-format-cells__border-edge-fab";
+    d2.textContent = "╱";
+    d2.title = "斜线边框（暂不支持）";
+    d2.disabled = true;
+    bottomCtr.appendChild(d2);
+
+    const shell = document.createElement("div");
+    shell.className = "fs-format-cells__border-preview-shell";
+    shell.appendChild(blab);
+    shell.appendChild(rowMid);
+    shell.appendChild(bottomCtr);
+
+    rightCol.appendChild(shell);
+
+    borderRoot.appendChild(leftCol);
+    borderRoot.appendChild(rightCol);
+  };
+
+  const syncFillSampleBox = (cv: HTMLCanvasElement): void => {
+    const rect = cv.getBoundingClientRect();
+    let w = Math.floor(rect.width);
+    let h = Math.floor(rect.height);
+    if (w < 2) {
+      w = 320;
+    }
+    if (h < 2) {
+      h = 88;
+    }
+    const dpr = window.devicePixelRatio || 1;
+    cv.width = Math.max(2, Math.floor(w * dpr));
+    cv.height = Math.max(2, Math.floor(h * dpr));
+    const ctx = cv.getContext("2d");
+    if (ctx === null) {
+      return;
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const bg = fillState.bgArgb !== null ? argb8ToCssHex6(fillState.bgArgb) : "#ffffff";
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+    if (fillState.patternType !== "none") {
+      const fgA =
+        fillState.patternFgAuto || fillState.patternFgArgb === null
+          ? "FF000000"
+          : fillState.patternFgArgb;
+      paintCellFillPatternOverlay(
+        ctx,
+        0,
+        0,
+        w,
+        h,
+        fillState.patternType,
+        argb8ToCssHex6(fgA),
+      );
+    }
+  };
+
+  const rebuildFillPanel = (): void => {
+    closeFillPopover();
+    if (fillSampleResizeObserver !== null) {
+      fillSampleResizeObserver.disconnect();
+      fillSampleResizeObserver = null;
+    }
+    fillRoot.replaceChildren();
+
+    const fillUiId = `fs-fcf-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const mountPalettePopover = (
+      anchor: HTMLButtonElement,
+      build: (pop: HTMLDivElement) => void,
+    ): void => {
+      closeFillPopover();
+      const pop = document.createElement("div");
+      pop.className = "fs-format-cells__fill-popover fs-color-menu";
+      build(pop);
+      document.body.appendChild(pop);
+      const position = (): void => {
+        const r = anchor.getBoundingClientRect();
+        const pw = pop.offsetWidth;
+        const left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8));
+        pop.style.position = "fixed";
+        pop.style.left = `${left}px`;
+        pop.style.top = `${r.bottom + 4}px`;
+      };
+      requestAnimationFrame(position);
+      const onDoc = (ev: PointerEvent): void => {
+        const t = ev.target as Node | null;
+        if (t !== null && (pop.contains(t) || anchor.contains(t))) {
+          return;
+        }
+        closeFillPopover();
+      };
+      fillPopoverCleanup = (): void => {
+        pop.remove();
+        document.removeEventListener("pointerdown", onDoc, true);
+      };
+      setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
+    };
+
+    const top = document.createElement("div");
+    top.className = "fs-format-cells__fill-top";
+
+    const rowBg = document.createElement("div");
+    rowBg.className = "fs-format-cells__fill-dd-row";
+    const labBg = document.createElement("label");
+    labBg.textContent = "背景色:";
+    const btnBg = document.createElement("button");
+    btnBg.id = `${fillUiId}-bg`;
+    labBg.htmlFor = btnBg.id;
+    btnBg.type = "button";
+    btnBg.className = "fs-format-cells__fill-dd";
+    const swBg = document.createElement("span");
+    swBg.className =
+      "fs-format-cells__fill-swatch" +
+      (fillState.bgArgb === null ? " fs-format-cells__fill-swatch--empty" : "");
+    if (fillState.bgArgb !== null) {
+      swBg.style.backgroundColor = argb8ToCssHex6(fillState.bgArgb);
+    }
+    const txtBg = document.createElement("span");
+    txtBg.className = "fs-format-cells__fill-dd-label";
+    txtBg.textContent = fillState.bgArgb === null ? "无颜色" : "自定义颜色";
+    const arBg = document.createElement("span");
+    arBg.className = "fs-format-cells__fill-dd-arrow";
+    btnBg.appendChild(swBg);
+    btnBg.appendChild(txtBg);
+    btnBg.appendChild(arBg);
+    btnBg.addEventListener("click", () => {
+      mountPalettePopover(btnBg, (pop) => {
+        appendRibbonColorPaletteContent(pop, {
+          themeHeading: "主题颜色",
+          standardHeading: "标准色",
+          includeNoneRow: true,
+          onNone: () => {
+            fillState = { ...fillState, bgArgb: null };
+            closeFillPopover();
+            rebuildFillPanel();
+          },
+          onPickHex: (hex: string) => {
+            fillState = { ...fillState, bgArgb: cssHexToFillArgb(hex) };
+            closeFillPopover();
+            rebuildFillPanel();
+          },
+          onMoreColors: () => {
+            closeFillPopover();
+            void (async () => {
+              const cur =
+                fillState.bgArgb !== null ? argb8ToCssHex6(fillState.bgArgb) : "#ffffff";
+              const picked = await showRibbonColorDialog(cur);
+              if (picked !== null) {
+                fillState = { ...fillState, bgArgb: cssHexToFillArgb(picked) };
+                rebuildFillPanel();
+              }
+            })();
+          },
+        });
+      });
+    });
+    rowBg.appendChild(labBg);
+    rowBg.appendChild(btnBg);
+
+    const rowPC = document.createElement("div");
+    rowPC.className = "fs-format-cells__fill-dd-row";
+    const labPC = document.createElement("label");
+    labPC.textContent = "图案颜色:";
+    const btnPC = document.createElement("button");
+    btnPC.id = `${fillUiId}-patfg`;
+    labPC.htmlFor = btnPC.id;
+    btnPC.type = "button";
+    btnPC.className = "fs-format-cells__fill-dd";
+    const swPC = document.createElement("span");
+    swPC.className = "fs-format-cells__fill-swatch";
+    const txtPC = document.createElement("span");
+    txtPC.className = "fs-format-cells__fill-dd-label";
+    if (fillState.patternFgAuto || fillState.patternFgArgb === null) {
+      swPC.classList.add("fs-format-cells__fill-swatch--empty");
+      txtPC.textContent = "自动";
+    } else {
+      swPC.style.backgroundColor = argb8ToCssHex6(fillState.patternFgArgb);
+      txtPC.textContent = "自定义颜色";
+    }
+    const arPC = document.createElement("span");
+    arPC.className = "fs-format-cells__fill-dd-arrow";
+    btnPC.appendChild(swPC);
+    btnPC.appendChild(txtPC);
+    btnPC.appendChild(arPC);
+    btnPC.addEventListener("click", () => {
+      mountPalettePopover(btnPC, (pop) => {
+        const autoBtn = document.createElement("button");
+        autoBtn.type = "button";
+        autoBtn.className = "fs-format-cells__fill-auto-btn";
+        autoBtn.textContent = "自动";
+        autoBtn.addEventListener("click", () => {
+          fillState = { ...fillState, patternFgAuto: true, patternFgArgb: null };
+          closeFillPopover();
+          rebuildFillPanel();
+        });
+        pop.appendChild(autoBtn);
+        appendRibbonColorPaletteContent(pop, {
+          themeHeading: "主题颜色",
+          standardHeading: "标准色",
+          includeNoneRow: false,
+          onPickHex: (hex: string) => {
+            fillState = {
+              ...fillState,
+              patternFgAuto: false,
+              patternFgArgb: cssHexToFillArgb(hex),
+            };
+            closeFillPopover();
+            rebuildFillPanel();
+          },
+          onMoreColors: () => {
+            closeFillPopover();
+            void (async () => {
+              const cur =
+                fillState.patternFgArgb !== null && !fillState.patternFgAuto
+                  ? argb8ToCssHex6(fillState.patternFgArgb)
+                  : "#323130";
+              const picked = await showRibbonColorDialog(cur);
+              if (picked !== null) {
+                fillState = {
+                  ...fillState,
+                  patternFgAuto: false,
+                  patternFgArgb: cssHexToFillArgb(picked),
+                };
+                rebuildFillPanel();
+              }
+            })();
+          },
+        });
+      });
+    });
+    rowPC.appendChild(labPC);
+    rowPC.appendChild(btnPC);
+
+    const rowPS = document.createElement("div");
+    rowPS.className = "fs-format-cells__fill-dd-row";
+    const labPS = document.createElement("label");
+    labPS.textContent = "图案样式:";
+    const btnPS = document.createElement("button");
+    btnPS.id = `${fillUiId}-pat`;
+    labPS.htmlFor = btnPS.id;
+    btnPS.type = "button";
+    btnPS.className = "fs-format-cells__fill-dd";
+    const mini = document.createElement("canvas");
+    mini.width = 40;
+    mini.height = 28;
+    mini.style.width = "40px";
+    mini.style.height = "28px";
+    mini.style.pointerEvents = "none";
+    const mtx = mini.getContext("2d");
+    if (mtx !== null) {
+      mtx.fillStyle = "#ffffff";
+      mtx.fillRect(0, 0, 40, 28);
+      if (fillState.patternType !== "none") {
+        const fga =
+          fillState.patternFgAuto || fillState.patternFgArgb === null
+            ? "FF000000"
+            : fillState.patternFgArgb;
+        paintCellFillPatternOverlay(
+          mtx,
+          0,
+          0,
+          40,
+          28,
+          fillState.patternType,
+          argb8ToCssHex6(fga),
+        );
+      }
+    }
+    const txtPS = document.createElement("span");
+    txtPS.className = "fs-format-cells__fill-dd-label";
+    txtPS.textContent = fillState.patternType === "none" ? "无" : "图案";
+    const arPS = document.createElement("span");
+    arPS.className = "fs-format-cells__fill-dd-arrow";
+    btnPS.appendChild(mini);
+    btnPS.appendChild(txtPS);
+    btnPS.appendChild(arPS);
+    btnPS.addEventListener("click", () => {
+      mountPalettePopover(btnPS, (pop) => {
+        const grid = document.createElement("div");
+        grid.className = "fs-format-cells__fill-pattern-grid";
+        for (const pid of FORMAT_CELLS_PATTERN_GRID_ORDER) {
+          const pb = document.createElement("button");
+          pb.type = "button";
+          pb.className = "fs-format-cells__fill-pattern-btn";
+          if (pid === fillState.patternType) {
+            pb.classList.add("fs-format-cells__fill-pattern-btn--on");
+          }
+          const cvs = document.createElement("canvas");
+          cvs.width = 32;
+          cvs.height = 24;
+          cvs.style.pointerEvents = "none";
+          const cx = cvs.getContext("2d");
+          if (cx !== null) {
+            cx.fillStyle = "#ffffff";
+            cx.fillRect(0, 0, 32, 24);
+            if (pid !== "none") {
+              paintCellFillPatternOverlay(cx, 0, 0, 32, 24, pid, "#323130");
+            }
+          }
+          pb.appendChild(cvs);
+          grid.appendChild(pb);
+          pb.addEventListener("click", () => {
+            fillState = {
+              ...fillState,
+              patternType: pid,
+              patternFgAuto: pid === "none" ? true : fillState.patternFgAuto,
+              patternFgArgb: pid === "none" ? null : fillState.patternFgArgb,
+            };
+            closeFillPopover();
+            rebuildFillPanel();
+          });
+        }
+        pop.appendChild(grid);
+      });
+    });
+    rowPS.appendChild(labPS);
+    rowPS.appendChild(btnPS);
+
+    top.appendChild(rowBg);
+    top.appendChild(rowPC);
+    top.appendChild(rowPS);
+
+    const sampleWrap = document.createElement("div");
+    sampleWrap.className = "fs-format-cells__fill-sample-wrap";
+    const sampleLab = document.createElement("label");
+    sampleLab.textContent = "示例";
+    const sampleCv = document.createElement("canvas");
+    sampleCv.className = "fs-format-cells__fill-sample";
+
+    fillRoot.appendChild(top);
+    fillRoot.appendChild(sampleWrap);
+    sampleWrap.appendChild(sampleLab);
+    sampleWrap.appendChild(sampleCv);
+
+    fillSampleResizeObserver = new ResizeObserver(() => {
+      syncFillSampleBox(sampleCv);
+    });
+    fillSampleResizeObserver.observe(sampleCv);
+    requestAnimationFrame(() => syncFillSampleBox(sampleCv));
+  };
+
   const renderBody = (): void => {
+    closeFillPopover();
     body.replaceChildren();
     if (mainTab === "number") {
       body.appendChild(numberLayout);
@@ -1867,12 +3707,21 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
     } else if (mainTab === "alignment") {
       rebuildAlignmentPanel();
       body.appendChild(alignmentRoot);
+    } else if (mainTab === "font") {
+      rebuildFontPanel();
+      body.appendChild(fontRoot);
+    } else if (mainTab === "border") {
+      rebuildBorderPanel();
+      body.appendChild(borderRoot);
+    } else if (mainTab === "fill") {
+      rebuildFillPanel();
+      body.appendChild(fillRoot);
     } else {
-      body.appendChild(placeholderEl);
+      rebuildProtectionPanel();
+      body.appendChild(protectionRoot);
     }
     updateDesc();
   };
-
   for (const [id, btn] of tabButtons) {
     btn.addEventListener("click", () => {
       mainTab = id;
@@ -1891,6 +3740,11 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
   }
 
   const close = (): void => {
+    closeFillPopover();
+    if (fillSampleResizeObserver !== null) {
+      fillSampleResizeObserver.disconnect();
+      fillSampleResizeObserver = null;
+    }
     overlay.remove();
     onClose?.();
   };
@@ -1906,19 +3760,40 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
   okBtn.addEventListener("click", () => {
     const code = buildFormatFromNumberState(numState);
     const alignPatch = alignmentPatchIfChanged(alignState, initialAlignState);
-    flex.applySelectionStylePatch({
+    const fontPatch = fontPatchIfChanged(fontState, initialFontState);
+    const fillPatch = fillPatchIfChanged(fillState, initialFillState);
+    const protectionPatch = protectionPatchIfChanged(protectionUi, initialProtectionState);
+    const basePatch: CellStylePatch = {
       ...alignPatch,
+      ...fontPatch,
+      ...fillPatch,
+      ...protectionPatch,
       numberFormat: code === null ? null : code,
-    });
-    if (alignState.mergeCells !== initialAlignState.mergeCells) {
-      if (alignState.mergeCells) {
-        const r = flex.selection.getNormalizedRange();
-        const multi = r.endRow > r.startRow || r.endCol > r.startCol;
-        if (multi) {
-          flex.applySelectionMerge("mergeCells");
+    };
+    const borderPatch = {
+      apply: !formatCellsBorderStateEqual(borderState, initialBorderState),
+      state: borderState,
+    } as const;
+    const mergeCellsChanged = alignState.mergeCells !== initialAlignState.mergeCells;
+    if (onApply !== undefined) {
+      onApply({
+        basePatch,
+        border: borderPatch,
+        mergeCellsChanged,
+        mergeCells: alignState.mergeCells,
+      });
+    } else {
+      flex.applyFormatCellsDialogOk(basePatch, borderPatch);
+      if (mergeCellsChanged) {
+        if (alignState.mergeCells) {
+          const r = flex.selection.getNormalizedRange();
+          const multi = r.endRow > r.startRow || r.endCol > r.startCol;
+          if (multi) {
+            flex.applySelectionMerge("mergeCells");
+          }
+        } else {
+          flex.applySelectionMerge("unmerge");
         }
-      } else {
-        flex.applySelectionMerge("unmerge");
       }
     }
     close();

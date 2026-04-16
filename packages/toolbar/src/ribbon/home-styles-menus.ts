@@ -5,15 +5,9 @@ import {
   clearToolbarDropdownMenuPosition,
   syncToolbarDropdownMenuPosition,
 } from "../toolbar/toolbar-dropdown.js";
-import { iconFormatGeneral } from "../toolbar/icons.js";
+import { createTableStyleThumbnailSvg, tableStyleCommandId } from "./table-style-gallery.js";
 import { createColorScaleFlyoutThumbnail } from "./color-scale-flyout-thumbnail.js";
 import { createDataBarFlyoutThumbnail } from "./data-bar-flyout-thumbnail.js";
-
-type StyleMenuRow = {
-  readonly id: string;
-  readonly label: string;
-  readonly icon: () => SVGSVGElement;
-};
 
 type ConditionalMenuRow =
   | { readonly kind: "sep" }
@@ -83,17 +77,24 @@ const TOP_BOTTOM_FLYOUT_ROWS: readonly ConditionalSubmenuRow[] = [
   { kind: "item", id: "home.style.conditional.topBottom.moreRules", label: "其他规则..." },
 ];
 
-const DATA_BAR_GRADIENT_PRESETS: readonly { readonly id: string; readonly color: string; readonly name: string }[] =
-  [
-    { id: "home.style.conditional.dataBars.gradient.blue", color: "#638ec6", name: "蓝色" },
-    { id: "home.style.conditional.dataBars.gradient.green", color: "#5cb85c", name: "绿色" },
-    { id: "home.style.conditional.dataBars.gradient.red", color: "#e74c3c", name: "红色" },
-    { id: "home.style.conditional.dataBars.gradient.yellow", color: "#f1c40f", name: "黄色" },
-    { id: "home.style.conditional.dataBars.gradient.cyan", color: "#17c0d8", name: "青色" },
-    { id: "home.style.conditional.dataBars.gradient.pink", color: "#e91e8c", name: "粉红" },
-  ];
+const DATA_BAR_GRADIENT_PRESETS: readonly {
+  readonly id: string;
+  readonly color: string;
+  readonly name: string;
+}[] = [
+  { id: "home.style.conditional.dataBars.gradient.blue", color: "#638ec6", name: "蓝色" },
+  { id: "home.style.conditional.dataBars.gradient.green", color: "#5cb85c", name: "绿色" },
+  { id: "home.style.conditional.dataBars.gradient.red", color: "#e74c3c", name: "红色" },
+  { id: "home.style.conditional.dataBars.gradient.yellow", color: "#f1c40f", name: "黄色" },
+  { id: "home.style.conditional.dataBars.gradient.cyan", color: "#17c0d8", name: "青色" },
+  { id: "home.style.conditional.dataBars.gradient.pink", color: "#e91e8c", name: "粉红" },
+];
 
-const DATA_BAR_SOLID_PRESETS: readonly { readonly id: string; readonly color: string; readonly name: string }[] = [
+const DATA_BAR_SOLID_PRESETS: readonly {
+  readonly id: string;
+  readonly color: string;
+  readonly name: string;
+}[] = [
   { id: "home.style.conditional.dataBars.solid.blue", color: "#638ec6", name: "蓝色" },
   { id: "home.style.conditional.dataBars.solid.green", color: "#5cb85c", name: "绿色" },
   { id: "home.style.conditional.dataBars.solid.red", color: "#e74c3c", name: "红色" },
@@ -111,93 +112,97 @@ const COLOR_SCALE_FLYOUT_PRESETS: readonly {
   readonly mid?: string;
   readonly max: string;
 }[] = [
-  { id: "home.style.conditional.colorScales.gyr", name: "绿黄红", kind: "three", min: "#63be7b", mid: "#ffeb84", max: "#f8696b" },
-  { id: "home.style.conditional.colorScales.ryg", name: "红黄绿", kind: "three", min: "#f8696b", mid: "#ffeb84", max: "#63be7b" },
-  { id: "home.style.conditional.colorScales.gwr", name: "绿白红", kind: "three", min: "#63be7b", mid: "#ffffff", max: "#f8696b" },
-  { id: "home.style.conditional.colorScales.rwg", name: "红白绿", kind: "three", min: "#f8696b", mid: "#ffffff", max: "#63be7b" },
-  { id: "home.style.conditional.colorScales.bwr", name: "蓝白红", kind: "three", min: "#638ec6", mid: "#ffffff", max: "#f8696b" },
-  { id: "home.style.conditional.colorScales.rwb", name: "红白蓝", kind: "three", min: "#f8696b", mid: "#ffffff", max: "#638ec6" },
-  { id: "home.style.conditional.colorScales.whiteRed", name: "白红", kind: "two", min: "#ffffff", max: "#f8696b" },
-  { id: "home.style.conditional.colorScales.redWhite", name: "红白", kind: "two", min: "#f8696b", max: "#ffffff" },
-  { id: "home.style.conditional.colorScales.greenWhite", name: "绿白", kind: "two", min: "#63be7b", max: "#ffffff" },
-  { id: "home.style.conditional.colorScales.whiteGreen", name: "白绿", kind: "two", min: "#ffffff", max: "#63be7b" },
-  { id: "home.style.conditional.colorScales.greenYellow", name: "绿黄", kind: "two", min: "#63be7b", max: "#ffeb84" },
-  { id: "home.style.conditional.colorScales.yellowGreen", name: "黄绿", kind: "two", min: "#ffeb84", max: "#63be7b" },
+  {
+    id: "home.style.conditional.colorScales.gyr",
+    name: "绿黄红",
+    kind: "three",
+    min: "#63be7b",
+    mid: "#ffeb84",
+    max: "#f8696b",
+  },
+  {
+    id: "home.style.conditional.colorScales.ryg",
+    name: "红黄绿",
+    kind: "three",
+    min: "#f8696b",
+    mid: "#ffeb84",
+    max: "#63be7b",
+  },
+  {
+    id: "home.style.conditional.colorScales.gwr",
+    name: "绿白红",
+    kind: "three",
+    min: "#63be7b",
+    mid: "#ffffff",
+    max: "#f8696b",
+  },
+  {
+    id: "home.style.conditional.colorScales.rwg",
+    name: "红白绿",
+    kind: "three",
+    min: "#f8696b",
+    mid: "#ffffff",
+    max: "#63be7b",
+  },
+  {
+    id: "home.style.conditional.colorScales.bwr",
+    name: "蓝白红",
+    kind: "three",
+    min: "#638ec6",
+    mid: "#ffffff",
+    max: "#f8696b",
+  },
+  {
+    id: "home.style.conditional.colorScales.rwb",
+    name: "红白蓝",
+    kind: "three",
+    min: "#f8696b",
+    mid: "#ffffff",
+    max: "#638ec6",
+  },
+  {
+    id: "home.style.conditional.colorScales.whiteRed",
+    name: "白红",
+    kind: "two",
+    min: "#ffffff",
+    max: "#f8696b",
+  },
+  {
+    id: "home.style.conditional.colorScales.redWhite",
+    name: "红白",
+    kind: "two",
+    min: "#f8696b",
+    max: "#ffffff",
+  },
+  {
+    id: "home.style.conditional.colorScales.greenWhite",
+    name: "绿白",
+    kind: "two",
+    min: "#63be7b",
+    max: "#ffffff",
+  },
+  {
+    id: "home.style.conditional.colorScales.whiteGreen",
+    name: "白绿",
+    kind: "two",
+    min: "#ffffff",
+    max: "#63be7b",
+  },
+  {
+    id: "home.style.conditional.colorScales.greenYellow",
+    name: "绿黄",
+    kind: "two",
+    min: "#63be7b",
+    max: "#ffeb84",
+  },
+  {
+    id: "home.style.conditional.colorScales.yellowGreen",
+    name: "黄绿",
+    kind: "two",
+    min: "#ffeb84",
+    max: "#63be7b",
+  },
 ];
-
-const TABLE_STYLE_MENU_ITEMS: readonly StyleMenuRow[] = [
-  { id: "home.style.table.light1", label: "表样式浅色 1", icon: iconFormatGeneral },
-  { id: "home.style.table.light2", label: "表样式浅色 2", icon: iconFormatGeneral },
-  { id: "home.style.table.medium1", label: "表样式中等深浅 1", icon: iconFormatGeneral },
-  { id: "home.style.table.medium2", label: "表样式中等深浅 2", icon: iconFormatGeneral },
-  { id: "home.style.table.dark1", label: "表样式深色 1", icon: iconFormatGeneral },
-  { id: "home.style.table.dark2", label: "表样式深色 2", icon: iconFormatGeneral },
-];
-
-const CELL_STYLE_MENU_ITEMS: readonly StyleMenuRow[] = [
-  { id: "home.style.cell.good", label: "好", icon: iconFormatGeneral },
-  { id: "home.style.cell.bad", label: "差", icon: iconFormatGeneral },
-  { id: "home.style.cell.neutral", label: "中性", icon: iconFormatGeneral },
-  { id: "home.style.cell.normal", label: "常规", icon: iconFormatGeneral },
-  { id: "home.style.cell.title", label: "标题", icon: iconFormatGeneral },
-];
-
-function mountStyleFloatingMenu(
-  anchor: HTMLButtonElement,
-  emit: RibbonEmit,
-  tab: RibbonTabId,
-  items: readonly StyleMenuRow[],
-): void {
-  const menu = document.createElement("div");
-  menu.className = "fs-bd-menu";
-  menu.hidden = true;
-  menu.setAttribute("role", "menu");
-  menu.setAttribute("data-fs-floating-menu", "");
-  menu.setAttribute("data-fs-menu-anchor-id", anchor.id);
-
-  for (const it of items) {
-    const row = document.createElement("button");
-    row.type = "button";
-    row.className = "fs-bd-menu__item";
-    row.setAttribute("role", "menuitem");
-    row.dataset.commandId = it.id;
-    const iconWrap = document.createElement("span");
-    iconWrap.className = "fs-bd-menu__icon";
-    iconWrap.appendChild(it.icon());
-    const lab = document.createElement("span");
-    lab.className = "fs-bd-menu__label";
-    lab.textContent = it.label;
-    row.appendChild(iconWrap);
-    row.appendChild(lab);
-    row.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      emit(it.id, tab);
-      menu.hidden = true;
-      clearToolbarDropdownMenuPosition(menu);
-      anchor.setAttribute("aria-expanded", "false");
-    });
-    menu.appendChild(row);
-  }
-
-  const ribbonRoot = anchor.closest(".fs-ribbon");
-  (ribbonRoot ?? document.body).appendChild(menu);
-  anchor.setAttribute("aria-haspopup", "menu");
-  anchor.setAttribute("aria-expanded", "false");
-
-  anchor.addEventListener("fs-dropdown-toggle", (ev) => {
-    ev.stopPropagation();
-    if (!menu.hidden) {
-      menu.hidden = true;
-      clearToolbarDropdownMenuPosition(menu);
-      anchor.setAttribute("aria-expanded", "false");
-      return;
-    }
-    closeAllRibbonPopups();
-    menu.hidden = false;
-    syncToolbarDropdownMenuPosition(anchor, menu);
-    anchor.setAttribute("aria-expanded", "true");
-  });
-}
 
 const HIGHLIGHT_CELLS_PARENT_ID = "home.style.conditional.highlightCells";
 const TOP_BOTTOM_PARENT_ID = "home.style.conditional.topBottom";
@@ -605,20 +610,174 @@ export function mountConditionalFormatMenu(
   });
 }
 
-/** 「套用表格格式」整钮展开浮动菜单 */
+/** 「套用表格格式」整钮展开：浅色 / 中等色 / 深色 分节 + 7 列缩略图网格 */
 export function mountTableFormatStyleMenu(
   anchor: HTMLButtonElement,
   emit: RibbonEmit,
   tab: RibbonTabId,
+  options?: {
+    readonly getCustomTableStyles?: () => readonly {
+      readonly id: string;
+      readonly name: string;
+      readonly commandId: string;
+    }[];
+  },
 ): void {
-  mountStyleFloatingMenu(anchor, emit, tab, TABLE_STYLE_MENU_ITEMS);
+  const menu = document.createElement("div");
+  menu.className = "fs-bd-menu fs-bd-menu--table-styles";
+  menu.hidden = true;
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("data-fs-floating-menu", "");
+  menu.setAttribute("data-fs-menu-anchor-id", anchor.id);
+
+  const mkSection = (
+    title: string,
+    section: "light" | "medium" | "dark",
+    rowCount: number,
+  ): void => {
+    const head = document.createElement("div");
+    head.className = "fs-ts-sec-head";
+    head.textContent = title;
+    menu.appendChild(head);
+    const grid = document.createElement("div");
+    grid.className = "fs-ts-grid";
+    for (let row = 0; row < rowCount; row++) {
+      for (let col = 0; col < 7; col++) {
+        const id = tableStyleCommandId(section, row, col);
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "fs-ts-thumb-btn";
+        btn.dataset.commandId = id;
+        btn.setAttribute("aria-label", `${title} 第 ${row + 1} 行，第 ${col + 1} 列主题`);
+        btn.appendChild(
+          createTableStyleThumbnailSvg({
+            section,
+            row,
+            col,
+          }),
+        );
+        btn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          emit(id, tab);
+          menu.hidden = true;
+          clearToolbarDropdownMenuPosition(menu);
+          anchor.setAttribute("aria-expanded", "false");
+        });
+        grid.appendChild(btn);
+      }
+    }
+    menu.appendChild(grid);
+  };
+
+  const closeMenu = (): void => {
+    menu.hidden = true;
+    clearToolbarDropdownMenuPosition(menu);
+    anchor.setAttribute("aria-expanded", "false");
+  };
+
+  const renderMenuContent = (): void => {
+    menu.replaceChildren();
+    mkSection("浅色", "light", 3);
+    mkSection("中等色", "medium", 4);
+    mkSection("深色", "dark", 2);
+
+    const customItems = options?.getCustomTableStyles?.() ?? [];
+    if (customItems.length > 0) {
+      const customHead = document.createElement("div");
+      customHead.className = "fs-ts-sec-head";
+      customHead.textContent = "自定义";
+      menu.appendChild(customHead);
+      const customGrid = document.createElement("div");
+      customGrid.className = "fs-ts-grid";
+      for (const item of customItems) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "fs-ts-thumb-btn";
+        btn.dataset.commandId = item.commandId;
+        btn.setAttribute("aria-label", `自定义表样式：${item.name}`);
+        const parsed = parseBuiltInTableStyleCommand(item.commandId);
+        btn.appendChild(
+          createTableStyleThumbnailSvg(
+            parsed ?? {
+              section: "medium",
+              row: 2,
+              col: 0,
+            },
+          ),
+        );
+        btn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          emit(item.commandId, tab);
+          closeMenu();
+        });
+        customGrid.appendChild(btn);
+      }
+      menu.appendChild(customGrid);
+    }
+
+    const sep = document.createElement("div");
+    sep.className = "fs-bd-menu__sep";
+    sep.setAttribute("role", "separator");
+    sep.setAttribute("aria-hidden", "true");
+    menu.appendChild(sep);
+
+    const newStyleBtn = document.createElement("button");
+    newStyleBtn.type = "button";
+    newStyleBtn.className = "fs-bd-menu__item fs-bd-menu__item--no-icon";
+    newStyleBtn.setAttribute("role", "menuitem");
+    newStyleBtn.dataset.commandId = "home.style.table.newStyle";
+    const newStyleLabel = document.createElement("span");
+    newStyleLabel.className = "fs-bd-menu__label";
+    newStyleLabel.textContent = "新建表样式...";
+    newStyleBtn.appendChild(newStyleLabel);
+    newStyleBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      emit("home.style.table.newStyle", tab);
+      closeMenu();
+    });
+    menu.appendChild(newStyleBtn);
+  };
+
+  renderMenuContent();
+
+  const ribbonRoot = anchor.closest(".fs-ribbon");
+  (ribbonRoot ?? document.body).appendChild(menu);
+  anchor.setAttribute("aria-haspopup", "menu");
+  anchor.setAttribute("aria-expanded", "false");
+
+  anchor.addEventListener("fs-dropdown-toggle", (ev) => {
+    ev.stopPropagation();
+    if (!menu.hidden) {
+      closeMenu();
+      return;
+    }
+    renderMenuContent();
+    closeAllRibbonPopups();
+    menu.hidden = false;
+    syncToolbarDropdownMenuPosition(anchor, menu);
+    anchor.setAttribute("aria-expanded", "true");
+  });
 }
 
-/** 「单元格样式」整钮展开浮动菜单 */
-export function mountCellStyleRibbonMenu(
-  anchor: HTMLButtonElement,
-  emit: RibbonEmit,
-  tab: RibbonTabId,
-): void {
-  mountStyleFloatingMenu(anchor, emit, tab, CELL_STYLE_MENU_ITEMS);
+function parseBuiltInTableStyleCommand(
+  commandId: string,
+): { section: "light" | "medium" | "dark"; row: number; col: number } | null {
+  const m = /^home\.style\.table\.(light|medium|dark)\.r(\d+)c(\d+)$/.exec(commandId);
+  if (m === null) {
+    return null;
+  }
+  const section = m[1];
+  const row = Number(m[2]);
+  const col = Number(m[3]);
+  if (
+    (section !== "light" && section !== "medium" && section !== "dark") ||
+    !Number.isInteger(row) ||
+    !Number.isInteger(col) ||
+    row < 0 ||
+    col < 0 ||
+    col > 6
+  ) {
+    return null;
+  }
+  return { section, row, col };
 }

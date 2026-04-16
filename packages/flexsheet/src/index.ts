@@ -112,10 +112,14 @@ export {
 } from "./sheet-structure-commands.js";
 
 export {
+  ApplyFormatAsTableCommand,
   ApplySelectionCellStylePatchCommand,
   ApplySelectionFontSizeStepCommand,
+  ApplySelectionFormatCellsDialogCommand,
   ApplySelectionIndentStepCommand,
 } from "./cell-style-commands.js";
+
+export type { FormatCellsBorderState, FormatCellsLineSwatchId } from "./format-cells-border.js";
 
 export {
   createDefaultDarkTheme,

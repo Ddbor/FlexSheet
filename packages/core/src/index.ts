@@ -3,14 +3,22 @@ export {
   applyCellStylePatch,
   type CellAddress,
   type CellBorderKind,
+  type CellBorderLinePattern,
   type CellBorderSide,
   type CellHorizontalAlign,
   type CellScalar,
   type CellStyle,
   type CellStylePatch,
   type CellTextOrientation,
+  CELL_FILL_PATTERN_TYPES,
+  isCellFillPatternType,
+  type CellFillPatternType,
   type CellVerticalAlign,
 } from "./cell.js";
+export {
+  resolveCellBorderStroke,
+  type ResolvedCellBorderStroke,
+} from "./border-line-pattern.js";
 export {
   adjustDecimalPlacesInFormat,
   applyCommaStyleFromFormat,
@@ -92,3 +100,12 @@ export {
 export { PLUGIN_SERVICE_KEYS, type PluginServiceKey } from "./plugin-keys.js";
 export { PluginBase, type IPlugin, type PluginContext } from "./plugin-types.js";
 export { Workspace } from "./workspace.js";
+export {
+  TABLE_ACCENT_PALETTES,
+  computeTableFormatCellStyle,
+  parseTableStyleRibbonCommand,
+  tableStyleUsesDistinctHeaderRow,
+  type ParsedTableStyleCommand,
+  type TableAccentPalette,
+  type TableStyleSection,
+} from "./table-style-presets.js";

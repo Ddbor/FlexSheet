@@ -1,6 +1,7 @@
 import {
   Cell,
   type CellBorderKind,
+  type CellBorderLinePattern,
   type CellBorderSide,
   type CellScalar,
   type CellStyle,
@@ -36,7 +37,7 @@ function borderSideSig(side: CellBorderSide | undefined): string {
   if (side === undefined) {
     return "";
   }
-  return `${side.kind}|${side.colorArgb ?? ""}`;
+  return `${side.kind}|${side.colorArgb ?? ""}|${side.linePattern ?? ""}`;
 }
 
 function firstFontNameFromStack(stack: string | undefined): string {
@@ -72,11 +73,18 @@ function styleSignature(st: CellStyle | null | undefined): string {
   const nfRaw = st.numberFormat?.trim() ?? "";
   const nf =
     nfRaw === "" || nfRaw.toLowerCase() === "general" ? "" : nfRaw;
+  const fpRaw = st.fillPatternType;
+  const fpStr =
+    fpRaw !== undefined && fpRaw !== "none" ? fpRaw : "";
+  const lk = st.locked === false ? 0 : 1;
+  const fh = st.formulaHidden === true ? 1 : 0;
   return JSON.stringify({
     b: st.bold === true,
     i: st.italic === true,
     fg: st.fgArgb ?? "",
     fill: st.fillArgb ?? "",
+    fp: fpStr,
+    ffg: st.fillPatternFgArgb ?? "",
     ff: firstFontNameFromStack(st.fontFamily),
     fs: st.fontSizePt ?? 0,
     ul: st.underline ?? "",
@@ -97,6 +105,8 @@ function styleSignature(st: CellStyle | null | undefined): string {
     bb: borderSideSig(st.borderBottom),
     br: borderSideSig(st.borderRight),
     nf,
+    lk,
+    fh,
   });
 }
 
@@ -117,6 +127,10 @@ interface StyleSignaturePayload {
   readonly i?: boolean;
   readonly fg: string;
   readonly fill: string;
+  /** 非空且非 `none` 时为图案填充的 `patternType`。 */
+  readonly fp?: string;
+  /** 图案前景色 ARGB（`patternFill/fgColor`）。 */
+  readonly ffg?: string;
   readonly ff?: string;
   /** 0 表示未设置字号（与默认 11pt 一致）。 */
   readonly fs?: number;
@@ -136,6 +150,10 @@ interface StyleSignaturePayload {
   readonly br?: string;
   /** Excel 数字格式码；空为常规。 */
   readonly nf?: string;
+  /** 1=锁定或未设置（默认）；0=取消锁定。 */
+  readonly lk?: number;
+  /** 1=隐藏公式。 */
+  readonly fh?: number;
 }
 
 const DEFAULT_FONT_NAME = "Calibri";
@@ -164,14 +182,28 @@ function parseBorderSideToken(tok: string): CellBorderSide | undefined {
   if (tok === "") {
     return undefined;
   }
-  const bar = tok.indexOf("|");
-  const rawKind = bar >= 0 ? tok.slice(0, bar) : tok;
+  const parts = tok.split("|");
+  const rawKind = parts[0] ?? "";
   if (rawKind === "") {
     return undefined;
   }
   const kind = rawKind as CellBorderKind;
-  const color = bar >= 0 ? tok.slice(bar + 1) : "";
-  return color.length > 0 ? { kind, colorArgb: color } : { kind };
+  let colorArgb: string | undefined;
+  let linePattern: CellBorderLinePattern | undefined;
+  if (parts.length >= 2 && parts[1] !== undefined && parts[1] !== "") {
+    const p1 = parts[1];
+    if (/^[\dA-Fa-f]{8}$/i.test(p1)) {
+      colorArgb = p1.toUpperCase();
+      if (parts.length >= 3 && parts[2] !== undefined && parts[2] !== "") {
+        linePattern = parts[2] as CellBorderLinePattern;
+      }
+    }
+  }
+  const out: CellBorderSide = { kind };
+  if (colorArgb !== undefined) {
+    return { ...out, colorArgb, ...(linePattern !== undefined ? { linePattern } : {}) };
+  }
+  return linePattern !== undefined ? { ...out, linePattern } : out;
 }
 
 function borderElementFromSignature(st: StyleSignaturePayload): string {
@@ -310,7 +342,16 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     }
 
     let fillId = 0;
-    if (st.fill !== "") {
+    const fpRaw = typeof st.fp === "string" ? st.fp : "";
+    const pat = fpRaw !== "" && fpRaw !== "none" ? fpRaw : "";
+    if (pat !== "") {
+      const fg = typeof st.ffg === "string" && st.ffg !== "" ? st.ffg : "FF000000";
+      const bg = typeof st.fill === "string" && st.fill !== "" ? st.fill : "FFFFFFFF";
+      fillsXml.push(
+        `<fill><patternFill patternType="${escapeXml(pat)}"><fgColor rgb="${escapeXml(fg)}"/><bgColor rgb="${escapeXml(bg)}"/></patternFill></fill>`,
+      );
+      fillId = nextFill++;
+    } else if (st.fill !== "") {
       fillsXml.push(
         `<fill><patternFill patternType="solid"><fgColor rgb="${escapeXml(st.fill)}"/><bgColor indexed="64"/></patternFill></fill>`,
       );
@@ -331,7 +372,7 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     }
 
     const applyFont = needFont ? ` applyFont="1"` : "";
-    const applyFill = st.fill !== "" ? ` applyFill="1"` : "";
+    const applyFill = pat !== "" || st.fill !== "" ? ` applyFill="1"` : "";
     const applyBorder = borderId > 0 ? ` applyBorder="1"` : "";
     const alignAttrs: string[] = [];
     /**
@@ -381,13 +422,21 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     }
     const alignInner = alignAttrs.length > 0 ? `<alignment ${alignAttrs.join(" ")}/>` : "";
     const applyAlignment = alignInner !== "" ? ` applyAlignment="1"` : "";
-    if (alignInner === "") {
+    const lk = typeof st.lk === "number" ? st.lk : 1;
+    const fh = typeof st.fh === "number" ? st.fh : 0;
+    const needProt = lk === 0 || fh === 1;
+    const protInner = needProt
+      ? `<protection locked="${lk === 0 ? "0" : "1"}" hidden="${fh === 1 ? "1" : "0"}"/>`
+      : "";
+    const applyProt = protInner !== "" ? ` applyProtection="1"` : "";
+    const innerXml = `${alignInner}${protInner}`;
+    if (innerXml === "") {
       cellXfsXml.push(
         `<xf${numFmtAttr} fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"${applyFont}${applyFill}${applyBorder}${applyNumberFmt}/>`,
       );
     } else {
       cellXfsXml.push(
-        `<xf${numFmtAttr} fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"${applyFont}${applyFill}${applyBorder}${applyNumberFmt}${applyAlignment}>${alignInner}</xf>`,
+        `<xf${numFmtAttr} fontId="${fontId}" fillId="${fillId}" borderId="${borderId}" xfId="0"${applyFont}${applyFill}${applyBorder}${applyNumberFmt}${applyAlignment}${applyProt}>${innerXml}</xf>`,
       );
     }
     xfBySig.set(sig, nextXf++);

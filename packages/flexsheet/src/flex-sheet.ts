@@ -65,10 +65,12 @@ import {
 import {
   ApplySelectionBorderRibbonCommand,
   ApplySelectionCellStylePatchCommand,
+  ApplySelectionFormatCellsDialogCommand,
   ApplySelectionFontSizeStepCommand,
   ApplySelectionIndentStepCommand,
   isRibbonBorderCommandId,
 } from "./cell-style-commands.js";
+import type { FormatCellsBorderState } from "./format-cells-border.js";
 import {
   AddConditionalFormatRuleCommand,
   ClearAllConditionalFormatRulesCommand,
@@ -78,8 +80,11 @@ import {
 import { SelectionMergeCommand } from "./merge-commands.js";
 import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
 import { openColumnFilterPanel } from "./column-filter-panel.js";
+import { showFormatAsTableDialog } from "./format-as-table-dialog.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
+import { showNewTableStyleDialog } from "./new-table-style-dialog.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
+import { mountFormatCellsDialog } from "./format-cells-dialog.js";
 import { useUndoRedo } from "./undo-redo-plugin.js";
 import { AutofillExtendCommand } from "./autofill-extend-command.js";
 
@@ -183,6 +188,12 @@ export class FlexSheet {
   private customSortOverlay: HTMLDivElement | null = null;
   /** 卸载 `chromeRoot` 上 ⇧⌘R 捕获监听。 */
   private chromeRootSortShortcutCleanup: (() => void) | null = null;
+  /** Ribbon「套用表格格式 -> 自定义」样式条目（当前以内置样式命令作为应用后端）。 */
+  private readonly customTableStyles: Array<{
+    readonly id: string;
+    name: string;
+    commandId: string;
+  }> = [];
 
   constructor(options: FlexSheetOptions) {
     this.formulaBarEl = options.formulaBar ?? null;
@@ -681,6 +692,31 @@ export class FlexSheet {
     this.refresh();
   }
 
+  /**
+   * 「设置单元格格式」确定：一次合并数字/对齐/字体与可选的边框几何（单条撤销）。
+   * `border.apply` 为 false 时不改写边框，仅应用 `basePatch` 中非边框字段。
+   */
+  applyFormatCellsDialogOk(
+    basePatch: CellStylePatch,
+    border: { readonly apply: boolean; readonly state: FormatCellsBorderState },
+  ): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const range = this.selection.getNormalizedRange();
+    this.workspace.commands.execute(
+      new ApplySelectionFormatCellsDialogCommand(sheet, range, basePatch, border.apply, border.state),
+    );
+    this.cellEditor.syncLayout();
+    this.refresh();
+  }
+
+  /** 打开「设置单元格格式」对话框（与右键菜单一致；供 Ribbon「新建单元格样式」等使用）。 */
+  openFormatCellsDialog(): void {
+    mountFormatCellsDialog({ flex: this });
+  }
+
   /** 选区内按字号阶梯增大（`1`）或减小（`-1`）字号，每格相对当前字号，可撤销。 */
   applySelectionFontSizeStep(dir: 1 | -1): void {
     const sheet = this.workbook.getActiveSheet();
@@ -1111,6 +1147,54 @@ export class FlexSheet {
       this.customSortOverlay.remove();
       this.customSortOverlay = null;
     }
+  }
+
+  /**
+   * Ribbon「套用表格格式」：在样式库中选定预设计后弹出「表数据来源」对话框；
+   * 确定后对目标区域应用表样式，若勾选「表包含标题」则为各列启用自动筛选。
+   */
+  openFormatAsTableFromRibbon(ribbonCommandId: string): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    showFormatAsTableDialog(this, ribbonCommandId);
+  }
+
+  /** Ribbon「套用表格格式」菜单项：打开「新建表样式」对话框。 */
+  openNewTableStyleDialog(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    showNewTableStyleDialog(this);
+  }
+
+  /**
+   * 注册一个新建表样式，并返回稳定 id。
+   * 当前实现先将自定义样式映射到一套可用的内置预设，保证样式库中可见且可套用。
+   */
+  createCustomTableStyle(name: string): string {
+    const trimmed = name.trim();
+    const displayName = trimmed.length > 0 ? trimmed : `表样式 ${this.customTableStyles.length + 1}`;
+    const id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    this.customTableStyles.push({
+      id,
+      name: displayName,
+      commandId: "home.style.table.medium.r2c0",
+    });
+    return id;
+  }
+
+  /** Ribbon「套用表格格式」读取“自定义”分组列表。 */
+  getCustomTableStyleEntries(): readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly commandId: string;
+  }[] {
+    return this.customTableStyles.map((it) => ({
+      id: it.id,
+      name: it.name,
+      commandId: it.commandId,
+    }));
   }
 
   /** 在列筛选作用行范围内按该列升序/降序排序并重算公式。 */

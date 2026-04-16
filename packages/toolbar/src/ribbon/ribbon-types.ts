@@ -20,6 +20,18 @@ export interface RibbonCommandEvent {
   readonly payload?: Readonly<Record<string, unknown>>;
 }
 
+export interface RibbonCustomTableStyleEntry {
+  /** 自定义样式稳定 id。 */
+  readonly id: string;
+  /** 在样式库中展示的名称。 */
+  readonly name: string;
+  /**
+   * 套用时要触发的命令 id（当前可复用内置 `home.style.table.*` 命令）。
+   * 后续若接入完整自定义样式持久化，可换为专用命令 id。
+   */
+  readonly commandId: string;
+}
+
 export interface FlexSheetRibbonOptions {
   /** 挂载容器（通常为 #toolbar） */
   readonly container: HTMLElement;
@@ -71,6 +83,8 @@ export interface FlexSheetLike {
   applyRibbonBorderCommand?(commandId: string): void;
   /** 活动单元格样式（Ribbon 字体/颜色条同步）。 */
   getActiveCellStyle(): CellStyle | null;
+  /** 打开「设置单元格格式」对话框（单元格样式库「新建单元格样式」等）。 */
+  openFormatCellsDialog?: () => void;
   /** 存在时 Backstage 可提供 JSON 保存/导入。 */
   readonly workbook?: Workbook;
   loadWorkbook?(wb: Workbook): void;
@@ -100,6 +114,12 @@ export interface FlexSheetLike {
   clearConditionalFormatRulesInSelection?(): void;
   /** 条件格式：清除整张表规则（可撤销）。 */
   clearAllConditionalFormatRulesFromUi?(): void;
+  /** Ribbon「套用表格格式」：弹出表数据来源对话框并应用所选样式。 */
+  openFormatAsTableFromRibbon?(ribbonCommandId: string): void;
+  /** Ribbon「套用表格格式」：打开“新建表样式”对话框。 */
+  openNewTableStyleDialog?(): void;
+  /** Ribbon「套用表格格式」：读取“自定义”分组样式项。 */
+  getCustomTableStyleEntries?(): readonly RibbonCustomTableStyleEntry[];
 }
 
 export type { ViewTabHandles } from "./tabs/view-tab.js";

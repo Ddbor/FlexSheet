@@ -9,6 +9,7 @@ import {
 } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
+import { paintCellFillPatternOverlay } from "./canvas-cell-fill-pattern.js";
 import {
   argbToCss,
   buildCellCanvasFontWithLogicalPx,
@@ -91,6 +92,21 @@ function paintBodyCellFills(
           : env.theme.cellBg;
       ctx.fillStyle = fillCss;
       ctx.fillRect(x, y, colW, rowH);
+      const pat = cell.style?.fillPatternType ?? "none";
+      if (
+        (cfFill === undefined || cfFill === "") &&
+        pat !== "none" &&
+        cell.style !== undefined &&
+        cell.style !== null
+      ) {
+        const rawFg = cell.style.fillPatternFgArgb?.trim();
+        const fgArgb =
+          rawFg !== undefined && rawFg !== "" && /^[\dA-Fa-f]{8}$/i.test(rawFg)
+            ? rawFg.toUpperCase()
+            : "FF000000";
+        const fgCss = argbToCss(fgArgb) ?? "#000000";
+        paintCellFillPatternOverlay(ctx, x, y, colW, rowH, pat, fgCss);
+      }
     }
   }
 }
@@ -246,6 +262,34 @@ function strokeCellTextUnderline(
     ctx.lineTo(leftX + m.width, y2);
     ctx.stroke();
   }
+  ctx.restore();
+}
+
+function strokeCellTextStrikethrough(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  leftX: number,
+  baselineY: number,
+  kind: CanvasTextBaseline,
+  color: string,
+  fontPx: number,
+): void {
+  const m = ctx.measureText(text);
+  const w = m.width;
+  let yStrike: number;
+  if (kind === "middle") {
+    yStrike = baselineY;
+  } else {
+    const ascent = m.actualBoundingBoxAscent ?? fontPx * 0.72;
+    yStrike = baselineY - ascent * 0.45;
+  }
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(1, fontPx / 14);
+  ctx.beginPath();
+  ctx.moveTo(leftX, yStrike);
+  ctx.lineTo(leftX + w, yStrike);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -675,6 +719,13 @@ function paintBodyCellTexts(
           ) {
             strokeCellTextUnderline(ctx, line, lineLeft, baselineY, underlineKind, ink, fontPx);
           }
+          if (
+            cell.style?.strikethrough === true &&
+            hAlign !== "justify" &&
+            hAlign !== "distributed"
+          ) {
+            strokeCellTextStrikethrough(ctx, line, lineLeft, baselineY, "alphabetic", ink, fontPx);
+          }
           yy += lineH;
         }
       } else if (isVerticalStack || fixedOrientActive) {
@@ -702,20 +753,34 @@ function paintBodyCellTexts(
         if (hAlign === "fill" && !wrap) {
           display = buildFillCellText(ctx, line, innerW);
         }
+        const scriptKind = cell.style?.fontScript;
+        const useScript =
+          (scriptKind === "superscript" || scriptKind === "subscript") && hAlign !== "distributed";
+        const logicalDraw = useScript ? logicalFontPx * 0.65 : logicalFontPx;
+        ctx.font = buildCellCanvasFontWithLogicalPx(cell.style, logicalDraw, env.viewZoom);
+        const fontPxDraw = scaledFontSizePx(logicalDraw, env.viewZoom);
         const m = ctx.measureText(display);
-        const ascent = m.actualBoundingBoxAscent ?? fontPx * 0.72;
-        const descent = m.actualBoundingBoxDescent ?? fontPx * 0.22;
+        const ascent = m.actualBoundingBoxAscent ?? fontPxDraw * 0.72;
+        const descent = m.actualBoundingBoxDescent ?? fontPxDraw * 0.22;
         const textLeft = textLineLeftInBox(hAlign, boxLeft, innerW, m.width);
         let baselineY: number;
+        let tb: CanvasTextBaseline;
         if (vAlign === "top") {
+          tb = "alphabetic";
           ctx.textBaseline = "alphabetic";
           baselineY = y + pad + ascent;
         } else if (vAlign === "bottom") {
+          tb = "alphabetic";
           ctx.textBaseline = "alphabetic";
           baselineY = y + rowH - pad - descent;
         } else {
+          tb = "middle";
           ctx.textBaseline = "middle";
           baselineY = y + rowH / 2;
+        }
+        if (useScript && scriptKind !== undefined) {
+          const basePx = scaledFontSizePx(logicalFontPx, env.viewZoom);
+          baselineY += scriptKind === "superscript" ? -basePx * 0.28 : basePx * 0.14;
         }
         if (hAlign === "distributed") {
           paintDistributedLine(ctx, display, boxLeft, innerW, baselineY);
@@ -726,7 +791,14 @@ function paintBodyCellTexts(
           (underlineKind === "single" || underlineKind === "double") &&
           hAlign !== "distributed"
         ) {
-          strokeCellTextUnderline(ctx, display, textLeft, baselineY, underlineKind, ink, fontPx);
+          strokeCellTextUnderline(ctx, display, textLeft, baselineY, underlineKind, ink, fontPxDraw);
+        }
+        if (
+          cell.style?.strikethrough === true &&
+          hAlign !== "distributed" &&
+          hAlign !== "justify"
+        ) {
+          strokeCellTextStrikethrough(ctx, display, textLeft, baselineY, tb, ink, fontPxDraw);
         }
       }
       ctx.restore();

@@ -1075,6 +1075,180 @@
   line-height: 1.3;
 }
 
+/* 「单元格样式」：分段标题 + 预览行 + 主题色网格 */
+.fs-bd-menu--cell-styles {
+  box-sizing: border-box;
+  width: max-content;
+  max-width: calc(100vw - 12px);
+  max-height: min(580px, calc(100vh - 24px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 6px 8px 8px;
+}
+
+.fs-bd-menu__cell-sec-head {
+  margin: 10px 2px 6px;
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 600;
+  color: var(--fs-ribbon-group-label, #605e5c);
+}
+
+.fs-bd-menu__cell-sec-head:first-child {
+  margin-top: 2px;
+}
+
+.fs-bd-menu__cell-swatch-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.fs-bd-menu__cell-swatch {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.fs-bd-menu__cell-swatch:hover {
+  background: var(--fs-ribbon-hover, #edebe9);
+}
+
+.fs-bd-menu__cell-swatch-preview {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 28px;
+  padding: 0 4px;
+  border-radius: 1px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.fs-bd-menu__cell-swatch-label {
+  font-size: 11px;
+  line-height: 1.15;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.fs-bd-menu__cell-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 2px;
+}
+
+.fs-bd-menu__cell-row {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fs-bd-menu__cell-row:hover {
+  background: var(--fs-ribbon-hover, #edebe9);
+}
+
+.fs-bd-menu__cell-row-preview {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 52px;
+  height: 22px;
+  font-size: 11px;
+  line-height: 1;
+  border-radius: 1px;
+}
+
+.fs-bd-menu__cell-row-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.fs-bd-menu__cell-theme {
+  margin: 2px 0 6px;
+}
+
+.fs-bd-menu__cell-theme-head {
+  display: grid;
+  grid-template-columns: 36px repeat(6, minmax(0, 1fr));
+  gap: 2px;
+  align-items: end;
+  margin-bottom: 2px;
+}
+
+.fs-bd-menu__cell-theme-h {
+  font-size: 10px;
+  line-height: 1.1;
+  text-align: center;
+  color: var(--fs-ribbon-group-label, #605e5c);
+}
+
+.fs-bd-menu__cell-theme-row {
+  display: grid;
+  grid-template-columns: 36px repeat(6, minmax(0, 1fr));
+  gap: 2px;
+  align-items: stretch;
+  margin-bottom: 2px;
+}
+
+.fs-bd-menu__cell-theme-rlabel {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 4px;
+  font-size: 10px;
+  line-height: 1.1;
+  color: var(--fs-ribbon-group-label, #605e5c);
+}
+
+.fs-bd-menu__cell-theme-cell {
+  box-sizing: border-box;
+  min-width: 0;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 1px;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fs-bd-menu__cell-theme-cell:hover {
+  filter: brightness(0.97);
+}
+
 /* 条件格式等：无左侧图标的菜单行 */
 .fs-bd-menu__item--no-icon {
   gap: 0;
@@ -1153,6 +1327,65 @@
 
 .fs-bd-menu__db-thumb-btn svg.fs-bd-cs-flyout-thumb {
   height: 22px;
+}
+
+/* 「套用表格格式」：分节 + 7 列缩略图（与 Excel 表格样式库一致） */
+.fs-bd-menu--table-styles {
+  width: max-content;
+  max-width: calc(100vw - 12px);
+  max-height: min(440px, calc(100vh - 24px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0 8px;
+  box-sizing: border-box;
+}
+
+.fs-ts-sec-head {
+  padding: 6px 10px 4px;
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--fs-ribbon-group-label, #605e5c);
+  background: var(--fs-ribbon-hover, #f3f2f1);
+  margin: 0 0 4px 0;
+}
+
+.fs-ts-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 46px));
+  gap: 6px 8px;
+  padding: 0 10px 10px;
+  box-sizing: border-box;
+}
+
+.fs-ts-thumb-btn {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: var(--fs-ribbon-panel-bg, #fff);
+  cursor: pointer;
+}
+
+.fs-ts-thumb-btn:hover {
+  border-color: var(--fs-ribbon-accent, #217346);
+  background: var(--fs-ribbon-hover, #f3f2f1);
+}
+
+.fs-ts-thumb-btn:focus-visible {
+  outline: 2px solid var(--fs-ribbon-accent, #217346);
+  outline-offset: 1px;
+}
+
+.fs-ts-thumb-btn svg {
+  display: block;
+  width: 44px;
+  height: 52px;
+  max-width: 100%;
+  object-fit: contain;
 }
 
 /* 填充色 / 字体颜色面板 */
@@ -1294,7 +1527,8 @@
   box-sizing: border-box;
   position: fixed;
   inset: 0;
-  z-index: 6000;
+  /* 高于「设置单元格格式」等宿主遮罩（~10002），以便从嵌套对话框中打开 */
+  z-index: 10010;
   display: flex;
   align-items: center;
   justify-content: center;

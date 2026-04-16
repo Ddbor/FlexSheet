@@ -1,3 +1,11 @@
+import type { CellFillPatternType } from "./cell-fill-pattern.js";
+
+export {
+  CELL_FILL_PATTERN_TYPES,
+  isCellFillPatternType,
+  type CellFillPatternType,
+} from "./cell-fill-pattern.js";
+
 /**
  * 单元格数据模型（Data 层最小单元），不含绘制与公式求值。
  *
@@ -47,11 +55,31 @@ export type CellTextOrientation =
 /** 单元格单边边框线型（与 Ribbon 边框预设子集一致）。 */
 export type CellBorderKind = "thin" | "medium" | "thick" | "double" | "hairline";
 
+/**
+ * 边框笔画图案（与「设置单元格格式」线型网格一致）；未设置时仅按 `kind` 画实线。
+ */
+export type CellBorderLinePattern =
+  | "hairlineDots"
+  | "shortDash"
+  | "dashDot"
+  | "dashDotDot"
+  | "mediumDash"
+  | "mediumDashDotDot"
+  | "slantedDash"
+  | "thickDash"
+  | "thickDashDot"
+  | "thinSolid"
+  | "mediumSolid"
+  | "thickSolid"
+  | "doubleLine";
+
 /** 单边边框（颜色缺省为黑色，由渲染层解析）。 */
 export interface CellBorderSide {
   readonly kind: CellBorderKind;
   /** 8 位 ARGB，如 FF000000；缺省为黑色。 */
   readonly colorArgb?: string;
+  /** 虚线/点线等图案；缺省时仅按 `kind` 绘制实线（兼容旧数据）。 */
+  readonly linePattern?: CellBorderLinePattern;
 }
 
 /** XLSX 往返用最小样式（ARGB 含 alpha，如 FFFF0000）。 */
@@ -64,8 +92,22 @@ export interface CellStyle {
   fontSizePt?: number;
   /** 下划线；未设置表示无下划线。 */
   underline?: "single" | "double";
+  /** 删除线。 */
+  strikethrough?: boolean;
+  /**
+   * 整格上标/下标（水平单行文本时生效；与竖排/任意角旋转等互斥时由渲染层忽略）。
+   */
+  fontScript?: "superscript" | "subscript";
   fgArgb?: string;
   fillArgb?: string;
+  /**
+   * 填充图案（OOXML `patternType`）；未设置或 `none` 表示无图案，仅 `fillArgb` 纯色。
+   */
+  fillPatternType?: CellFillPatternType;
+  /**
+   * 图案前景色（线/点），8 位 ARGB；未设置表示「自动」（渲染为近黑色，与 Excel 一致）。
+   */
+  fillPatternFgArgb?: string;
   /** 文本水平对齐。 */
   hAlign?: CellHorizontalAlign;
   /** 文本垂直对齐。 */
@@ -96,6 +138,14 @@ export interface CellStyle {
    * 未设置或 `General` 表示常规。
    */
   numberFormat?: string;
+  /**
+   * 工作表受保护时是否锁定单元格（不可编辑）。未设置视为 `true`（与 Excel 默认一致）。
+   */
+  locked?: boolean;
+  /**
+   * 工作表受保护时是否在公式栏隐藏公式；仅对含公式单元格有意义。
+   */
+  formulaHidden?: boolean;
 }
 
 /**
@@ -107,8 +157,12 @@ export type CellStylePatch = {
   readonly fontFamily?: string | null;
   readonly fontSizePt?: number | null;
   readonly underline?: "single" | "double" | null;
+  readonly strikethrough?: boolean | null;
+  readonly fontScript?: "superscript" | "subscript" | null;
   readonly fgArgb?: string | null;
   readonly fillArgb?: string | null;
+  readonly fillPatternType?: CellFillPatternType | null;
+  readonly fillPatternFgArgb?: string | null;
   readonly hAlign?: CellHorizontalAlign | null;
   readonly vAlign?: CellVerticalAlign | null;
   readonly indentLevel?: number | null;
@@ -121,6 +175,8 @@ export type CellStylePatch = {
   readonly borderBottom?: CellBorderSide | null;
   readonly borderRight?: CellBorderSide | null;
   readonly numberFormat?: string | null;
+  readonly locked?: boolean | null;
+  readonly formulaHidden?: boolean | null;
 };
 
 export function applyCellStylePatch(
@@ -163,6 +219,20 @@ export function applyCellStylePatch(
       next.underline = patch.underline;
     }
   }
+  if (patch.strikethrough !== undefined) {
+    if (patch.strikethrough === null) {
+      delete next.strikethrough;
+    } else {
+      next.strikethrough = patch.strikethrough;
+    }
+  }
+  if (patch.fontScript !== undefined) {
+    if (patch.fontScript === null) {
+      delete next.fontScript;
+    } else {
+      next.fontScript = patch.fontScript;
+    }
+  }
   if (patch.fgArgb !== undefined) {
     if (patch.fgArgb === null) {
       delete next.fgArgb;
@@ -175,6 +245,20 @@ export function applyCellStylePatch(
       delete next.fillArgb;
     } else {
       next.fillArgb = patch.fillArgb;
+    }
+  }
+  if (patch.fillPatternType !== undefined) {
+    if (patch.fillPatternType === null) {
+      delete next.fillPatternType;
+    } else {
+      next.fillPatternType = patch.fillPatternType;
+    }
+  }
+  if (patch.fillPatternFgArgb !== undefined) {
+    if (patch.fillPatternFgArgb === null) {
+      delete next.fillPatternFgArgb;
+    } else {
+      next.fillPatternFgArgb = patch.fillPatternFgArgb;
     }
   }
   if (patch.hAlign !== undefined) {
@@ -280,6 +364,20 @@ export function applyCellStylePatch(
       } else {
         next.numberFormat = t;
       }
+    }
+  }
+  if (patch.locked !== undefined) {
+    if (patch.locked === null) {
+      delete next.locked;
+    } else {
+      next.locked = patch.locked;
+    }
+  }
+  if (patch.formulaHidden !== undefined) {
+    if (patch.formulaHidden === null) {
+      delete next.formulaHidden;
+    } else {
+      next.formulaHidden = patch.formulaHidden;
     }
   }
   return Object.keys(next).length === 0 ? null : next;

@@ -13,6 +13,7 @@ import {
   showConditionalFormatNewRuleDialog,
   type CfNewRuleDialogSeed,
 } from "./ribbon-conditional-format-dialog.js";
+import { applyRibbonCellStyleCommand } from "./cell-style-ribbon-handlers.js";
 import { getNumberFormatPresetByCommandId } from "./ribbon-number-format-chrome.js";
 import type { FlexSheetLike, RibbonCommandEvent } from "./ribbon-types.js";
 
@@ -162,6 +163,9 @@ function tryApplyRibbonBorder(ev: RibbonCommandEvent, fs: FlexSheetLike): boolea
  */
 export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSheetLike): boolean {
   if (tryApplyRibbonBorder(ev, fs)) {
+    return true;
+  }
+  if (applyRibbonCellStyleCommand(fs, ev.id)) {
     return true;
   }
   const preset = getNumberFormatPresetByCommandId(ev.id);
@@ -355,45 +359,6 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
     case "home.align.textDirection.rotateDown":
       fs.applySelectionStylePatch({ textOrientation: "rotateDown90" });
       return true;
-    case "home.style.cell.good":
-      fs.applySelectionStylePatch({
-        bold: true,
-        fillArgb: "FFC6EFCE",
-        fgArgb: "FF006100",
-      });
-      return true;
-    case "home.style.cell.bad":
-      fs.applySelectionStylePatch({
-        bold: true,
-        fillArgb: "FFFFC7CE",
-        fgArgb: "FF9C0006",
-      });
-      return true;
-    case "home.style.cell.neutral":
-      fs.applySelectionStylePatch({
-        bold: false,
-        fillArgb: "FFFFEB9C",
-        fgArgb: "FF9C6500",
-      });
-      return true;
-    case "home.style.cell.normal":
-      fs.applySelectionStylePatch({
-        bold: null,
-        italic: null,
-        underline: null,
-        fillArgb: null,
-        fgArgb: null,
-        fontSizePt: null,
-      });
-      return true;
-    case "home.style.cell.title":
-      fs.applySelectionStylePatch({
-        bold: true,
-        fontSizePt: 14,
-        fillArgb: null,
-        fgArgb: "FF1F497D",
-      });
-      return true;
     case "data.sort.asc":
     case "data.sort.desc": {
       if (fs.sortSelectionRowsByKeyColumn === undefined) {
@@ -443,6 +408,13 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
         return false;
       }
       fs.clearAllConditionalFormatRulesFromUi();
+      return true;
+    }
+    case "home.style.table.newStyle": {
+      if (fs.openNewTableStyleDialog === undefined) {
+        return false;
+      }
+      fs.openNewTableStyleDialog();
       return true;
     }
     default: {
@@ -502,6 +474,10 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
           fs.applySelectionStylePatch({ fontSizePt: pt });
           return true;
         }
+      }
+      if (ev.id.startsWith("home.style.table.") && fs.openFormatAsTableFromRibbon !== undefined) {
+        fs.openFormatAsTableFromRibbon(ev.id);
+        return true;
       }
       return false;
     }

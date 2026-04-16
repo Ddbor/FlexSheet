@@ -7,6 +7,7 @@ import type {
   CellStyle,
   CellTextOrientation,
 } from "@flexsheet/core";
+import { isCellFillPatternType } from "@flexsheet/core";
 import { parseCellRef } from "./a1.js";
 import { unzipToMap } from "./zip-reader.js";
 import { recalcWorksheet } from "@flexsheet/formula";
@@ -189,6 +190,27 @@ function parseAlignmentFromXf(xf: Element): Partial<CellStyle> {
   return out;
 }
 
+function parseProtectionFromXf(xf: Element): Partial<CellStyle> {
+  const prot = firstLocal(xf, "protection");
+  if (prot === undefined) {
+    return {};
+  }
+  const out: Partial<CellStyle> = {};
+  const locked = prot.getAttribute("locked");
+  if (locked === "0" || locked === "false") {
+    out.locked = false;
+  } else if (locked === "1" || locked === "true") {
+    out.locked = true;
+  }
+  const hidden = prot.getAttribute("hidden");
+  if (hidden === "1" || hidden === "true") {
+    out.formulaHidden = true;
+  } else if (hidden === "0" || hidden === "false") {
+    out.formulaHidden = false;
+  }
+  return out;
+}
+
 const OOXML_BORDER_TO_KIND: Record<string, CellBorderKind> = {
   thin: "thin",
   medium: "medium",
@@ -236,15 +258,34 @@ function parseFillStyle(fillEl: Element): Partial<CellStyle> {
   if (pf === undefined) {
     return {};
   }
-  if (pf.getAttribute("patternType") !== "solid") {
+  const pt = pf.getAttribute("patternType") ?? "none";
+  const fgEl = firstLocal(pf, "fgColor");
+  const bgEl = firstLocal(pf, "bgColor");
+  const fgRgb = fgEl?.getAttribute("rgb");
+  const bgRgb = bgEl?.getAttribute("rgb");
+
+  if (pt === "solid") {
+    if (fgRgb !== null && fgRgb !== undefined && fgRgb !== "") {
+      return { fillArgb: fgRgb };
+    }
     return {};
   }
-  const fg = firstLocal(pf, "fgColor");
-  const rgb = fg?.getAttribute("rgb");
-  if (rgb !== null && rgb !== undefined && rgb !== "") {
-    return { fillArgb: rgb };
+  if (pt === "none" || pt === "") {
+    return {};
   }
-  return {};
+  if (!isCellFillPatternType(pt)) {
+    return {};
+  }
+  const out: Partial<CellStyle> = {
+    fillPatternType: pt,
+  };
+  if (bgRgb !== null && bgRgb !== undefined && bgRgb !== "") {
+    out.fillArgb = bgRgb;
+  }
+  if (fgRgb !== null && fgRgb !== undefined && fgRgb !== "") {
+    out.fillPatternFgArgb = fgRgb;
+  }
+  return out;
 }
 
 /** Excel 内置 numFmtId → formatCode（子集；与导出/常见文件一致）。 */
@@ -362,6 +403,9 @@ function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
       Object.assign(st, borderParts[borderId]);
     }
     Object.assign(st, parseAlignmentFromXf(xf));
+    if (xf.getAttribute("applyProtection") === "1" || firstLocal(xf, "protection") !== undefined) {
+      Object.assign(st, parseProtectionFromXf(xf));
+    }
     if (applyNumber || numFmtId > 0) {
       const nf = numberFormatFromNumFmtId(numFmtId, customNumFmt);
       if (nf !== undefined) {

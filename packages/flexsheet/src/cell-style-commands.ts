@@ -1,13 +1,17 @@
 import {
   applyCellStylePatch,
+  computeTableFormatCellStyle,
   normalizeSelectionRange,
+  TABLE_ACCENT_PALETTES,
   type CellStyle,
   type CellStylePatch,
   type ICommand,
+  type ParsedTableStyleCommand,
   type SelectionRange,
   type Worksheet,
 } from "@flexsheet/core";
 import { cloneCellStyle, computeBorderStyleForRibbonCommand } from "./border-ribbon-preset.js";
+import { mergeFormatCellsDialogStyle, type FormatCellsBorderState } from "./format-cells-border.js";
 
 interface CellStyleSnapshot {
   readonly row: number;
@@ -79,6 +83,90 @@ export class ApplySelectionCellStylePatchCommand implements ICommand {
   undo(): void {
     for (const s of this.snapshots) {
       this.sheet.setCellStyle(s.row, s.col, s.before === null ? null : { ...s.before });
+    }
+  }
+}
+
+/** 「设置单元格格式」确定：合并数字/对齐/字体与可选的边框几何（单条撤销）。 */
+export class ApplySelectionFormatCellsDialogCommand implements ICommand {
+  readonly id = "cell.applyFormatCellsDialog";
+  readonly label = "设置单元格格式";
+  private readonly snapshots: CellStyleSnapshot[];
+
+  constructor(
+    private readonly sheet: Worksheet,
+    range: SelectionRange,
+    basePatch: CellStylePatch,
+    applyBorder: boolean,
+    borderState: FormatCellsBorderState,
+  ) {
+    const n = normalizeSelectionRange(range);
+    const list: CellStyleSnapshot[] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        if (this.sheet.isMergeCoveredCell(r, c)) {
+          continue;
+        }
+        const raw = this.sheet.getCell(r, c).style;
+        const before = cloneCellStyle(raw);
+        const after = mergeFormatCellsDialogStyle(raw, this.sheet, range, r, c, basePatch, applyBorder, borderState);
+        list.push({ row: r, col: c, before, after });
+      }
+    }
+    this.snapshots = list;
+  }
+
+  execute(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.after === null ? null : { ...s.after });
+    }
+  }
+
+  undo(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, cloneCellStyle(s.before));
+    }
+  }
+}
+
+/** 「套用表格格式」：整区写入表样式（单条撤销）。 */
+export class ApplyFormatAsTableCommand implements ICommand {
+  readonly id = "cell.applyFormatAsTable";
+  readonly label = "套用表格格式";
+  private readonly snapshots: CellStyleSnapshot[];
+
+  constructor(
+    private readonly sheet: Worksheet,
+    range: SelectionRange,
+    parsed: ParsedTableStyleCommand,
+    hasHeaders: boolean,
+  ) {
+    const n = normalizeSelectionRange(range);
+    const palette = TABLE_ACCENT_PALETTES[parsed.col];
+    const list: CellStyleSnapshot[] = [];
+    for (let r = n.startRow; r <= n.endRow; r++) {
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        if (this.sheet.isMergeCoveredCell(r, c)) {
+          continue;
+        }
+        const raw = this.sheet.getCell(r, c).style;
+        const before = cloneCellStyle(raw);
+        const after = computeTableFormatCellStyle(parsed, palette, n, hasHeaders, r, c);
+        list.push({ row: r, col: c, before, after });
+      }
+    }
+    this.snapshots = list;
+  }
+
+  execute(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, s.after === null ? null : { ...s.after });
+    }
+  }
+
+  undo(): void {
+    for (const s of this.snapshots) {
+      this.sheet.setCellStyle(s.row, s.col, cloneCellStyle(s.before));
     }
   }
 }
