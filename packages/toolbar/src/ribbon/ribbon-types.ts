@@ -122,6 +122,10 @@ export interface FlexSheetLike {
   openNewTableStyleDialog?(): void;
   /** Ribbon「填充 -> 系列」：打开系列填充对话框。 */
   openFillSeriesDialog?(): void;
+  /** Ribbon「插入 -> 数据透视表」：打开数据透视表创建对话框。 */
+  openPivotTableDialog?(): void;
+  /** Ribbon「数据 -> 字段列表」：在透视区域内打开字段窗格。 */
+  openPivotTableFieldsPane?(): void;
   /** Ribbon「清除」：清除当前选区内容（保留格式）。 */
   clearSelectionContents?(): void;
   /** Ribbon「清除」：清除当前选区格式（保留内容）。 */

@@ -717,6 +717,20 @@ export function iconSparkline(): SVGSVGElement {
   return svgEl("0 0 24 24", '<path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/>');
 }
 
+/** 数据透视表选项（32×32，单色层次） */
+export function iconPivotTableOption(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-opacity="0.08" d="M3 3h26v26H3z"/>' +
+      '<path fill="currentColor" d="M30 2v28H2V2zm-1 1H3v26h26z"/>' +
+      '<path fill="currentColor" fill-opacity="0.62" d="M13 5h14v6H13zM5 5h6v6H5zM11 13v14H5V13z"/>' +
+      '<path fill="currentColor" fill-opacity="0.34" d="M14 6h12v4H14zM6 6h4v4H6zM10 14v12H6V14z"/>' +
+      '<path fill="currentColor" fill-opacity="0.88" d="m24.5 13 2.5 3h-2v9h-8v2l-3-2.5 3-2.5v2h7v-8h-2z"/>' +
+      "</g>",
+  );
+}
+
 export function iconOrientation(): SVGSVGElement {
   return svgEl("0 0 24 24", '<rect x="4" y="4" width="16" height="10" rx="1"/><path d="M8 20h8"/><path d="M12 14v6"/>');
 }

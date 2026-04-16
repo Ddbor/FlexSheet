@@ -456,6 +456,20 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.openNewTableStyleDialog();
       return true;
     }
+    case "insert.pivottable.options": {
+      if (fs.openPivotTableDialog === undefined) {
+        return false;
+      }
+      fs.openPivotTableDialog();
+      return true;
+    }
+    case "data.pivot.fields": {
+      if (fs.openPivotTableFieldsPane === undefined) {
+        return false;
+      }
+      fs.openPivotTableFieldsPane();
+      return true;
+    }
     default: {
       if (
         ev.id.startsWith("home.style.conditional.highlightCells.") &&

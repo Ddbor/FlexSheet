@@ -14,12 +14,15 @@ import {
   buildWorkbookConditionalFormatDxfIndex,
   expandBoundsWithConditionalFormatRanges,
 } from "./export-xlsx-cf.js";
+import { buildPivotSheetPlans, collectPivotExportPieces } from "./export-xlsx-pivot.js";
 import { escapeXml, sanitizeXml10Text } from "./xml-escape.js";
 import { buildZipArchive, type ZipEntryInput } from "./zip-writer.js";
 
 const SS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
+const REL_PIVOT_CACHE =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCache";
 const CP_NS = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
 const DC_NS = "http://purl.org/dc/elements/1.1/";
 const DCTERMS_NS = "http://purl.org/dc/terms/";
@@ -71,11 +74,9 @@ function styleSignature(st: CellStyle | null | undefined): string {
   }
   const tor = st.textOrientation;
   const nfRaw = st.numberFormat?.trim() ?? "";
-  const nf =
-    nfRaw === "" || nfRaw.toLowerCase() === "general" ? "" : nfRaw;
+  const nf = nfRaw === "" || nfRaw.toLowerCase() === "general" ? "" : nfRaw;
   const fpRaw = st.fillPatternType;
-  const fpStr =
-    fpRaw !== undefined && fpRaw !== "none" ? fpRaw : "";
+  const fpStr = fpRaw !== undefined && fpRaw !== "none" ? fpRaw : "";
   const lk = st.locked === false ? 0 : 1;
   const fh = st.formulaHidden === true ? 1 : 0;
   return JSON.stringify({
@@ -593,6 +594,9 @@ function effectiveCellStyleForXlsxExport(
 }
 
 function shouldExportCellForXlsx(sheet: Worksheet, cell: Cell, opts: XlsxExportOptions): boolean {
+  if (sheet.isPivotExportSuppressedCell(cell.row, cell.col)) {
+    return false;
+  }
   if (sheet.isMergeCoveredCell(cell.row, cell.col)) {
     return false;
   }
@@ -651,9 +655,36 @@ function usedBoundsForSheet(
     maxC = Math.max(maxC, endC);
   }
   if (!hasCell) {
-    return expandBoundsWithConditionalFormatRanges(sheet, null);
+    return expandBoundsWithConditionalFormatRanges(sheet, expandBoundsWithPivotOutput(sheet, null));
   }
-  return expandBoundsWithConditionalFormatRanges(sheet, { minR, maxR, minC, maxC });
+  return expandBoundsWithConditionalFormatRanges(
+    sheet,
+    expandBoundsWithPivotOutput(sheet, { minR, maxR, minC, maxC }),
+  );
+}
+
+function expandBoundsWithPivotOutput(
+  sheet: Worksheet,
+  b: { minR: number; maxR: number; minC: number; maxC: number } | null,
+): { minR: number; maxR: number; minC: number; maxC: number } | null {
+  let cur = b;
+  for (const p of sheet.getPivotTableDefinitionsSnapshot()) {
+    const r0 = p.destinationRow;
+    const c0 = p.destinationCol;
+    const r1 = r0 + p.outputRowCount - 1;
+    const c1 = c0 + p.outputColCount - 1;
+    if (cur === null) {
+      cur = { minR: r0, maxR: r1, minC: c0, maxC: c1 };
+    } else {
+      cur = {
+        minR: Math.min(cur.minR, r0),
+        maxR: Math.max(cur.maxR, r1),
+        minC: Math.min(cur.minC, c0),
+        maxC: Math.max(cur.maxC, c1),
+      };
+    }
+  }
+  return cur;
 }
 
 /** FlexSheet 行高为逻辑 px（与 import 互逆），OOXML `ht` 为磅。 */
@@ -816,6 +847,7 @@ function buildSheetXml(
   xfBySig: Map<string, number>,
   opts: XlsxExportOptions,
   cfDxfIndex: ReturnType<typeof buildWorkbookConditionalFormatDxfIndex>,
+  pivotTablesFragment = "",
 ): string {
   const b = usedBoundsForSheet(sheet, opts);
   const dim =
@@ -894,6 +926,7 @@ function buildSheetXml(
     `<sheetData>${rowXml.join("")}</sheetData>` +
     mergeXml +
     cfXml +
+    pivotTablesFragment +
     `</worksheet>`
   );
 }
@@ -927,21 +960,36 @@ export function exportWorkbookToXlsxBytes(
   const stylesXml = buildStylesXml(styleTable);
   const { xml: sstXml, index: sstMap } = buildSharedStrings(workbook, options);
 
+  const n = workbook.sheetCount;
+  const sheetNames: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const sh = workbook.getSheet(i);
+    sheetNames.push(sanitizeSheetName(sh?.name ?? `Sheet${i + 1}`, i));
+  }
+
+  const pivotPieces = collectPivotExportPieces(workbook, sheetNames);
+  const pivotSheetPlans = buildPivotSheetPlans(pivotPieces);
+  const pivotFragmentBySheet = new Map<number, string>();
+  for (const pl of pivotSheetPlans) {
+    pivotFragmentBySheet.set(pl.sheetIndex, pl.pivotTablesFragment);
+  }
+  const pivotRelsBySheet = new Map<number, string>();
+  for (const pl of pivotSheetPlans) {
+    pivotRelsBySheet.set(pl.sheetIndex, pl.relsXml);
+  }
+
   const sheetParts: string[] = [];
-  for (let i = 0; i < workbook.sheetCount; i++) {
+  for (let i = 0; i < n; i++) {
     const sh = workbook.getSheet(i);
     if (sh === undefined) {
       continue;
     }
-    sheetParts.push(buildSheetXml(sh, i, sstMap, styleTable.xfBySig, options, cfDxfIndex));
+    const pivotFrag = pivotFragmentBySheet.get(i) ?? "";
+    sheetParts.push(
+      buildSheetXml(sh, i, sstMap, styleTable.xfBySig, options, cfDxfIndex, pivotFrag),
+    );
   }
 
-  const sheetNames = sheetParts.map((_, i) => {
-    const sh = workbook.getSheet(i);
-    return sanitizeSheetName(sh?.name ?? `Sheet${i + 1}`, i);
-  });
-
-  const n = sheetParts.length;
   const sheetRels: string[] = [];
   let rid = 1;
   for (let i = 0; i < n; i++) {
@@ -959,10 +1007,29 @@ export function exportWorkbookToXlsxBytes(
   sheetRels.push(
     `<Relationship Id="rId${stRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`,
   );
+  const pivotWorkbookRelIds: number[] = [];
+  let pivotRid = stRid + 1;
+  for (const p of pivotPieces) {
+    pivotWorkbookRelIds.push(pivotRid);
+    sheetRels.push(
+      `<Relationship Id="rId${pivotRid}" Type="${REL_PIVOT_CACHE}" Target="${escapeXml(p.workbookRelTarget)}"/>`,
+    );
+    pivotRid++;
+  }
 
   const sheetsXml = sheetNames
     .map((name, i) => `<sheet name="${escapeXml(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`)
     .join("");
+
+  const pivotCachesXml =
+    pivotPieces.length === 0
+      ? ""
+      : `<pivotCaches count="${pivotPieces.length}">${pivotPieces
+          .map((p, idx) => {
+            const relNum = pivotWorkbookRelIds[idx]!;
+            return `<pivotCache cacheId="${p.cacheId}" r:id="rId${relNum}"/>`;
+          })
+          .join("")}</pivotCaches>`;
 
   const workbookXml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -970,6 +1037,7 @@ export function exportWorkbookToXlsxBytes(
     `<workbookPr date1904="false"/>` +
     `<bookViews><workbookView xWindow="0" yWindow="0"/></bookViews>` +
     `<sheets>${sheetsXml}</sheets>` +
+    pivotCachesXml +
     `<calcPr calcId="191029"/>` +
     `</workbook>`;
 
@@ -995,6 +1063,14 @@ export function exportWorkbookToXlsxBytes(
   for (let i = 0; i < n; i++) {
     ctOverrides.push(
       `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+    );
+  }
+  for (const p of pivotPieces) {
+    ctOverrides.push(
+      `<Override PartName="/xl/pivotCache/pivotCacheDefinition${p.cacheIdx}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"/>`,
+    );
+    ctOverrides.push(
+      `<Override PartName="/xl/pivotTables/pivotTable${p.cacheIdx}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/>`,
     );
   }
 
@@ -1040,6 +1116,26 @@ export function exportWorkbookToXlsxBytes(
     files.push({
       path: `xl/worksheets/sheet${i + 1}.xml`,
       data: enc.encode(sheetParts[i] ?? ""),
+    });
+  }
+  for (const p of pivotPieces) {
+    files.push({
+      path: `xl/pivotCache/pivotCacheDefinition${p.cacheIdx}.xml`,
+      data: enc.encode(p.pivotCacheDefinitionXml),
+    });
+    files.push({
+      path: `xl/pivotTables/pivotTable${p.cacheIdx}.xml`,
+      data: enc.encode(p.pivotTableXml),
+    });
+    files.push({
+      path: `xl/pivotTables/_rels/pivotTable${p.cacheIdx}.xml.rels`,
+      data: enc.encode(p.pivotTableRelsXml),
+    });
+  }
+  for (const [si, relsXml] of pivotRelsBySheet) {
+    files.push({
+      path: `xl/worksheets/_rels/sheet${si + 1}.xml.rels`,
+      data: enc.encode(relsXml),
     });
   }
 

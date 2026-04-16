@@ -1,5 +1,5 @@
 import { createToolbarButton, createToolbarDropdown, type RibbonEmit } from "../../toolbar/index.js";
-import { iconDataTools, iconFilter, iconSlicer, iconSort } from "../../toolbar/icons.js";
+import { iconDataTools, iconFilter, iconPivotTableOption, iconSlicer, iconSort } from "../../toolbar/icons.js";
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { RibbonTabId } from "../ribbon-types.js";
 
@@ -27,6 +27,23 @@ export function mountDataTab(panel: HTMLElement, emit: RibbonEmit): void {
     content.appendChild(
       createToolbarButton(
         { id: "data.slicer.insert", tab: TAB, label: "插入切片器", icon: iconSlicer(), variant: "large" },
+        emit,
+      ).element,
+    );
+    inner.appendChild(root);
+  }
+
+  {
+    const { root, content } = createRibbonGroup("数据透视表");
+    content.appendChild(
+      createToolbarButton(
+        {
+          id: "data.pivot.fields",
+          tab: TAB,
+          label: "字段列表",
+          icon: iconPivotTableOption(),
+          variant: "large",
+        },
         emit,
       ).element,
     );

@@ -15,10 +15,7 @@ export {
   type CellFillPatternType,
   type CellVerticalAlign,
 } from "./cell.js";
-export {
-  resolveCellBorderStroke,
-  type ResolvedCellBorderStroke,
-} from "./border-line-pattern.js";
+export { resolveCellBorderStroke, type ResolvedCellBorderStroke } from "./border-line-pattern.js";
 export {
   adjustDecimalPlacesInFormat,
   applyCommaStyleFromFormat,
@@ -109,3 +106,8 @@ export {
   type TableAccentPalette,
   type TableStyleSection,
 } from "./table-style-presets.js";
+export {
+  type PivotAggregateKind,
+  type PivotValueFieldSpec,
+  type WorksheetPivotTableDefinition,
+} from "./pivot-table-model.js";

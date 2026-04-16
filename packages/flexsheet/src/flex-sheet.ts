@@ -85,6 +85,8 @@ import { showFormatAsTableDialog } from "./format-as-table-dialog.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { showFillSeriesDialog } from "./fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./new-table-style-dialog.js";
+import { showPivotTableDialog } from "./pivot-table-dialog.js";
+import { tryOpenPivotFieldsPaneForSelection } from "./pivot-table-fields-pane.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
 import { mountFormatCellsDialog } from "./format-cells-dialog.js";
 import { useUndoRedo } from "./undo-redo-plugin.js";
@@ -708,7 +710,13 @@ export class FlexSheet {
     }
     const range = this.selection.getNormalizedRange();
     this.workspace.commands.execute(
-      new ApplySelectionFormatCellsDialogCommand(sheet, range, basePatch, border.apply, border.state),
+      new ApplySelectionFormatCellsDialogCommand(
+        sheet,
+        range,
+        basePatch,
+        border.apply,
+        border.state,
+      ),
     );
     this.cellEditor.syncLayout();
     this.refresh();
@@ -862,7 +870,9 @@ export class FlexSheet {
       return;
     }
     const range = this.selection.getNormalizedRange();
-    this.workspace.commands.execute(new ClearConditionalFormatRulesIntersectingCommand(sheet, range));
+    this.workspace.commands.execute(
+      new ClearConditionalFormatRulesIntersectingCommand(sheet, range),
+    );
     this.cellEditor.syncLayout();
     this.refresh();
   }
@@ -1269,13 +1279,38 @@ export class FlexSheet {
     showFillSeriesDialog(this);
   }
 
+  /** Ribbon「插入 -> 数据透视表」：打开数据透视表创建对话框。 */
+  openPivotTableDialog(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    showPivotTableDialog(this);
+  }
+
+  /**
+   * 当活动单元格位于已注册透视输出区域内时，打开右侧「数据透视表字段」窗格。
+   * Ribbon「数据 -> 字段列表」。
+   */
+  openPivotTableFieldsPane(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sh = this.workbook.getActiveSheet();
+    if (sh === undefined) {
+      return;
+    }
+    const ac = this.selection.getActiveCell();
+    tryOpenPivotFieldsPaneForSelection(this, sh, ac.row, ac.col);
+  }
+
   /**
    * 注册一个新建表样式，并返回稳定 id。
    * 当前实现先将自定义样式映射到一套可用的内置预设，保证样式库中可见且可套用。
    */
   createCustomTableStyle(name: string): string {
     const trimmed = name.trim();
-    const displayName = trimmed.length > 0 ? trimmed : `表样式 ${this.customTableStyles.length + 1}`;
+    const displayName =
+      trimmed.length > 0 ? trimmed : `表样式 ${this.customTableStyles.length + 1}`;
     const id = `custom-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     this.customTableStyles.push({
       id,
@@ -1327,13 +1362,7 @@ export class FlexSheet {
     if (meta === undefined) {
       return;
     }
-    sheet.sortRowsInRangeByColumnFontColor(
-      meta.rowStart,
-      meta.rowEnd,
-      col,
-      targetArgb,
-      direction,
-    );
+    sheet.sortRowsInRangeByColumnFontColor(meta.rowStart, meta.rowEnd, col, targetArgb, direction);
     recalcWorksheet(sheet);
     this.refresh();
   }
@@ -1522,7 +1551,10 @@ export class FlexSheet {
 
   private readonly onLostPointerCapture = (ev: PointerEvent): void => {
     if (
-      (!this.dragSelecting && !this.resizing && this.headingDrag === null && this.fillDrag === null) ||
+      (!this.dragSelecting &&
+        !this.resizing &&
+        this.headingDrag === null &&
+        this.fillDrag === null) ||
       ev.pointerId !== this.dragPointerId
     ) {
       return;
@@ -1531,7 +1563,12 @@ export class FlexSheet {
   };
 
   private readonly onCanvasPointerMove = (ev: PointerEvent): void => {
-    if (this.resizing || this.dragSelecting || this.headingDrag !== null || this.fillDrag !== null) {
+    if (
+      this.resizing ||
+      this.dragSelecting ||
+      this.headingDrag !== null ||
+      this.fillDrag !== null
+    ) {
       return;
     }
     const sheet = this.workbook.getActiveSheet();
@@ -1562,7 +1599,12 @@ export class FlexSheet {
   }
 
   private readonly onCanvasPointerLeave = (): void => {
-    if (this.resizing || this.dragSelecting || this.headingDrag !== null || this.fillDrag !== null) {
+    if (
+      this.resizing ||
+      this.dragSelecting ||
+      this.headingDrag !== null ||
+      this.fillDrag !== null
+    ) {
       return;
     }
     this.hoverResizeKind = null;

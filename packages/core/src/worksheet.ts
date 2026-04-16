@@ -22,6 +22,7 @@ import {
   tableStyleUsesDistinctHeaderRow,
   type ParsedTableStyleCommand,
 } from "./table-style-presets.js";
+import type { WorksheetPivotTableDefinition } from "./pivot-table-model.js";
 
 /** 列筛选按钮绘制位置：列标题栏或选区上一行的表体单元格。 */
 export type ColumnAutoFilterUiKind = "header" | "body";
@@ -91,6 +92,8 @@ export class Worksheet {
   private readonly autoFilterConcealedRows = new Set<number>();
   private readonly autoFilterByCol = new Map<number, ColumnAutoFilterMutable>();
   private tableStyleRegions: TableStyleRegion[] = [];
+  /** 数据透视：导出 OOXML 用元数据（显示在工作表 `destination*` 矩形内）。 */
+  private pivotTableDefinitions: WorksheetPivotTableDefinition[] = [];
 
   /** 合并区域：主格键 `row,col` → 跨度（≥2 格）。 */
   private mergeRegionsByMaster = new Map<
@@ -457,6 +460,53 @@ export class Worksheet {
     );
   }
 
+  /** 注册透视表导出元数据（同 id 覆盖）。 */
+  registerPivotTableDefinition(def: WorksheetPivotTableDefinition): void {
+    this.pivotTableDefinitions = this.pivotTableDefinitions.filter((it) => it.id !== def.id);
+    this.pivotTableDefinitions.push(def);
+    this.touchData();
+  }
+
+  removePivotTableDefinitionById(id: string): void {
+    const before = this.pivotTableDefinitions.length;
+    this.pivotTableDefinitions = this.pivotTableDefinitions.filter((it) => it.id !== id);
+    if (this.pivotTableDefinitions.length !== before) {
+      this.touchData();
+    }
+  }
+
+  clearPivotTableDefinitions(): void {
+    if (this.pivotTableDefinitions.length === 0) {
+      return;
+    }
+    this.pivotTableDefinitions = [];
+    this.touchData();
+  }
+
+  getPivotTableDefinitionsSnapshot(): readonly WorksheetPivotTableDefinition[] {
+    return this.pivotTableDefinitions.map((it) => ({
+      ...it,
+      sourceRange: { ...it.sourceRange },
+    }));
+  }
+
+  /**
+   * XLSX 导出：位于任一已注册透视输出矩形内的单元格不写入工作表部件，
+   * 避免与 Excel 原生透视缓存布局冲突（打开后由 Excel 填充显示区）。
+   */
+  isPivotExportSuppressedCell(row: number, col: number): boolean {
+    for (const p of this.pivotTableDefinitions) {
+      const r0 = p.destinationRow;
+      const c0 = p.destinationCol;
+      const r1 = r0 + p.outputRowCount - 1;
+      const c1 = c0 + p.outputColCount - 1;
+      if (row >= r0 && row <= r1 && col >= c0 && col <= c1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** 列中曾出现过的字体前景色 ARGB（去重，用于「按颜色」子菜单）；仅扫描该列筛选作用行范围。 */
   collectUniqueFontColorArgbsInColumn(col: number): string[] {
     if (!Number.isInteger(col) || col < 0 || col >= this.colCount) {
@@ -777,7 +827,10 @@ export class Worksheet {
 
   /** 替换整张表的条件格式规则列表。 */
   setConditionalFormatRules(rules: readonly ConditionalFormatRule[]): void {
-    this.conditionalFormatRules = rules.map((r) => ({ ...r, range: normalizeSelectionRange(r.range) }));
+    this.conditionalFormatRules = rules.map((r) => ({
+      ...r,
+      range: normalizeSelectionRange(r.range),
+    }));
     this.touchData();
   }
 
