@@ -6,6 +6,9 @@ import type {
   CellScalar,
   CellStyle,
   CellTextOrientation,
+  PivotAggregateKind,
+  PivotValueFieldSpec,
+  WorksheetPivotTableDefinition,
 } from "@flexsheet/core";
 import { isCellFillPatternType } from "@flexsheet/core";
 import { parseCellRef } from "./a1.js";
@@ -696,6 +699,309 @@ function resolveWorkbookRels(relsXml: string): Map<string, string> {
   return map;
 }
 
+function normalizePartPath(path: string): string {
+  const raw = path.replace(/\\/g, "/").replace(/^\/+/, "");
+  const segs = raw.split("/");
+  const out: string[] = [];
+  for (const seg of segs) {
+    if (seg === "" || seg === ".") {
+      continue;
+    }
+    if (seg === "..") {
+      if (out.length > 0) {
+        out.pop();
+      }
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+
+function dirname(path: string): string {
+  const p = normalizePartPath(path);
+  const idx = p.lastIndexOf("/");
+  if (idx < 0) {
+    return "";
+  }
+  return p.slice(0, idx);
+}
+
+function resolvePartTarget(basePartPath: string, target: string): string {
+  if (target.startsWith("/")) {
+    return normalizePartPath(target.slice(1));
+  }
+  const baseDir = dirname(basePartPath);
+  const joined = baseDir === "" ? target : `${baseDir}/${target}`;
+  return normalizePartPath(joined);
+}
+
+function relsPartPathFor(partPath: string): string {
+  const dir = dirname(partPath);
+  const file = partPath.slice(partPath.lastIndexOf("/") + 1);
+  return normalizePartPath(`${dir}/_rels/${file}.rels`);
+}
+
+function parseRangeA1(ref: string): { startRow: number; endRow: number; startCol: number; endCol: number } | null {
+  const raw = ref.trim();
+  if (raw.length === 0) {
+    return null;
+  }
+  const parts = raw.split(":");
+  const a = parseCellRef(parts[0] ?? "");
+  const b = parseCellRef((parts[1] ?? parts[0]) ?? "");
+  if (a === null || b === null) {
+    return null;
+  }
+  return {
+    startRow: Math.min(a.row, b.row),
+    endRow: Math.max(a.row, b.row),
+    startCol: Math.min(a.col, b.col),
+    endCol: Math.max(a.col, b.col),
+  };
+}
+
+function parsePivotAggregateKind(subtotal: string | null): PivotAggregateKind {
+  switch ((subtotal ?? "").trim().toLowerCase()) {
+    case "count":
+      return "count";
+    case "average":
+      return "average";
+    case "max":
+      return "max";
+    case "min":
+      return "min";
+    case "sum":
+    default:
+      return "sum";
+  }
+}
+
+function parsePivotFieldOffsets(container: Element | undefined): number[] {
+  if (container === undefined) {
+    return [];
+  }
+  const out: number[] = [];
+  for (const f of [...container.children]) {
+    if (f.localName === "field") {
+      const x = Number(f.getAttribute("x") ?? "");
+      if (Number.isFinite(x) && x >= 0) {
+        out.push(Math.trunc(x));
+      }
+      continue;
+    }
+    if (f.localName === "pageField") {
+      const fld = Number(f.getAttribute("fld") ?? "");
+      if (Number.isFinite(fld) && fld >= 0) {
+        out.push(Math.trunc(fld));
+      }
+    }
+  }
+  return out;
+}
+
+function parsePivotFilterSelectedKeys(
+  pivotFieldEl: Element | undefined,
+  sharedItems: readonly string[],
+): readonly string[] {
+  if (pivotFieldEl === undefined) {
+    return [];
+  }
+  const items = firstLocal(pivotFieldEl, "items");
+  if (items === undefined) {
+    return [];
+  }
+  const explicit: string[] = [];
+  let hasDefault = false;
+  for (const it of childrenLocal(items, "item")) {
+    if ((it.getAttribute("t") ?? "").toLowerCase() === "default") {
+      hasDefault = true;
+      continue;
+    }
+    if ((it.getAttribute("h") ?? "") === "1") {
+      continue;
+    }
+    const x = Number(it.getAttribute("x") ?? "");
+    if (!Number.isFinite(x) || x < 0) {
+      continue;
+    }
+    const key = sharedItems[Math.trunc(x)];
+    if (key !== undefined) {
+      explicit.push(key);
+    }
+  }
+  if (hasDefault || explicit.length === 0) {
+    return [];
+  }
+  return explicit;
+}
+
+function pivotFieldNameFromCellValue(value: CellScalar, fallback: string): string {
+  if (typeof value === "string") {
+    const t = value.trim();
+    if (t.length > 0) {
+      return t;
+    }
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "TRUE" : "FALSE";
+  }
+  return fallback;
+}
+
+interface PivotCacheMeta {
+  readonly sourceSheetName: string;
+  readonly sourceRange: { startRow: number; endRow: number; startCol: number; endCol: number };
+  readonly cacheFieldNames: readonly string[];
+  readonly sharedItemsByFieldOffset: ReadonlyMap<number, readonly string[]>;
+}
+
+function parsePivotCacheMeta(defXml: string): PivotCacheMeta | null {
+  const doc = parseXml(defXml);
+  const root = doc.documentElement;
+  if (root.localName !== "pivotCacheDefinition") {
+    return null;
+  }
+  const cacheSource = firstLocal(root, "cacheSource");
+  const wsSource = cacheSource !== undefined ? firstLocal(cacheSource, "worksheetSource") : undefined;
+  const sourceSheetName = wsSource?.getAttribute("sheet") ?? "";
+  const sourceRef = wsSource?.getAttribute("ref") ?? "";
+  const sourceRange = parseRangeA1(sourceRef);
+  if (sourceSheetName.trim() === "" || sourceRange === null) {
+    return null;
+  }
+
+  const sharedItemsByFieldOffset = new Map<number, readonly string[]>();
+  const cacheFieldNames: string[] = [];
+  const cacheFields = firstLocal(root, "cacheFields");
+  const fieldEls = cacheFields !== undefined ? childrenLocal(cacheFields, "cacheField") : [];
+  for (let i = 0; i < fieldEls.length; i++) {
+    const cf = fieldEls[i]!;
+    cacheFieldNames.push(cf.getAttribute("name") ?? `Column${i + 1}`);
+    const shared = firstLocal(cf, "sharedItems");
+    const keys: string[] = [];
+    if (shared !== undefined) {
+      for (const k of [...shared.children]) {
+        if (k.localName === "s") {
+          keys.push(k.getAttribute("v") ?? "");
+        } else if (k.localName === "n") {
+          keys.push(k.getAttribute("v") ?? "");
+        } else if (k.localName === "b") {
+          keys.push((k.getAttribute("v") ?? "") === "1" ? "TRUE" : "FALSE");
+        } else if (k.localName === "m") {
+          keys.push("(空白)");
+        }
+      }
+    }
+    sharedItemsByFieldOffset.set(i, keys);
+  }
+  return { sourceSheetName, sourceRange, cacheFieldNames, sharedItemsByFieldOffset };
+}
+
+function parseWorksheetPivotDefinitions(
+  pivotTableXml: string,
+  cache: PivotCacheMeta,
+  sourceSheetIndex: number,
+  sourceSheet: Worksheet | undefined,
+  idSeed: string,
+): WorksheetPivotTableDefinition[] {
+  const doc = parseXml(pivotTableXml);
+  const root = doc.documentElement;
+  if (root.localName !== "pivotTableDefinition") {
+    return [];
+  }
+  const location = firstLocal(root, "location");
+  const ref = location?.getAttribute("ref") ?? "";
+  const dstRange = parseRangeA1(ref);
+  if (dstRange === null) {
+    return [];
+  }
+
+  const sourceRange = cache.sourceRange;
+  const toAbsCol = (offset: number): number => sourceRange.startCol + offset;
+  const rowOffsets = parsePivotFieldOffsets(firstLocal(root, "rowFields"));
+  const colOffsets = parsePivotFieldOffsets(firstLocal(root, "colFields"));
+  const filterOffsets = parsePivotFieldOffsets(firstLocal(root, "pageFields"));
+  const dataFields = childrenLocal(firstLocal(root, "dataFields") ?? root, "dataField");
+  if (dataFields.length === 0) {
+    return [];
+  }
+  const valueFields: PivotValueFieldSpec[] = [];
+  for (const df of dataFields) {
+    const fld = Number(df.getAttribute("fld") ?? "");
+    if (!Number.isFinite(fld) || fld < 0) {
+      continue;
+    }
+    valueFields.push({
+      col: toAbsCol(Math.trunc(fld)),
+      aggregate: parsePivotAggregateKind(df.getAttribute("subtotal")),
+    });
+  }
+  if (valueFields.length === 0) {
+    return [];
+  }
+
+  const pivotFieldsRoot = firstLocal(root, "pivotFields");
+  const pivotFieldEls = pivotFieldsRoot !== undefined ? childrenLocal(pivotFieldsRoot, "pivotField") : [];
+  const filterSelectedKeys: (readonly string[])[] = [];
+  for (const off of filterOffsets) {
+    const pField = pivotFieldEls[off];
+    const sharedItems = cache.sharedItemsByFieldOffset.get(off) ?? [];
+    filterSelectedKeys.push(parsePivotFilterSelectedKeys(pField, sharedItems));
+  }
+
+  let hasHeaders = true;
+  if (sourceSheet !== undefined) {
+    const fields = cache.cacheFieldNames;
+    if (fields.length > 0) {
+      let allMatch = true;
+      for (let i = 0; i < fields.length; i++) {
+        const absCol = sourceRange.startCol + i;
+        if (absCol > sourceRange.endCol) {
+          break;
+        }
+        const cellName = pivotFieldNameFromCellValue(
+          sourceSheet.getCell(sourceRange.startRow, absCol).value,
+          `Column${i + 1}`,
+        );
+        if (cellName !== fields[i]) {
+          allMatch = false;
+          break;
+        }
+      }
+      hasHeaders = allMatch;
+    }
+  }
+
+  const name = root.getAttribute("name") ?? "PivotTable";
+  const valueFieldsOnRows =
+    valueFields.length > 1 &&
+    colOffsets.length === 0 &&
+    (root.getAttribute("dataOnRows") ?? "") === "1";
+  return [
+    {
+      id: `pvt-import-${idSeed}`,
+      name,
+      sourceSheetIndex,
+      sourceRange: { ...sourceRange },
+      hasHeaders,
+      rowFieldCols: rowOffsets.map(toAbsCol),
+      columnFieldCols: colOffsets.map(toAbsCol),
+      filterFieldCols: filterOffsets.map(toAbsCol),
+      filterSelectedKeys,
+      valueFields,
+      valueFieldsOnRows: valueFieldsOnRows ? true : undefined,
+      destinationRow: dstRange.startRow,
+      destinationCol: dstRange.startCol,
+      outputRowCount: Math.max(1, dstRange.endRow - dstRange.startRow + 1),
+      outputColCount: Math.max(1, dstRange.endCol - dstRange.startCol + 1),
+    },
+  ];
+}
+
 /** 自标准 XLSX Blob 导入为 `Workbook`（纯前端）。 */
 export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
   const buf = await blob.arrayBuffer();
@@ -734,6 +1040,11 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
   const out = new Workbook();
   const sheetElements = childrenLocal(sheetsEl, "sheet");
 
+  const importedSheetBindings: {
+    readonly importedIndex: number;
+    readonly sheetName: string;
+    readonly sheetPath: string;
+  }[] = [];
   for (const se of sheetElements) {
     const nm = se.getAttribute("name") ?? "Sheet";
     const id = rId(se);
@@ -752,6 +1063,11 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
     const sheetXml = new TextDecoder("utf-8").decode(part);
     const ws = parseSheet(sheetXml, sst, styleTable, nm);
     out.addSheet(ws);
+    importedSheetBindings.push({
+      importedIndex: out.sheetCount - 1,
+      sheetName: nm,
+      sheetPath: fullPath,
+    });
   }
 
   if (out.sheetCount === 0) {
@@ -759,6 +1075,100 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
   }
 
   out.activeSheetIndex = readActiveSheetIndexFromWorkbookXml(wbDoc, out.sheetCount);
+
+  const cacheIdToMeta = new Map<number, PivotCacheMeta>();
+  const pivotCaches = firstLocal(wbDoc.documentElement, "pivotCaches");
+  if (pivotCaches !== undefined) {
+    for (const pc of childrenLocal(pivotCaches, "pivotCache")) {
+      const cacheId = Number(pc.getAttribute("cacheId") ?? "");
+      const relId = rId(pc);
+      if (!Number.isFinite(cacheId) || relId === null) {
+        continue;
+      }
+      const target = relsMap.get(relId);
+      if (target === undefined) {
+        continue;
+      }
+      const cacheDefPath = resolvePartTarget("xl/workbook.xml", target);
+      const cacheDefBytes = files.get(cacheDefPath);
+      if (cacheDefBytes === undefined) {
+        continue;
+      }
+      const cacheDefXml = new TextDecoder("utf-8").decode(cacheDefBytes);
+      const meta = parsePivotCacheMeta(cacheDefXml);
+      if (meta !== null) {
+        cacheIdToMeta.set(Math.trunc(cacheId), meta);
+      }
+    }
+  }
+
+  const sheetNameToImportedIndex = new Map<string, number>();
+  for (const binding of importedSheetBindings) {
+    sheetNameToImportedIndex.set(binding.sheetName, binding.importedIndex);
+  }
+  let importedPivotSerial = 1;
+  for (const binding of importedSheetBindings) {
+    const sheetPartBytes = files.get(binding.sheetPath);
+    if (sheetPartBytes === undefined) {
+      continue;
+    }
+    const sheetXml = new TextDecoder("utf-8").decode(sheetPartBytes);
+    const sheetDoc = parseXml(sheetXml);
+    const pivotTables = firstLocal(sheetDoc.documentElement, "pivotTables");
+    if (pivotTables === undefined) {
+      continue;
+    }
+    const sheetRelsPath = relsPartPathFor(binding.sheetPath);
+    const sheetRelsBytes = files.get(sheetRelsPath);
+    if (sheetRelsBytes === undefined) {
+      continue;
+    }
+    const sheetRels = resolveWorkbookRels(new TextDecoder("utf-8").decode(sheetRelsBytes));
+    const destSheet = out.getSheet(binding.importedIndex);
+    if (destSheet === undefined) {
+      continue;
+    }
+    for (const pt of childrenLocal(pivotTables, "pivotTable")) {
+      const relId = rId(pt);
+      if (relId === null) {
+        continue;
+      }
+      const target = sheetRels.get(relId);
+      if (target === undefined) {
+        continue;
+      }
+      const pivotTablePath = resolvePartTarget(binding.sheetPath, target);
+      const pivotTableBytes = files.get(pivotTablePath);
+      if (pivotTableBytes === undefined) {
+        continue;
+      }
+      const pivotTableXml = new TextDecoder("utf-8").decode(pivotTableBytes);
+      const pivotDoc = parseXml(pivotTableXml);
+      const cacheId = Number(pivotDoc.documentElement.getAttribute("cacheId") ?? "");
+      if (!Number.isFinite(cacheId)) {
+        continue;
+      }
+      const cacheMeta = cacheIdToMeta.get(Math.trunc(cacheId));
+      if (cacheMeta === undefined) {
+        continue;
+      }
+      const sourceSheetIndex = sheetNameToImportedIndex.get(cacheMeta.sourceSheetName);
+      if (sourceSheetIndex === undefined) {
+        continue;
+      }
+      const sourceSheet = out.getSheet(sourceSheetIndex);
+      const defs = parseWorksheetPivotDefinitions(
+        pivotTableXml,
+        cacheMeta,
+        sourceSheetIndex,
+        sourceSheet,
+        String(importedPivotSerial++),
+      );
+      for (const def of defs) {
+        destSheet.registerPivotTableDefinition(def);
+      }
+    }
+  }
 
   for (let i = 0; i < out.sheetCount; i++) {
     const sh = out.getSheet(i);

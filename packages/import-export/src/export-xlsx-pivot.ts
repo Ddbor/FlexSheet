@@ -102,7 +102,7 @@ function buildSharedItemsXmlForField(
   src: Worksheet,
   def: WorksheetPivotTableDefinition,
   fieldCol: number,
-): string {
+): { readonly xml: string; readonly keys: readonly string[] } {
   const n = normalizeSelectionRange(def.sourceRange);
   const rStart = def.hasHeaders ? n.startRow + 1 : n.startRow;
   const rEnd = n.endRow;
@@ -136,22 +136,28 @@ function buildSharedItemsXmlForField(
     strings.add(String(v));
   }
   const parts: string[] = [];
+  const keys: string[] = [];
   const numsSorted = [...numbers].sort((a, b) => a - b);
   for (const nv of numsSorted) {
     parts.push(`<n v="${String(nv)}"/>`);
+    keys.push(String(nv));
   }
   const strsSorted = [...strings].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "accent" }));
   for (const s of strsSorted) {
     parts.push(`<s v="${escapeXml(s)}"/>`);
+    keys.push(s);
   }
   if (hasFalse) {
     parts.push(`<b v="0"/>`);
+    keys.push("FALSE");
   }
   if (hasTrue) {
     parts.push(`<b v="1"/>`);
+    keys.push("TRUE");
   }
   if (hasBlank) {
     parts.push(`<m/>`);
+    keys.push("(空白)");
   }
   const mixed =
     (numbers.size > 0 && strings.size > 0) ||
@@ -170,7 +176,10 @@ function buildSharedItemsXmlForField(
     attrs.push(`count="${cnt}"`);
   }
   const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
-  return `<sharedItems${attrStr}>${parts.join("")}</sharedItems>`;
+  return {
+    xml: `<sharedItems${attrStr}>${parts.join("")}</sharedItems>`,
+    keys,
+  };
 }
 
 /**
@@ -267,9 +276,9 @@ function buildPivotCacheDefinitionRelsXml(cacheIdx: number): string {
 
 function buildPivotCacheDefinitionXml(
   def: WorksheetPivotTableDefinition,
-  src: Worksheet,
   sheetNames: readonly string[],
   fieldNames: readonly string[],
+  sharedItemsByField: readonly { readonly xml: string; readonly keys: readonly string[] }[],
   recordCount: number,
 ): string {
   const n = normalizeSelectionRange(def.sourceRange);
@@ -277,8 +286,7 @@ function buildPivotCacheDefinitionXml(
   const ref = `${formatCellRef(n.startRow, n.startCol)}:${formatCellRef(n.endRow, n.endCol)}`;
   const fieldsXml = fieldNames
     .map((nm, fi) => {
-      const col = n.startCol + fi;
-      const shared = buildSharedItemsXmlForField(src, def, col);
+      const shared = sharedItemsByField[fi]?.xml ?? `<sharedItems/>`;
       return `<cacheField name="${escapeXml(nm)}">${shared}</cacheField>`;
     })
     .join("");
@@ -286,7 +294,7 @@ function buildPivotCacheDefinitionXml(
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<pivotCacheDefinition xmlns="${SS_MAIN}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
-    ` refreshOnLoad="1" recordCount="${recordCount}" createdVersion="6" refreshedVersion="6" minRefreshableVersion="3" saveData="${saveData}">` +
+    ` r:id="rId1" refreshOnLoad="1" recordCount="${recordCount}" createdVersion="6" refreshedVersion="6" minRefreshableVersion="3" saveData="${saveData}">` +
     `<cacheSource type="worksheet">` +
     `<worksheetSource ref="${escapeXml(ref)}" sheet="${escapeXml(sheetName)}"/>` +
     `</cacheSource>` +
@@ -298,6 +306,7 @@ function buildPivotCacheDefinitionXml(
 function buildPivotTableDefinitionXml(
   def: WorksheetPivotTableDefinition,
   fieldNames: readonly string[],
+  sharedItemsByField: readonly { readonly xml: string; readonly keys: readonly string[] }[],
   cacheId: number,
 ): string {
   const n = normalizeSelectionRange(def.sourceRange);
@@ -323,20 +332,45 @@ function buildPivotTableDefinitionXml(
   const filterOffSet = new Set(filterOffs);
 
   const pivotFieldsXml: string[] = [];
+  const selectedKeysByFilterOffset = new Map<number, readonly string[]>();
+  for (let i = 0; i < filterOffs.length; i++) {
+    selectedKeysByFilterOffset.set(filterOffs[i]!, def.filterSelectedKeys[i] ?? []);
+  }
   for (let fi = 0; fi < fieldNames.length; fi++) {
     if (dataFieldIndices.has(fi)) {
       pivotFieldsXml.push(`<pivotField dataField="1" showAll="0"/>`);
     } else if (filterOffSet.has(fi)) {
-      pivotFieldsXml.push(
-        `<pivotField axis="axisPage" showAll="1"><items count="1"><item x="0"/></items></pivotField>`,
-      );
+      const selected = selectedKeysByFilterOffset.get(fi) ?? [];
+      const sharedKeys = sharedItemsByField[fi]?.keys ?? [];
+      if (selected.length === 0 || sharedKeys.length === 0) {
+        pivotFieldsXml.push(
+          `<pivotField axis="axisPage" showAll="1"><items count="1"><item t="default"/></items></pivotField>`,
+        );
+      } else {
+        const selectedSet = new Set(selected);
+        const itemXml = sharedKeys
+          .map((k, idx) => {
+            return selectedSet.has(k) ? `<item x="${idx}"/>` : `<item x="${idx}" h="1"/>`;
+          })
+          .join("");
+        const hasHit = sharedKeys.some((k) => selectedSet.has(k));
+        if (!hasHit) {
+          pivotFieldsXml.push(
+            `<pivotField axis="axisPage" showAll="1"><items count="1"><item t="default"/></items></pivotField>`,
+          );
+        } else {
+          pivotFieldsXml.push(
+            `<pivotField axis="axisPage" showAll="0"><items count="${sharedKeys.length}">${itemXml}</items></pivotField>`,
+          );
+        }
+      }
     } else if (rowOffSet.has(fi)) {
       pivotFieldsXml.push(
-        `<pivotField axis="axisRow" showAll="1"><items count="1"><item x="0"/></items></pivotField>`,
+        `<pivotField axis="axisRow" showAll="1"><items count="1"><item t="default"/></items></pivotField>`,
       );
     } else if (colOffSet.has(fi)) {
       pivotFieldsXml.push(
-        `<pivotField axis="axisCol" showAll="1"><items count="1"><item x="0"/></items></pivotField>`,
+        `<pivotField axis="axisCol" showAll="1"><items count="1"><item t="default"/></items></pivotField>`,
       );
     } else {
       pivotFieldsXml.push(`<pivotField/>`);
@@ -344,10 +378,15 @@ function buildPivotTableDefinitionXml(
   }
 
   const rowFieldsXml =
-    `<rowFields count="${rowOffs.length}">` +
-    rowOffs.map((o) => `<field x="${o}"/>`).join("") +
-    `</rowFields>`;
-  const rowItemsXml = `<rowItems count="1"><i><x v="0"/></i></rowItems>`;
+    rowOffs.length === 0
+      ? ""
+      : `<rowFields count="${rowOffs.length}">` +
+        rowOffs.map((o) => `<field x="${o}"/>`).join("") +
+        `</rowFields>`;
+  const rowItemsXml =
+    rowOffs.length === 0
+      ? `<rowItems count="1"><i/></rowItems>`
+      : `<rowItems count="1"><i>${rowOffs.map(() => `<x v="0"/>`).join("")}</i></rowItems>`;
 
   let colFieldsXml = "";
   let colItemsXml = `<colItems count="1"><i/></colItems>`;
@@ -356,6 +395,7 @@ function buildPivotTableDefinitionXml(
       `<colFields count="${colOffs.length}">` +
       colOffs.map((o) => `<field x="${o}"/>`).join("") +
       `</colFields>`;
+    colItemsXml = `<colItems count="1"><i>${colOffs.map(() => `<x v="0"/>`).join("")}</i></colItems>`;
   }
 
   const dataCaption = "Values";
@@ -372,7 +412,7 @@ function buildPivotTableDefinitionXml(
     dataFieldParts.push(
       `<dataField name="${dataName}" fld="${valOff}" subtotal="${escapeXml(
         ooxmlDataSubtotal(subAgg),
-      )}"/>`,
+      )}" showDataAs="normal"/>`,
     );
   }
   const dataFieldsXml = `<dataFields count="${dataFieldParts.length}">${dataFieldParts.join("")}</dataFields>`;
@@ -381,7 +421,7 @@ function buildPivotTableDefinitionXml(
     filterOffs.length === 0
       ? ""
       : `<pageFields count="${filterOffs.length}">${filterOffs
-          .map((o) => `<field x="${o}"/>`)
+          .map((o) => `<pageField fld="${o}"/>`)
           .join("")}</pageFields>`;
 
   const styleXml = `<pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0"/>`;
@@ -404,7 +444,8 @@ function buildPivotTableDefinitionXml(
     ` applyFontFormats="0"` +
     ` applyPatternFormats="0"` +
     ` applyAlignmentFormats="0"` +
-    ` applyWidthHeightFormats="1">` +
+    ` applyWidthHeightFormats="1"` +
+    `${def.valueFieldsOnRows === true && valueSpecs.length > 1 && colOffs.length === 0 ? ` dataOnRows="1"` : ""}>` +
     `<location ref="${escapeXml(locRef)}" firstHeaderRow="1" firstDataRow="1" firstDataCol="1"/>` +
     `<pivotFields count="${fieldNames.length}">${pivotFieldsXml.join("")}</pivotFields>` +
     rowFieldsXml +
@@ -447,21 +488,25 @@ export function collectPivotExportPieces(
         continue;
       }
       cacheIdx++;
-      const cacheId = cacheIdx - 1;
+      const cacheId = cacheIdx;
       const fieldNames = collectFieldNames(src, def);
       if (fieldNames.length === 0) {
         continue;
       }
+      const n = normalizeSelectionRange(def.sourceRange);
+      const sharedItemsByField = fieldNames.map((_, fi) =>
+        buildSharedItemsXmlForField(src, def, n.startCol + fi),
+      );
       const { xml: pivotCacheRecordsXml, recordCount } = buildPivotCacheRecordsXml(src, def);
       const pivotCacheDefinitionXml = buildPivotCacheDefinitionXml(
         def,
-        src,
         sheetNames,
         fieldNames,
+        sharedItemsByField,
         recordCount,
       );
       const pivotCacheDefinitionRelsXml = buildPivotCacheDefinitionRelsXml(cacheIdx);
-      const pivotTableXml = buildPivotTableDefinitionXml(def, fieldNames, cacheId);
+      const pivotTableXml = buildPivotTableDefinitionXml(def, fieldNames, sharedItemsByField, cacheId);
       const pivotTableRelsXml = buildPivotTableRelsXml(cacheIdx);
       out.push({
         cacheIdx,

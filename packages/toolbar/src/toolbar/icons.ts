@@ -289,6 +289,20 @@ export function iconFillColor(): SVGSVGElement {
   );
 }
 
+/** 字体填充颜色（16×16，仿 Office 油漆桶，非彩色） */
+export function iconFontFillColor(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 16 16",
+    '<g fill="none" fill-rule="nonzero">' +
+      '<path fill="currentColor" fill-opacity="0.16" d="M0 12h16v4H0z"/>' +
+      '<path fill="currentColor" fill-opacity="0.72" d="M1 13v2h14v-2zm-1-1h16v4H0z"/>' +
+      '<path fill="currentColor" fill-opacity="0.2" d="M6.993 3.33 2.331 7.994l3.676 3.676 4.662-4.662z"/>' +
+      '<path fill="currentColor" d="M6.644 3.68 2.33 7.994l3.676 3.676 4.662-4.662L7.592 3.93v2.525l.006.044L8.1 7l-1 1.002L6.1 7l.544-.544zm0-1.33v-.84c0-.323-.204-.547-.493-.553H6.06c-.28 0-.511.24-.511.553v1.935zM4.6 4.393V1.51c0-.324.1-.636.282-.893q.145-.205.346-.35C5.47.094 5.758 0 6.06 0h.073c.255 0 .5.067.715.192.458.266.744.769.744 1.318V2.6L12 7.007 6.007 13 1 7.993z"/>' +
+      '<path fill="currentColor" fill-opacity="0.82" d="M11.739 9.267c0 1.181.248 2.142.638 2.733 0-.628.14-1.035.53-1.773.922-1.514 1.594-2.733.603-3.988Q12.518 4.983 10 5s1.393 1.595 1.739 1.977c.142.628 0 1.108 0 2.29"/>' +
+      "</g>",
+  );
+}
+
 /** 向下填充（16×16，单色） */
 export function iconFillDown(): SVGSVGElement {
   return svgElMarkup(
@@ -695,11 +709,17 @@ export function iconFormatText(): SVGSVGElement {
 }
 
 export function iconChart(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>',
+  );
 }
 
 export function iconTable(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/>',
+  );
 }
 
 export function iconImage(): SVGSVGElement {
@@ -710,7 +730,10 @@ export function iconImage(): SVGSVGElement {
 }
 
 export function iconShapes(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<circle cx="8" cy="8" r="3"/><rect x="13" y="5" width="6" height="6" rx="1"/><path d="M3 21l7-7 4 4 7-7"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<circle cx="8" cy="8" r="3"/><rect x="13" y="5" width="6" height="6" rx="1"/><path d="M3 21l7-7 4 4 7-7"/>',
+  );
 }
 
 export function iconSparkline(): SVGSVGElement {
@@ -732,19 +755,31 @@ export function iconPivotTableOption(): SVGSVGElement {
 }
 
 export function iconOrientation(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="4" y="4" width="16" height="10" rx="1"/><path d="M8 20h8"/><path d="M12 14v6"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="4" y="4" width="16" height="10" rx="1"/><path d="M8 20h8"/><path d="M12 14v6"/>',
+  );
 }
 
 export function iconMargins(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="6" y="6" width="12" height="12"/><path d="M3 3v18"/><path d="M21 3v18"/><path d="M3 3h18"/><path d="M3 21h18"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="6" y="6" width="12" height="12"/><path d="M3 3v18"/><path d="M21 3v18"/><path d="M3 3h18"/><path d="M3 21h18"/>',
+  );
 }
 
 export function iconBackground(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l6-6 4 4 8-8"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 15l6-6 4 4 8-8"/>',
+  );
 }
 
 export function iconPrintTitles(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 8h16"/><path d="M8 4v4"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 8h16"/><path d="M8 4v4"/>',
+  );
 }
 
 export function iconFunction(): SVGSVGElement {
@@ -767,7 +802,10 @@ export function iconAudit(): SVGSVGElement {
 }
 
 export function iconSort(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<path d="M3 6h7"/><path d="M3 12h5"/><path d="M3 18h3"/><path d="M16 5v14l4-4"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<path d="M3 6h7"/><path d="M3 12h5"/><path d="M3 18h3"/><path d="M16 5v14l4-4"/>',
+  );
 }
 
 export function iconFilter(): SVGSVGElement {
@@ -775,11 +813,17 @@ export function iconFilter(): SVGSVGElement {
 }
 
 export function iconSlicer(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="10" height="6" rx="1"/><circle cx="17" cy="17" r="2"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="4" y="4" width="16" height="6" rx="1"/><rect x="4" y="14" width="10" height="6" rx="1"/><circle cx="17" cy="17" r="2"/>',
+  );
 }
 
 export function iconDataTools(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>',
+  );
 }
 
 export function iconNormalView(): SVGSVGElement {
@@ -787,30 +831,42 @@ export function iconNormalView(): SVGSVGElement {
 }
 
 export function iconPageBreak(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h18" stroke-dasharray="2 2"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M12 3v18"/><path d="M3 12h18" stroke-dasharray="2 2"/>',
+  );
 }
 
 export function iconGrid(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="3" y="3" width="18" height="18"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="3" y="3" width="18" height="18"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  );
 }
 
 export function iconZoom(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6M8 11h6"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6M8 11h6"/>',
+  );
 }
 
 export function iconFreeze(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18"/><path d="M3 9h18"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="3" y="3" width="18" height="18"/><path d="M9 3v18"/><path d="M3 9h18"/>',
+  );
 }
 
 export function iconWindow(): SVGSVGElement {
-  return svgEl("0 0 24 24", '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><path d="M13 3h8v8"/>');
+  return svgEl(
+    "0 0 24 24",
+    '<rect x="3" y="3" width="8" height="8" rx="1"/><rect x="13" y="13" width="8" height="8" rx="1"/><path d="M13 3h8v8"/>',
+  );
 }
 
 export function iconRuler(): SVGSVGElement {
-  return svgEl(
-    "0 0 24 24",
-    '<path d="M4 20h16"/><path d="M5 20v-5M9 20v-3M13 20v-5M17 20v-3"/>',
-  );
+  return svgEl("0 0 24 24", '<path d="M4 20h16"/><path d="M5 20v-5M9 20v-3M13 20v-5M17 20v-3"/>');
 }
 
 export function iconFormulaBar(): SVGSVGElement {
@@ -911,5 +967,8 @@ export function iconCellStyle(): SVGSVGElement {
 
 /** Ribbon 下拉小三角（8×8，与资源几何一致） */
 export function iconChevronDown(): SVGSVGElement {
-  return svgElMarkup("0 0 8 8", '<path fill="currentColor" fill-rule="evenodd" d="M2 3h5L4.5 6z"/>');
+  return svgElMarkup(
+    "0 0 8 8",
+    '<path fill="currentColor" fill-rule="evenodd" d="M2 3h5L4.5 6z"/>',
+  );
 }

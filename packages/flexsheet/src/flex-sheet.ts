@@ -91,6 +91,7 @@ import {
   syncPivotTableFieldsPaneWithSelection,
   tryOpenPivotFieldsPaneForSelection,
 } from "./pivot/pivot-table-fields-pane.js";
+import { refreshPivotTableDefinition } from "./pivot/pivot-table-command.js";
 import { useSheetContextMenu } from "./plugins/sheet-context-menu-plugin.js";
 import { mountFormatCellsDialog } from "./format-cells/format-cells-dialog.js";
 import { useUndoRedo } from "./plugins/undo-redo-plugin.js";
@@ -185,6 +186,10 @@ export class FlexSheet {
     previewCol: number;
   } | null = null;
   private workbookUnsub: (() => void) | null = null;
+  /** 防止透视自动刷新回写时再次触发递归刷新。 */
+  private pivotAutoRefreshRunning = false;
+  /** 透视定义键 -> 上次已同步的数据源修订号。 */
+  private readonly pivotSourceRevisionByDefKey = new Map<string, number>();
   private lastWorkbookActiveIndex = 0;
   private activeSheetFormattingUnsub: (() => void) | null = null;
   private readonly formattingChromeListeners = new Set<() => void>();
@@ -356,8 +361,11 @@ export class FlexSheet {
 
   private attachWorkbookForDataDrive(): void {
     this.workbookUnsub?.();
+    this.pivotSourceRevisionByDefKey.clear();
+    this.syncPivotAutoRefreshBaseline();
     this.lastWorkbookActiveIndex = this._workbook.activeSheetIndex;
     this.workbookUnsub = this._workbook.subscribe(() => {
+      this.tryAutoRefreshPivotTables();
       const cur = this._workbook.activeSheetIndex;
       if (cur !== this.lastWorkbookActiveIndex) {
         this.lastWorkbookActiveIndex = cur;
@@ -2731,6 +2739,81 @@ export class FlexSheet {
     const sh = this.workbook.getActiveSheet();
     const ac = this.selection.getActiveCell();
     syncPivotTableFieldsPaneWithSelection(this, sh, ac.row, ac.col);
+  }
+
+  private pivotDefStorageKey(sheetIndex: number, defId: string): string {
+    return `${sheetIndex}::${defId}`;
+  }
+
+  private syncPivotAutoRefreshBaseline(): void {
+    const alive = new Set<string>();
+    for (let si = 0; si < this._workbook.sheetCount; si++) {
+      const pivotSheet = this._workbook.getSheet(si);
+      if (pivotSheet === undefined) {
+        continue;
+      }
+      for (const def of pivotSheet.getPivotTableDefinitionsSnapshot()) {
+        const key = this.pivotDefStorageKey(si, def.id);
+        alive.add(key);
+        const src = this._workbook.getSheet(def.sourceSheetIndex);
+        if (src !== undefined) {
+          this.pivotSourceRevisionByDefKey.set(key, src.revision);
+        }
+      }
+    }
+    for (const key of this.pivotSourceRevisionByDefKey.keys()) {
+      if (!alive.has(key)) {
+        this.pivotSourceRevisionByDefKey.delete(key);
+      }
+    }
+  }
+
+  private tryAutoRefreshPivotTables(): void {
+    if (this.pivotAutoRefreshRunning) {
+      return;
+    }
+    const toRefresh: Array<{ sheet: Worksheet; defId: string }> = [];
+    const alive = new Set<string>();
+    for (let si = 0; si < this._workbook.sheetCount; si++) {
+      const pivotSheet = this._workbook.getSheet(si);
+      if (pivotSheet === undefined) {
+        continue;
+      }
+      for (const def of pivotSheet.getPivotTableDefinitionsSnapshot()) {
+        const key = this.pivotDefStorageKey(si, def.id);
+        alive.add(key);
+        const src = this._workbook.getSheet(def.sourceSheetIndex);
+        if (src === undefined) {
+          continue;
+        }
+        const prev = this.pivotSourceRevisionByDefKey.get(key);
+        const cur = src.revision;
+        if (prev === undefined) {
+          this.pivotSourceRevisionByDefKey.set(key, cur);
+          continue;
+        }
+        if (prev !== cur) {
+          toRefresh.push({ sheet: pivotSheet, defId: def.id });
+        }
+      }
+    }
+    for (const key of this.pivotSourceRevisionByDefKey.keys()) {
+      if (!alive.has(key)) {
+        this.pivotSourceRevisionByDefKey.delete(key);
+      }
+    }
+    if (toRefresh.length === 0) {
+      return;
+    }
+    this.pivotAutoRefreshRunning = true;
+    try {
+      for (const it of toRefresh) {
+        refreshPivotTableDefinition(this._workbook, it.sheet, it.defId);
+      }
+    } finally {
+      this.pivotAutoRefreshRunning = false;
+      this.syncPivotAutoRefreshBaseline();
+    }
   }
 
   private notifyFormattingChrome(): void {

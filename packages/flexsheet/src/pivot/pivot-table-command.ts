@@ -941,6 +941,61 @@ function clonePivotDef(def: WorksheetPivotTableDefinition): WorksheetPivotTableD
   };
 }
 
+/**
+ * 按当前已落地的透视定义重算并覆写输出区域（不进入撤销栈）。
+ * 返回 `true` 表示找到并刷新成功，`false` 表示定义或源表不存在。
+ */
+export function refreshPivotTableDefinition(
+  workbook: Workbook,
+  pivotSheet: Worksheet,
+  pivotDefId: string,
+): boolean {
+  const current = pivotSheet.getPivotTableDefinitionsSnapshot().find((d) => d.id === pivotDefId);
+  if (current === undefined) {
+    return false;
+  }
+  const sourceSheet = workbook.getSheet(current.sourceSheetIndex);
+  if (sourceSheet === undefined) {
+    return false;
+  }
+  const out = buildPivotRender(sourceSheet, {
+    sourceRange: current.sourceRange,
+    hasHeaders: current.hasHeaders,
+    rowFieldCols: current.rowFieldCols,
+    columnFieldCols: current.columnFieldCols,
+    filterFieldCols: current.filterFieldCols,
+    filterSelectedKeys: current.filterSelectedKeys,
+    valueFields: current.valueFields,
+    valueFieldsOnRows: current.valueFieldsOnRows === true ? true : undefined,
+    destination: {
+      kind: "existingSheet",
+      startRow: current.destinationRow,
+      startCol: current.destinationCol,
+    },
+  });
+
+  const snapRows = Math.max(current.outputRowCount, out.rowCount);
+  const snapCols = Math.max(current.outputColCount, out.colCount);
+  pivotSheet.removePivotTableDefinitionById(pivotDefId);
+  writePivotResult(pivotSheet, current.destinationRow, current.destinationCol, out);
+  clearPivotOutputOverflow(
+    pivotSheet,
+    current.destinationRow,
+    current.destinationCol,
+    snapRows,
+    snapCols,
+    out.rowCount,
+    out.colCount,
+  );
+  const nextDef: WorksheetPivotTableDefinition = {
+    ...clonePivotDef(current),
+    outputRowCount: out.rowCount,
+    outputColCount: out.colCount,
+  };
+  pivotSheet.registerPivotTableDefinition(nextDef);
+  return true;
+}
+
 export function findPivotTableDefinitionAtCell(
   sheet: Worksheet,
   row: number,

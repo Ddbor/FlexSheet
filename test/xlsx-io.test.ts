@@ -458,4 +458,239 @@ describe("xlsx export/import", () => {
     expect(dimBox.maxR).toBeGreaterThanOrEqual(locBox.maxR);
     expect(dimBox.maxC).toBeGreaterThanOrEqual(locBox.maxC);
   });
+
+  it("roundtrips pivot table metadata through xlsx import/export", async () => {
+    const wb = new Workbook();
+    const src = new Worksheet("Data", 20, 10);
+    wb.addSheet(src);
+    src.setCellLiteral(0, 0, "Region");
+    src.setCellLiteral(0, 1, "Category");
+    src.setCellLiteral(0, 2, "Amount");
+    src.setCellLiteral(1, 0, "East");
+    src.setCellLiteral(1, 1, "A");
+    src.setCellLiteral(1, 2, 10);
+    src.setCellLiteral(2, 0, "West");
+    src.setCellLiteral(2, 1, "B");
+    src.setCellLiteral(2, 2, 20);
+    const pivot = new Worksheet("Pivot", 20, 12);
+    wb.addSheet(pivot);
+    pivot.registerPivotTableDefinition({
+      id: "p-roundtrip",
+      name: "PivotTable1",
+      sourceSheetIndex: 0,
+      sourceRange: { startRow: 0, endRow: 2, startCol: 0, endCol: 2 },
+      hasHeaders: true,
+      rowFieldCols: [1],
+      columnFieldCols: [],
+      filterFieldCols: [0],
+      filterSelectedKeys: [],
+      valueFields: [{ col: 2, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 6,
+      outputColCount: 4,
+    });
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const back = await importXlsxToWorkbook(
+      new Blob([new Uint8Array(bytes)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    const importedPivot = back.getSheet(1);
+    const defs = importedPivot?.getPivotTableDefinitionsSnapshot() ?? [];
+    expect(defs.length).toBe(1);
+    expect(defs[0]?.name).toBe("PivotTable1");
+    expect(defs[0]?.sourceSheetIndex).toBe(0);
+    expect(defs[0]?.rowFieldCols).toEqual([1]);
+    expect(defs[0]?.filterFieldCols).toEqual([0]);
+    expect(defs[0]?.valueFields).toEqual([{ col: 2, aggregate: "sum" }]);
+    expect(defs[0]?.destinationRow).toBe(0);
+    expect(defs[0]?.destinationCol).toBe(0);
+  });
+
+  it("exports pivot page filter selection into pivotField items", () => {
+    const wb = new Workbook();
+    const src = new Worksheet("Data", 20, 10);
+    wb.addSheet(src);
+    src.setCellLiteral(0, 0, "Region");
+    src.setCellLiteral(0, 1, "Amount");
+    src.setCellLiteral(1, 0, "East");
+    src.setCellLiteral(1, 1, 10);
+    src.setCellLiteral(2, 0, "West");
+    src.setCellLiteral(2, 1, 20);
+    const pivot = new Worksheet("Pivot", 20, 12);
+    wb.addSheet(pivot);
+    pivot.registerPivotTableDefinition({
+      id: "p-filter-export",
+      name: "PivotTable1",
+      sourceSheetIndex: 0,
+      sourceRange: { startRow: 0, endRow: 2, startCol: 0, endCol: 1 },
+      hasHeaders: true,
+      rowFieldCols: [],
+      columnFieldCols: [],
+      filterFieldCols: [0],
+      filterSelectedKeys: [["West"]],
+      valueFields: [{ col: 1, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 6,
+      outputColCount: 4,
+    });
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
+    expect(pivotTable).toContain('axis="axisPage"');
+    expect(pivotTable).toContain('<pageFields count="1"><pageField fld="0"/></pageFields>');
+    expect(pivotTable).toContain('showAll="0"');
+    expect(pivotTable).toContain('<item x="1"/>');
+    expect(pivotTable).toContain('<item x="0" h="1"/>');
+  });
+
+  it("exports rowItems/colItems aligned with row/column fields", () => {
+    const wb = new Workbook();
+    const src = new Worksheet("Data", 20, 10);
+    wb.addSheet(src);
+    src.setCellLiteral(0, 0, "Region");
+    src.setCellLiteral(0, 1, "Type");
+    src.setCellLiteral(0, 2, "Amount");
+    src.setCellLiteral(1, 0, "East");
+    src.setCellLiteral(1, 1, "A");
+    src.setCellLiteral(1, 2, 10);
+    src.setCellLiteral(2, 0, "West");
+    src.setCellLiteral(2, 1, "B");
+    src.setCellLiteral(2, 2, 20);
+    const pivot = new Worksheet("Pivot", 20, 12);
+    wb.addSheet(pivot);
+    pivot.registerPivotTableDefinition({
+      id: "p-axis-items",
+      name: "PivotTable1",
+      sourceSheetIndex: 0,
+      sourceRange: { startRow: 0, endRow: 2, startCol: 0, endCol: 2 },
+      hasHeaders: true,
+      rowFieldCols: [0, 1],
+      columnFieldCols: [],
+      filterFieldCols: [],
+      filterSelectedKeys: [],
+      valueFields: [{ col: 2, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 6,
+      outputColCount: 4,
+    });
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
+    expect(pivotTable).toContain('<rowFields count="2"><field x="0"/><field x="1"/></rowFields>');
+    expect(pivotTable).toContain('<rowItems count="1"><i><x v="0"/><x v="0"/></i></rowItems>');
+    expect(pivotTable).toContain("<colItems count=\"1\"><i/></colItems>");
+  });
+
+  it("exports valueFieldsOnRows layout via dataOnRows", () => {
+    const wb = new Workbook();
+    const src = new Worksheet("Data", 20, 10);
+    wb.addSheet(src);
+    src.setCellLiteral(0, 0, "Region");
+    src.setCellLiteral(0, 1, "Amount");
+    src.setCellLiteral(0, 2, "CountBase");
+    src.setCellLiteral(1, 0, "East");
+    src.setCellLiteral(1, 1, 10);
+    src.setCellLiteral(1, 2, 1);
+    const pivot = new Worksheet("Pivot", 20, 12);
+    wb.addSheet(pivot);
+    pivot.registerPivotTableDefinition({
+      id: "p-data-on-rows",
+      name: "PivotTable1",
+      sourceSheetIndex: 0,
+      sourceRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 2 },
+      hasHeaders: true,
+      rowFieldCols: [0],
+      columnFieldCols: [],
+      filterFieldCols: [],
+      filterSelectedKeys: [],
+      valueFields: [
+        { col: 1, aggregate: "sum" },
+        { col: 2, aggregate: "count" },
+      ],
+      valueFieldsOnRows: true,
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 6,
+      outputColCount: 4,
+    });
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
+    expect(pivotTable).toContain('dataOnRows="1"');
+  });
+
+  it("imports Excel-like pivot subtotal and page filter selection", async () => {
+    const wb = new Workbook();
+    const src = new Worksheet("Data", 20, 10);
+    wb.addSheet(src);
+    src.setCellLiteral(0, 0, "Region");
+    src.setCellLiteral(0, 1, "Category");
+    src.setCellLiteral(0, 2, "Amount");
+    src.setCellLiteral(1, 0, "East");
+    src.setCellLiteral(1, 1, "A");
+    src.setCellLiteral(1, 2, 10);
+    src.setCellLiteral(2, 0, "West");
+    src.setCellLiteral(2, 1, "B");
+    src.setCellLiteral(2, 2, 20);
+    const pivot = new Worksheet("Pivot", 20, 12);
+    wb.addSheet(pivot);
+    pivot.registerPivotTableDefinition({
+      id: "p-excel-like",
+      name: "PivotTable1",
+      sourceSheetIndex: 0,
+      sourceRange: { startRow: 0, endRow: 2, startCol: 0, endCol: 2 },
+      hasHeaders: true,
+      rowFieldCols: [1],
+      columnFieldCols: [],
+      filterFieldCols: [0],
+      filterSelectedKeys: [],
+      valueFields: [{ col: 2, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 6,
+      outputColCount: 4,
+    });
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const pvtRaw = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
+    const patchedPivot = pvtRaw
+      .replace('subtotal="sum"', 'subtotal="average"')
+      .replace(
+        '<pivotField axis="axisPage" showAll="1"><items count="1"><item t="default"/></items></pivotField>',
+        '<pivotField axis="axisPage" showAll="1"><items count="2"><item x="1"/><item x="0" h="1"/></items></pivotField>',
+      );
+    const next = new Map(map);
+    next.set("xl/pivotTables/pivotTable1.xml", new TextEncoder().encode(patchedPivot));
+    const rebuiltEntries: ZipEntryInput[] = [...next.entries()].map(([path, data]) => ({ path, data }));
+    const rebuilt = buildZipArchive(rebuiltEntries);
+
+    const back = await importXlsxToWorkbook(
+      new Blob([new Uint8Array(rebuilt)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    const importedPivot = back.getSheet(1);
+    const defs = importedPivot?.getPivotTableDefinitionsSnapshot() ?? [];
+    expect(defs.length).toBe(1);
+    expect(defs[0]?.valueFields).toEqual([{ col: 2, aggregate: "average" }]);
+    expect(defs[0]?.filterFieldCols).toEqual([0]);
+    expect(defs[0]?.filterSelectedKeys[0]).toEqual(["West"]);
+  });
 });
