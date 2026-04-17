@@ -56,10 +56,20 @@ function parseFontStyle(fontEl: Element): Partial<CellStyle> {
   if (childrenLocal(fontEl, "i").length > 0) {
     st.italic = true;
   }
+  if (childrenLocal(fontEl, "strike").length > 0) {
+    st.strikethrough = true;
+  }
   const uEl = firstLocal(fontEl, "u");
   if (uEl !== undefined) {
     const uv = uEl.getAttribute("val");
     st.underline = uv === "double" ? "double" : "single";
+  }
+  const vaEl = firstLocal(fontEl, "vertAlign");
+  if (vaEl !== undefined) {
+    const vv = vaEl.getAttribute("val");
+    if (vv === "superscript" || vv === "subscript") {
+      st.fontScript = vv;
+    }
   }
   const szEl = firstLocal(fontEl, "sz");
   if (szEl !== undefined) {

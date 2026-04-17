@@ -107,6 +107,37 @@ describe("xlsx export/import", () => {
     expect(map.has("xl/worksheets/sheet1.xml")).toBe(true);
   });
 
+  it("roundtrips strikethrough and superscript/subscript font", async () => {
+    const wb = new Workbook();
+    const s = new Worksheet("S");
+    wb.addSheet(s);
+    s.getCell(0, 0).value = "strike";
+    s.getCell(0, 0).style = { strikethrough: true };
+    s.getCell(0, 1).value = "sup";
+    s.getCell(0, 1).style = { fontScript: "superscript" };
+    s.getCell(0, 2).value = "sub";
+    s.getCell(0, 2).style = { fontScript: "subscript" };
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const stylesXml = new TextDecoder().decode(map.get("xl/styles.xml"));
+    expect(stylesXml).toContain("<strike/>");
+    expect(stylesXml).toContain('vertAlign val="superscript"');
+    expect(stylesXml).toContain('vertAlign val="subscript"');
+
+    const back = await importXlsxToWorkbook(
+      new Blob([new Uint8Array(bytes)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    const sh = back.getSheet(0);
+    expect(sh?.getCell(0, 0).style?.strikethrough).toBe(true);
+    expect(sh?.getCell(0, 1).style?.fontScript).toBe("superscript");
+    expect(sh?.getCell(0, 2).style?.fontScript).toBe("subscript");
+  });
+
   it("roundtrips font (family, size, italic, underline) and borders", async () => {
     const wb = new Workbook();
     const s = new Worksheet("S");
@@ -325,5 +356,46 @@ describe("xlsx export/import", () => {
     const stylesXml = new TextDecoder().decode(map.get("xl/styles.xml"));
     expect(stylesXml).toMatch(/<dxfs count="[1-9]/);
     expect(stylesXml).toContain("<dxf>");
+  });
+
+  it("exports pivot table with pivotCacheRecords and OOXML-valid dataField attributes", () => {
+    const wb = new Workbook();
+    const src = new Worksheet("Data", 20, 10);
+    wb.addSheet(src);
+    src.setCellLiteral(0, 0, "A");
+    src.setCellLiteral(0, 1, "B");
+    src.setCellLiteral(1, 0, "x");
+    src.setCellLiteral(1, 1, 1);
+    const dest = new Worksheet("Pivot", 30, 10);
+    wb.addSheet(dest);
+    dest.registerPivotTableDefinition({
+      id: "p1",
+      name: "PivotTable1",
+      sourceSheetIndex: 0,
+      sourceRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+      hasHeaders: true,
+      rowFieldCols: [0],
+      columnFieldCols: [],
+      filterFieldCols: [],
+      filterSelectedKeys: [],
+      valueFields: [{ col: 1, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 5,
+      outputColCount: 3,
+    });
+
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    expect(map.has("xl/pivotCache/pivotCacheRecords1.xml")).toBe(true);
+    expect(map.has("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels")).toBe(true);
+    const records = new TextDecoder().decode(map.get("xl/pivotCache/pivotCacheRecords1.xml"));
+    expect(records).toContain('count="0"');
+    const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
+    expect(pivotTable).toContain("<dataField ");
+    expect(pivotTable).not.toContain('baseField="0"');
+    expect(pivotTable).not.toContain('baseItem="0"');
   });
 });

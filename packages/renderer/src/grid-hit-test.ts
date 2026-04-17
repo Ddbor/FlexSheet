@@ -7,6 +7,26 @@ import { clampScroll, type ViewportScrollLimits } from "./viewport.js";
 /** 列标题右侧筛选按钮占用宽度（与 `paintColumnHeaderCell` 一致，画布 CSS 像素）。 */
 export const COLUMN_HEADER_FILTER_BUTTON_CSS_PX = 20;
 
+/**
+ * 表体「列筛选」锚点格右侧为下拉按钮预留的宽度（与 `paintBodyCellTexts` / `paintBodyAutoFilterAnchors` 一致）。
+ * 非锚点格或未启用列筛选时为 0。
+ */
+export function bodyColumnAutoFilterTextReservePx(
+  sheet: Worksheet,
+  row: number,
+  col: number,
+): number {
+  const meta = sheet.getColumnAutoFilterMeta(col);
+  if (meta?.uiKind !== "body" || meta.bodyAnchorRow !== row) {
+    return 0;
+  }
+  const anchor = sheet.getMergeAnchorCell(row, col);
+  if (anchor.row !== row || anchor.col !== col) {
+    return 0;
+  }
+  return COLUMN_HEADER_FILTER_BUTTON_CSS_PX + 4;
+}
+
 /** 行列标题区命中（不含表体单元格）。 */
 export type HeadingHit =
   | { readonly kind: "selectAllCorner" }

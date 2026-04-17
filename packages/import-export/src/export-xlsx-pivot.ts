@@ -14,6 +14,8 @@ const SS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
 const REL_PIVOT_CACHE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCache";
+const REL_PIVOT_CACHE_RECORDS =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords";
 const REL_PIVOT_TABLE =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
 
@@ -24,6 +26,9 @@ export interface PivotExportPiece {
   readonly pivotTableName: string;
   readonly workbookRelTarget: string;
   readonly pivotCacheDefinitionXml: string;
+  /** Excel 通常要求 cache 部件通过关系引用 `pivotCacheRecords` 部件（可与 `recordCount=0` 一致）。 */
+  readonly pivotCacheRecordsXml: string;
+  readonly pivotCacheDefinitionRelsXml: string;
   readonly pivotTableXml: string;
   readonly pivotTableRelsXml: string;
 }
@@ -81,6 +86,22 @@ function ooxmlDataSubtotal(agg: PivotAggregateKind): string {
     default:
       return "sum";
   }
+}
+
+function buildPivotCacheRecordsXml(): string {
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<pivotCacheRecords xmlns="${SS_MAIN}" count="0"/>`
+  );
+}
+
+function buildPivotCacheDefinitionRelsXml(cacheIdx: number): string {
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="${PKG_REL}">` +
+    `<Relationship Id="rId1" Type="${REL_PIVOT_CACHE_RECORDS}" Target="pivotCacheRecords${cacheIdx}.xml"/>` +
+    `</Relationships>`
+  );
 }
 
 function buildPivotCacheDefinitionXml(
@@ -182,7 +203,7 @@ function buildPivotTableDefinitionXml(
     dataFieldParts.push(
       `<dataField name="${dataName}" fld="${valOff}" subtotal="${escapeXml(
         ooxmlDataSubtotal(subAgg),
-      )}" baseField="0" baseItem="0" numFmtId="0"/>`,
+      )}"/>`,
     );
   }
   const dataFieldsXml = `<dataFields count="${dataFieldParts.length}">${dataFieldParts.join("")}</dataFields>`;
@@ -255,6 +276,8 @@ export function collectPivotExportPieces(
         continue;
       }
       const pivotCacheDefinitionXml = buildPivotCacheDefinitionXml(def, sheetNames, fieldNames);
+      const pivotCacheRecordsXml = buildPivotCacheRecordsXml();
+      const pivotCacheDefinitionRelsXml = buildPivotCacheDefinitionRelsXml(cacheIdx);
       const pivotTableXml = buildPivotTableDefinitionXml(def, fieldNames, cacheId);
       const pivotTableRelsXml = buildPivotTableRelsXml(cacheIdx);
       out.push({
@@ -264,6 +287,8 @@ export function collectPivotExportPieces(
         pivotTableName: def.name,
         workbookRelTarget: `pivotCache/pivotCacheDefinition${cacheIdx}.xml`,
         pivotCacheDefinitionXml,
+        pivotCacheRecordsXml,
+        pivotCacheDefinitionRelsXml,
         pivotTableXml,
         pivotTableRelsXml,
       });

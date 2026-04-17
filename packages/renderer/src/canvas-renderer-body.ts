@@ -24,7 +24,10 @@ import {
 import { paintBodyCellBorders } from "./canvas-renderer-body-borders.js";
 import { getConditionalFormattingCellOverlayCached } from "./canvas-renderer-cf-overlay.js";
 import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
-import { COLUMN_HEADER_FILTER_BUTTON_CSS_PX } from "./grid-hit-test.js";
+import {
+  COLUMN_HEADER_FILTER_BUTTON_CSS_PX,
+  bodyColumnAutoFilterTextReservePx,
+} from "./grid-hit-test.js";
 import type { FrozenLayout } from "./viewport.js";
 
 export interface BodyPaintEnv {
@@ -591,6 +594,7 @@ function paintBodyCellTexts(
           : env.theme.cellColor;
       ctx.textAlign = "left";
       const pad = 4;
+      const filterReservePx = bodyColumnAutoFilterTextReservePx(sheet, r, c);
       const hAlign = resolvedHAlign(cell.style);
       const vAlign = resolvedVAlign(cell.style);
       const baseLog = cellStyleLogicalFontSizeBasePx(cell.style);
@@ -598,12 +602,12 @@ function paintBodyCellTexts(
       const indentLv = clampIndentLevel(cell.style?.indentLevel);
       const indentUnit = Math.max(6, baseFontPx * 0.55);
       let indentPx = indentLv * indentUnit;
-      const maxIndentPx = Math.max(0, colW - 2 * pad - 4);
+      const maxIndentPx = Math.max(0, colW - 2 * pad - 4 - filterReservePx);
       if (indentPx > maxIndentPx) {
         indentPx = maxIndentPx;
       }
       const boxLeft = x + pad + indentPx;
-      const innerW = Math.max(1, colW - 2 * pad - indentPx);
+      const innerW = Math.max(1, colW - 2 * pad - indentPx - filterReservePx);
 
       const wrap = cell.style?.wrapText === true;
       const orient = resolvedTextOrientation(cell.style);
@@ -661,7 +665,15 @@ function paintBodyCellTexts(
       const ink = String(ctx.fillStyle);
       ctx.save();
       ctx.beginPath();
-      ctx.rect(x, y, drawW, rowH);
+      if (filterReservePx > 0) {
+        const wAnchor = Math.max(0, colW - filterReservePx);
+        ctx.rect(x, y, wAnchor, rowH);
+        if (drawW > colW) {
+          ctx.rect(x + colW, y, drawW - colW, rowH);
+        }
+      } else {
+        ctx.rect(x, y, drawW, rowH);
+      }
       ctx.clip();
       if (!onlySingleLineVisual) {
         const lineH = Math.max(12, fontPx * 1.25);

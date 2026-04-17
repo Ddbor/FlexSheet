@@ -79,9 +79,15 @@ function styleSignature(st: CellStyle | null | undefined): string {
   const fpStr = fpRaw !== undefined && fpRaw !== "none" ? fpRaw : "";
   const lk = st.locked === false ? 0 : 1;
   const fh = st.formulaHidden === true ? 1 : 0;
+  const fsc =
+    st.fontScript === "superscript" || st.fontScript === "subscript"
+      ? st.fontScript
+      : "";
   return JSON.stringify({
     b: st.bold === true,
     i: st.italic === true,
+    stk: st.strikethrough === true,
+    fsc,
     fg: st.fgArgb ?? "",
     fill: st.fillArgb ?? "",
     fp: fpStr,
@@ -126,6 +132,9 @@ interface StyleTable {
 interface StyleSignaturePayload {
   readonly b: boolean;
   readonly i?: boolean;
+  readonly stk?: boolean;
+  /** `superscript` / `subscript`，空表示无。 */
+  readonly fsc?: string;
   readonly fg: string;
   readonly fill: string;
   /** 非空且非 `none` 时为图案填充的 `patternType`。 */
@@ -315,9 +324,12 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     const applyNumberFmt = numFmtId > 0 ? ` applyNumberFormat="1"` : "";
     const fontName = st.ff !== undefined && st.ff !== "" ? st.ff : DEFAULT_FONT_NAME;
     const fontSize = st.fs !== undefined && st.fs > 0 ? st.fs : DEFAULT_FONT_SIZE_PT;
+    const hasFsc = st.fsc === "superscript" || st.fsc === "subscript";
     const needFont =
       st.b === true ||
       st.i === true ||
+      st.stk === true ||
+      hasFsc ||
       st.fg !== "" ||
       (st.ff !== undefined && st.ff !== "" && st.ff !== DEFAULT_FONT_NAME) ||
       (st.fs !== undefined && st.fs > 0 && st.fs !== DEFAULT_FONT_SIZE_PT) ||
@@ -327,17 +339,19 @@ function buildStyleTable(workbook: Workbook, opts: XlsxExportOptions): StyleTabl
     if (needFont) {
       const bold = st.b ? "<b/>" : "";
       const italic = st.i ? "<i/>" : "";
+      const strike = st.stk === true ? "<strike/>" : "";
       let underline = "";
       if (st.ul === "double") {
         underline = `<u val="double"/>`;
       } else if (st.ul === "single") {
         underline = `<u val="single"/>`;
       }
+      const vertAlignFont = hasFsc ? `<vertAlign val="${st.fsc}"/>` : "";
       const color = st.fg !== "" ? `<color rgb="${escapeXml(st.fg)}"/>` : `<color rgb="FF000000"/>`;
       const sz = Math.max(1, Math.min(409, Math.round(fontSize * 100) / 100));
       const szAttr = Number.isInteger(sz) ? String(sz) : sz.toFixed(2).replace(/\.?0+$/, "");
       fontsXml.push(
-        `<font>${bold}${italic}${underline}<sz val="${szAttr}"/>${color}<name val="${escapeXml(fontName)}"/><family val="2"/></font>`,
+        `<font>${bold}${italic}${strike}${underline}${vertAlignFont}<sz val="${szAttr}"/>${color}<name val="${escapeXml(fontName)}"/><family val="2"/></font>`,
       );
       fontId = nextFont++;
     }
@@ -1070,6 +1084,9 @@ export function exportWorkbookToXlsxBytes(
       `<Override PartName="/xl/pivotCache/pivotCacheDefinition${p.cacheIdx}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheDefinition+xml"/>`,
     );
     ctOverrides.push(
+      `<Override PartName="/xl/pivotCache/pivotCacheRecords${p.cacheIdx}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotCacheRecords+xml"/>`,
+    );
+    ctOverrides.push(
       `<Override PartName="/xl/pivotTables/pivotTable${p.cacheIdx}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.pivotTable+xml"/>`,
     );
   }
@@ -1122,6 +1139,14 @@ export function exportWorkbookToXlsxBytes(
     files.push({
       path: `xl/pivotCache/pivotCacheDefinition${p.cacheIdx}.xml`,
       data: enc.encode(p.pivotCacheDefinitionXml),
+    });
+    files.push({
+      path: `xl/pivotCache/pivotCacheRecords${p.cacheIdx}.xml`,
+      data: enc.encode(p.pivotCacheRecordsXml),
+    });
+    files.push({
+      path: `xl/pivotCache/_rels/pivotCacheDefinition${p.cacheIdx}.xml.rels`,
+      data: enc.encode(p.pivotCacheDefinitionRelsXml),
     });
     files.push({
       path: `xl/pivotTables/pivotTable${p.cacheIdx}.xml`,

@@ -6,6 +6,7 @@ export {
 } from "./canvas-renderer.js";
 export { RendererPlugin, type RendererPluginOptions } from "./renderer-plugin.js";
 export {
+  bodyColumnAutoFilterTextReservePx,
   COLUMN_HEADER_FILTER_BUTTON_CSS_PX,
   hitTestBodyCellAutoFilterButton,
   hitTestCell,

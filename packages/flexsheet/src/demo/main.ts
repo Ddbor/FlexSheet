@@ -8,6 +8,8 @@ import {
   type HomeTabHandles,
   type RibbonCommandEvent,
 } from "@flexsheet/toolbar";
+import { CreatePivotTableCommand } from "../pivot/pivot-table-command.js";
+import { createDemoWorkbook } from "./demo-workbook.js";
 
 const chromeRoot = document.getElementById("fs-sheet-chrome");
 const toolbar = document.getElementById("toolbar");
@@ -35,9 +37,36 @@ toolbar.style.gap = "0";
 
 const flexSheet = new FlexSheet({
   container: gridCanvasHost,
+  workbook: createDemoWorkbook(),
   formulaBar: formulaBar ?? undefined,
   chromeRoot,
 });
+
+function findSheetByName(name: string) {
+  const wb = flexSheet.workbook;
+  for (let i = 0; i < wb.sheetCount; i++) {
+    const sh = wb.getSheet(i);
+    if (sh?.name === name) {
+      return sh;
+    }
+  }
+  return undefined;
+}
+
+const pivotSource = findSheetByName("透视数据源");
+if (pivotSource !== undefined) {
+  const pivotCmd = new CreatePivotTableCommand(flexSheet.workbook, pivotSource, {
+    sourceRange: { startRow: 0, endRow: 6, startCol: 0, endCol: 2 },
+    hasHeaders: true,
+    rowFieldCols: [0],
+    columnFieldCols: [],
+    filterFieldCols: [],
+    valueFields: [{ col: 2, aggregate: "sum" }],
+    destination: { kind: "newSheet", preferredName: "透视表示例" },
+  });
+  flexSheet.workspace.commands.execute(pivotCmd);
+  flexSheet.workbook.activeSheetIndex = 0;
+}
 
 mountGridVerticalScrollbar({ container: gridVscrollHost, flexSheet });
 mountExcelBottomBar({ container: bottomChrome, flexSheet });

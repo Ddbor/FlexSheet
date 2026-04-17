@@ -5,6 +5,7 @@ import {
   scaledFontSizePx,
   wrapCellLines,
 } from "./canvas-renderer-utils.js";
+import { bodyColumnAutoFilterTextReservePx } from "./grid-hit-test.js";
 
 const PAD = 4;
 /** 与拖拽调整行列尺寸下限（flex-sheet）一致。 */
@@ -62,7 +63,8 @@ export function computeColumnAutoWidth(sheet: Worksheet, col: number, viewZoom: 
     for (const line of lines) {
       maxLineW = Math.max(maxLineW, ctx.measureText(line).width);
     }
-    const need = Math.ceil(indentPx + maxLineW + PAD * 2);
+    const filterReserve = bodyColumnAutoFilterTextReservePx(sheet, r, col);
+    const need = Math.ceil(indentPx + maxLineW + PAD * 2 + filterReserve);
     maxNeed = Math.max(maxNeed, need);
   }
   return Math.max(MIN_LINE_SIZE, maxNeed > 0 ? maxNeed : sheet.defaultColWidth);

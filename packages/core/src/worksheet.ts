@@ -24,7 +24,7 @@ import {
 } from "./table-style-presets.js";
 import type { WorksheetPivotTableDefinition } from "./pivot-table-model.js";
 
-/** 列筛选按钮绘制位置：列标题栏或选区上一行的表体单元格。 */
+/** 列筛选按钮绘制位置：`body` 为表体锚点行；`header` 为列标行（遗留，新启用筛选均为 `body`）。 */
 export type ColumnAutoFilterUiKind = "header" | "body";
 
 /** 该列在筛选菜单中最后一次应用的排序方向（用于表头图标）。 */
@@ -350,7 +350,7 @@ export class Worksheet {
   }
 
   /**
-   * 按当前选区启用列自动筛选：作用域为选区行范围；选区含第 1 行时按钮在列标题，否则在选区顶行上一格。
+   * 按当前选区启用列自动筛选：作用域为选区行范围；下拉按钮绘制在选区顶行（表头行），与 Excel 一致。
    * 初始为范围内**全选**（所有去重显示值及空白项均勾选）。`col` 为筛选列；`_valueRow` 为右键格，仅作合法性校验。
    */
   enableColumnAutoFilterFromSelection(
@@ -371,9 +371,8 @@ export class Worksheet {
     const n = normalizeSelectionRange(selection);
     const rowStart = clampIndex(n.startRow, 0, this.rowCount - 1);
     const rowEnd = clampIndex(n.endRow, rowStart, this.rowCount - 1);
-    const selectionIncludesFirstRow = n.startRow <= 0 && n.endRow >= 0;
-    const uiKind: ColumnAutoFilterUiKind = selectionIncludesFirstRow ? "header" : "body";
-    const bodyAnchorRow = selectionIncludesFirstRow ? 0 : Math.max(0, n.startRow - 1);
+    const uiKind: ColumnAutoFilterUiKind = "body";
+    const bodyAnchorRow = n.startRow;
 
     const checkedKeys = new Set<string>();
     let includeBlank = false;
