@@ -1,6 +1,6 @@
 import { normalizeSelectionRange, type Worksheet } from "@flexsheet/core";
 
-import type { FlexSheet } from "./flex-sheet.js";
+import type { FlexSheet } from "../flex-sheet.js";
 import {
   collectPivotFilterDistinctKeys,
   normalizeFilterSelectedKeys,

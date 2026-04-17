@@ -45,7 +45,7 @@ import { columnIndexToLabel, columnLabelToIndex } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
 import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
-import { useClipboard } from "./clipboard-plugin.js";
+import { useClipboard } from "./plugins/clipboard-plugin.js";
 import {
   DeleteCellsShiftLeftCommand,
   DeleteCellsShiftUpCommand,
@@ -61,7 +61,7 @@ import {
   SetRowHeightsInRangeCommand,
   SetRowHeightCommand,
   SetRowHiddenCommand,
-} from "./sheet-structure-commands.js";
+} from "./commands/sheet-structure-commands.js";
 import {
   ApplySelectionBorderRibbonCommand,
   ApplySelectionCellStylePatchCommand,
@@ -70,31 +70,31 @@ import {
   ApplySelectionIndentStepCommand,
   ClearSelectionFormatsCommand,
   isRibbonBorderCommandId,
-} from "./cell-style-commands.js";
-import type { FormatCellsBorderState } from "./format-cells-border.js";
+} from "./commands/cell-style-commands.js";
+import type { FormatCellsBorderState } from "./format-cells/format-cells-border.js";
 import {
   AddConditionalFormatRuleCommand,
   ClearAllConditionalFormatRulesCommand,
   ClearConditionalFormatRulesIntersectingCommand,
   SetConditionalFormatRulesCommand,
-} from "./conditional-format-commands.js";
-import { SelectionMergeCommand } from "./merge-commands.js";
-import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
-import { openColumnFilterPanel } from "./column-filter-panel.js";
-import { openPivotFilterPanel } from "./pivot-filter-panel.js";
-import { showFormatAsTableDialog } from "./format-as-table-dialog.js";
-import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
-import { showFillSeriesDialog } from "./fill-series-dialog.js";
-import { showNewTableStyleDialog } from "./new-table-style-dialog.js";
-import { showPivotTableDialog } from "./pivot-table-dialog.js";
+} from "./commands/conditional-format-commands.js";
+import { SelectionMergeCommand } from "./commands/merge-commands.js";
+import { useSheetChromeGuard } from "./plugins/sheet-chrome-guard-plugin.js";
+import { openColumnFilterPanel } from "./chrome/column-filter-panel.js";
+import { openPivotFilterPanel } from "./pivot/pivot-filter-panel.js";
+import { showFormatAsTableDialog } from "./dialogs/format-as-table-dialog.js";
+import { ensureFsSheetPromptStyles } from "./dialogs/fs-dialog-styles.js";
+import { showFillSeriesDialog } from "./dialogs/fill-series-dialog.js";
+import { showNewTableStyleDialog } from "./dialogs/new-table-style-dialog.js";
+import { showPivotTableDialog } from "./pivot/pivot-table-dialog.js";
 import {
   syncPivotTableFieldsPaneWithSelection,
   tryOpenPivotFieldsPaneForSelection,
-} from "./pivot-table-fields-pane.js";
-import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
-import { mountFormatCellsDialog } from "./format-cells-dialog.js";
-import { useUndoRedo } from "./undo-redo-plugin.js";
-import { AutofillExtendCommand } from "./autofill-extend-command.js";
+} from "./pivot/pivot-table-fields-pane.js";
+import { useSheetContextMenu } from "./plugins/sheet-context-menu-plugin.js";
+import { mountFormatCellsDialog } from "./format-cells/format-cells-dialog.js";
+import { useUndoRedo } from "./plugins/undo-redo-plugin.js";
+import { AutofillExtendCommand } from "./commands/autofill-extend-command.js";
 
 /** 指针命中画布表面时的区域类型（供右键菜单等扩展使用）。 */
 export type FlexSheetSurfaceHit =

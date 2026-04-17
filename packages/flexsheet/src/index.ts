@@ -66,29 +66,29 @@ export {
   type SelectionCellDeleteMode,
 } from "./flex-sheet.js";
 
-export { mountExcelBottomBar, type MountExcelBottomBarOptions } from "./excel-bottom-bar.js";
+export { mountExcelBottomBar, type MountExcelBottomBarOptions } from "./chrome/excel-bottom-bar.js";
 
 export {
   mountGridVerticalScrollbar,
   type MountGridVerticalScrollbarOptions,
-} from "./grid-vertical-scrollbar.js";
+} from "./chrome/grid-vertical-scrollbar.js";
 
-export { UndoRedoPlugin, useUndoRedo, type UndoRedoPluginOptions } from "./undo-redo-plugin.js";
+export { UndoRedoPlugin, useUndoRedo, type UndoRedoPluginOptions } from "./plugins/undo-redo-plugin.js";
 
 export {
   CONTEXT_MENU_SCOPE,
   SheetContextMenuPlugin,
   useSheetContextMenu,
   type SheetContextMenuPluginOptions,
-} from "./sheet-context-menu-plugin.js";
+} from "./plugins/sheet-context-menu-plugin.js";
 
 export {
   SheetChromeGuardPlugin,
   useSheetChromeGuard,
   type SheetChromeGuardPluginOptions,
-} from "./sheet-chrome-guard-plugin.js";
+} from "./plugins/sheet-chrome-guard-plugin.js";
 
-export { ClipboardPlugin, useClipboard, type ClipboardPluginOptions } from "./clipboard-plugin.js";
+export { ClipboardPlugin, useClipboard, type ClipboardPluginOptions } from "./plugins/clipboard-plugin.js";
 
 export {
   CutClearRegionCommand,
@@ -109,7 +109,7 @@ export {
   SetRowHeightsInRangeCommand,
   SetRowHeightCommand,
   SetRowHiddenCommand,
-} from "./sheet-structure-commands.js";
+} from "./commands/sheet-structure-commands.js";
 
 export {
   ApplyFormatAsTableCommand,
@@ -117,9 +117,9 @@ export {
   ApplySelectionFontSizeStepCommand,
   ApplySelectionFormatCellsDialogCommand,
   ApplySelectionIndentStepCommand,
-} from "./cell-style-commands.js";
+} from "./commands/cell-style-commands.js";
 
-export type { FormatCellsBorderState, FormatCellsLineSwatchId } from "./format-cells-border.js";
+export type { FormatCellsBorderState, FormatCellsLineSwatchId } from "./format-cells/format-cells-border.js";
 
 export {
   createDefaultDarkTheme,

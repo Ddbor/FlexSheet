@@ -1,8 +1,8 @@
 import type { CellStylePatch } from "@flexsheet/core";
-import type { FlexSheet } from "./flex-sheet.js";
+import type { FlexSheet } from "../flex-sheet.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
-import { mountFormatCellsDialog } from "./format-cells-dialog.js";
-import type { FormatCellsBorderState } from "./format-cells-border.js";
+import { mountFormatCellsDialog } from "../format-cells/format-cells-dialog.js";
+import type { FormatCellsBorderState } from "../format-cells/format-cells-border.js";
 
 let newTableStyleDialogCssInjected = false;
 

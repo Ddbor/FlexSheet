@@ -1,7 +1,7 @@
 import { PluginBase, PLUGIN_SERVICE_KEYS, type PluginContext } from "@flexsheet/core";
 import type { CellEditor } from "@flexsheet/editor";
 
-import { isEditableKeydownTarget } from "./keyboard-editable-target.js";
+import { isEditableKeydownTarget } from "../chrome/keyboard-editable-target.js";
 
 export interface UndoRedoPluginOptions {
   readonly canvas: HTMLCanvasElement;

@@ -1,4 +1,4 @@
-import type { FlexSheet } from "./flex-sheet.js";
+import type { FlexSheet } from "../flex-sheet.js";
 
 const VSCROLL_STEP_PX = 48;
 const VSCROLL_MIN_THUMB_PX = 22;

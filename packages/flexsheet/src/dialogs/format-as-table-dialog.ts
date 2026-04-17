@@ -6,10 +6,10 @@ import {
   type Worksheet,
 } from "@flexsheet/core";
 import { columnIndexToLabel } from "@flexsheet/shared";
-import { ApplyFormatAsTableCommand } from "./cell-style-commands.js";
+import { ApplyFormatAsTableCommand } from "../commands/cell-style-commands.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { parseFormatAsTableRangeRef } from "./format-as-table-range.js";
-import { createRangePickerIconSvg } from "./range-picker-icon.js";
+import { createRangePickerIconSvg } from "../pivot/range-picker-icon.js";
 
 let formatAsTableStylesInjected = false;
 const LARGE_TABLE_STYLE_CONFIRM_THRESHOLD = 2000;

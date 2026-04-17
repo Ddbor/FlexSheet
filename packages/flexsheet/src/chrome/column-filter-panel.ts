@@ -1,7 +1,7 @@
 import { AUTO_FILTER_BLANK_KEY } from "@flexsheet/core";
 import { columnIndexToLabel } from "@flexsheet/shared";
 
-import type { FlexSheet } from "./flex-sheet.js";
+import type { FlexSheet } from "../flex-sheet.js";
 
 let columnFilterStylesInjected = false;
 

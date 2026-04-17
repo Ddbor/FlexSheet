@@ -2,8 +2,8 @@ import { normalizeSelectionRange, type SelectionRange, type Worksheet } from "@f
 import { columnIndexToLabel } from "@flexsheet/shared";
 import { CreatePivotTableCommand, type PivotAggregateKind } from "./pivot-table-command.js";
 import { showPivotTableFieldsPane, type PivotFieldsPaneHost } from "./pivot-table-fields-pane.js";
-import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
-import { parseFormatAsTableRangeRef } from "./format-as-table-range.js";
+import { ensureFsSheetPromptStyles } from "../dialogs/fs-dialog-styles.js";
+import { parseFormatAsTableRangeRef } from "../dialogs/format-as-table-range.js";
 import { createRangePickerIconSvg } from "./range-picker-icon.js";
 
 interface PivotFieldOption {

@@ -10,8 +10,8 @@ import {
   type SelectionRange,
   type Worksheet,
 } from "@flexsheet/core";
-import { cloneCellStyle, computeBorderStyleForRibbonCommand } from "./border-ribbon-preset.js";
-import { mergeFormatCellsDialogStyle, type FormatCellsBorderState } from "./format-cells-border.js";
+import { cloneCellStyle, computeBorderStyleForRibbonCommand } from "../format-cells/border-ribbon-preset.js";
+import { mergeFormatCellsDialogStyle, type FormatCellsBorderState } from "../format-cells/format-cells-border.js";
 
 interface CellStyleSnapshot {
   readonly row: number;

@@ -12,9 +12,9 @@ import {
 } from "@flexsheet/core";
 import { iconCopy, iconCut, iconPaste } from "@flexsheet/toolbar";
 
-import type { FlexSheet, FlexSheetSurfaceHit, SelectionCellDeleteMode } from "./flex-sheet.js";
-import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
-import { mountFormatCellsDialog } from "./format-cells-dialog.js";
+import type { FlexSheet, FlexSheetSurfaceHit, SelectionCellDeleteMode } from "../flex-sheet.js";
+import { ensureFsSheetPromptStyles } from "../dialogs/fs-dialog-styles.js";
+import { mountFormatCellsDialog } from "../format-cells/format-cells-dialog.js";
 
 /** 选区为整表宽的连续行块，且命中行落在该块内（行标题拖动多选后右键应保留选区）。 */
 function isRowHeaderHitInsideEntireRowBlockSelection(

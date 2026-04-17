@@ -18,7 +18,7 @@ import {
   showRibbonColorDialog,
 } from "@flexsheet/toolbar";
 import { paintCellFillPatternOverlay } from "@flexsheet/renderer";
-import type { FlexSheet } from "./flex-sheet.js";
+import type { FlexSheet } from "../flex-sheet.js";
 import {
   FORMAT_CELLS_LINE_STYLES,
   type FormatCellsBorderState,
@@ -29,7 +29,7 @@ import {
   createFormatCellsBorderPreviewSvg,
   createFormatCellsLineSwatchHost,
 } from "./format-cells-line-swatch.js";
-import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
+import { ensureFsSheetPromptStyles } from "../dialogs/fs-dialog-styles.js";
 import {
   fillPatchIfChanged,
   FORMAT_CELLS_PATTERN_GRID_ORDER,

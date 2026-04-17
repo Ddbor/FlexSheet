@@ -1,7 +1,7 @@
 import { Workbook, Worksheet, type SelectionRange } from "@flexsheet/core";
 import { recalcWorksheet } from "@flexsheet/formula";
 
-import type { FlexSheet } from "./flex-sheet.js";
+import type { FlexSheet } from "../flex-sheet.js";
 
 /** 与 `CanvasRenderer` 内 VIEW_ZOOM_MIN / MAX 对应的百分比。 */
 const ZOOM_SLIDER_PCT_MIN = 25;

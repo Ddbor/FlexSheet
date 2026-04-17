@@ -4,7 +4,7 @@ import {
   type SelectionRange,
   type Worksheet,
 } from "@flexsheet/core";
-import { FillSeriesCommand, type FillSeriesOptions } from "./fill-series-command.js";
+import { FillSeriesCommand, type FillSeriesOptions } from "../commands/fill-series-command.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 
 let fillSeriesStylesInjected = false;

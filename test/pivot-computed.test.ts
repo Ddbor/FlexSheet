@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Worksheet } from "@flexsheet/core";
-import { buildPivotRender } from "../packages/flexsheet/src/pivot-table-command.js";
+import { buildPivotRender } from "../packages/flexsheet/src/pivot/pivot-table-command.js";
 
 describe("buildPivotRender computed value fields", () => {
   it("bucketRatio: CTR as sum(点击)/sum(展现) per group and in total", () => {

@@ -16,7 +16,7 @@ import {
   SetColWidthCommand,
   SetRowHeightCommand,
   SetRowHiddenCommand,
-} from "../packages/flexsheet/src/sheet-structure-commands";
+} from "../packages/flexsheet/src/commands/sheet-structure-commands.js";
 
 describe("row/col structural commands", () => {
   it("insert/delete rows should shift formula and support undo redo", () => {

@@ -3,7 +3,7 @@ import { normalizeSelectionRange } from "@flexsheet/core";
 import { parseEditString } from "@flexsheet/editor";
 import { recalcWorksheet } from "@flexsheet/formula";
 
-import { serializeSelection } from "./clipboard/serialize-selection.js";
+import { serializeSelection } from "../clipboard/serialize-selection.js";
 
 interface CellFullSnapshot {
   readonly row: number;
