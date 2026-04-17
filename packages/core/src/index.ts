@@ -107,7 +107,9 @@ export {
   type TableStyleSection,
 } from "./table-style-presets.js";
 export {
+  getPivotValueFieldCaption,
   type PivotAggregateKind,
+  type PivotValueComputed,
   type PivotValueFieldSpec,
   type WorksheetPivotTableDefinition,
 } from "./pivot-table-model.js";

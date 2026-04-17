@@ -9,6 +9,7 @@ import { columnIndexToLabel } from "@flexsheet/shared";
 import { ApplyFormatAsTableCommand } from "./cell-style-commands.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { parseFormatAsTableRangeRef } from "./format-as-table-range.js";
+import { createRangePickerIconSvg } from "./range-picker-icon.js";
 
 let formatAsTableStylesInjected = false;
 const LARGE_TABLE_STYLE_CONFIRM_THRESHOLD = 2000;
@@ -42,23 +43,6 @@ function ensureFormatAsTableDialogStyles(): void {
 .fs-fs-table__range-row .fs-sheet-prompt__input {
   flex: 1;
   min-width: 0;
-}
-.fs-fs-table__range-pick {
-  flex-shrink: 0;
-  width: 36px;
-  padding: 0;
-  border: 1px solid #c8c6c4;
-  border-radius: 4px;
-  background: #fff;
-  cursor: not-allowed;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #605e5c;
-}
-.fs-fs-table__range-pick svg {
-  width: 18px;
-  height: 18px;
 }
 .fs-fs-table__cb {
   display: flex;
@@ -103,28 +87,6 @@ function formatRangeAsAbsolute(range: SelectionRange): string {
   const r0 = n.startRow + 1;
   const r1 = n.endRow + 1;
   return `=$${c0}$${r0}:$${c1}$${r1}`;
-}
-
-function rangePickerIconSvg(): SVGSVGElement {
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.6");
-  const g = document.createElementNS(ns, "g");
-  const r = document.createElementNS(ns, "rect");
-  r.setAttribute("x", "3");
-  r.setAttribute("y", "4");
-  r.setAttribute("width", "14");
-  r.setAttribute("height", "14");
-  r.setAttribute("rx", "1.5");
-  const p = document.createElementNS(ns, "path");
-  p.setAttribute("d", "M17 8l4-2v12l-4-2M7 9h5M7 12h5M7 15h4");
-  g.appendChild(r);
-  g.appendChild(p);
-  svg.appendChild(g);
-  return svg;
 }
 
 function countRangeCells(range: SelectionRange): number {
@@ -212,6 +174,10 @@ export interface FormatAsTableDialogHost {
   readonly selection: { getNormalizedRange(): SelectionRange };
   readonly workspace: { readonly commands: { execute(cmd: ICommand): void } };
   refresh(): void;
+  pickRangeReferenceFromSheet?(options?: {
+    readonly mode?: "range" | "singleCell";
+    readonly onRangePreview?: (displayRef: string) => void;
+  }): Promise<string | null>;
 }
 
 /**
@@ -274,11 +240,15 @@ export function showFormatAsTableDialog(
 
   const pickBtn = document.createElement("button");
   pickBtn.type = "button";
-  pickBtn.className = "fs-fs-table__range-pick";
-  pickBtn.title = "在工作表中选定区域（暂不支持）";
+  pickBtn.className = "fs-sheet-prompt__range-pick";
+  pickBtn.title = "在工作表中选定区域";
   pickBtn.setAttribute("aria-label", pickBtn.title);
-  pickBtn.disabled = true;
-  pickBtn.appendChild(rangePickerIconSvg());
+  pickBtn.appendChild(createRangePickerIconSvg());
+  const pick = host.pickRangeReferenceFromSheet;
+  if (pick === undefined) {
+    pickBtn.disabled = true;
+    pickBtn.title = "当前宿主不支持从工作表选定区域";
+  }
 
   rangeRow.appendChild(rangeInput);
   rangeRow.appendChild(pickBtn);
@@ -315,10 +285,73 @@ export function showFormatAsTableDialog(
   panel.appendChild(body);
   panel.appendChild(footer);
   overlay.appendChild(panel);
+
+  const rangePickBar = document.createElement("div");
+  rangePickBar.className = "fs-sheet-prompt-range-pick-bar";
+  rangePickBar.setAttribute("aria-hidden", "true");
+  const rangePickBarTitle = document.createElement("div");
+  rangePickBarTitle.className = "fs-sheet-prompt-range-pick-bar__title";
+  rangePickBarTitle.textContent = "套用表格格式";
+  const rangePickBarHint = document.createElement("p");
+  rangePickBarHint.className = "fs-sheet-prompt-range-pick-bar__hint";
+  rangePickBarHint.textContent = "正在选择区域，在表格中拖拽；完成后松开鼠标。按 Esc 取消。";
+  const rangePickBarRow = document.createElement("div");
+  rangePickBarRow.className = "fs-sheet-prompt-range-pick-bar__row";
+  const rangePickBarInput = document.createElement("input");
+  rangePickBarInput.type = "text";
+  rangePickBarInput.readOnly = true;
+  rangePickBarInput.className = "fs-sheet-prompt-range-pick-bar__input";
+  rangePickBarInput.setAttribute("aria-label", "当前选定区域预览");
+  rangePickBarInput.setAttribute("autocomplete", "off");
+  const rangePickBarIconWrap = document.createElement("span");
+  rangePickBarIconWrap.className = "fs-sheet-prompt-range-pick-bar__icon-wrap";
+  rangePickBarIconWrap.appendChild(createRangePickerIconSvg());
+  rangePickBarIconWrap.setAttribute("aria-hidden", "true");
+  rangePickBarRow.appendChild(rangePickBarInput);
+  rangePickBarRow.appendChild(rangePickBarIconWrap);
+  rangePickBar.appendChild(rangePickBarTitle);
+  rangePickBar.appendChild(rangePickBarHint);
+  rangePickBar.appendChild(rangePickBarRow);
+  overlay.appendChild(rangePickBar);
+
   document.body.appendChild(overlay);
+
+  let rangePicking = false;
+
+  const runRangePick = async (): Promise<void> => {
+    if (pick === undefined) {
+      return;
+    }
+    rangePicking = true;
+    rangePickBar.setAttribute("aria-hidden", "false");
+    overlay.classList.add("fs-sheet-prompt-overlay--range-pick");
+    try {
+      const ref = await pick.call(host, {
+        mode: "range",
+        onRangePreview: (display) => {
+          rangePickBarInput.value = display;
+        },
+      });
+      if (ref !== null) {
+        rangeInput.value = ref;
+      }
+    } finally {
+      rangePicking = false;
+      rangePickBar.setAttribute("aria-hidden", "true");
+      rangePickBarInput.value = "";
+      overlay.classList.remove("fs-sheet-prompt-overlay--range-pick");
+    }
+    queueMicrotask(() => {
+      rangeInput.focus();
+      rangeInput.select();
+    });
+  };
 
   function onKey(e: KeyboardEvent): void {
     if (e.key === "Escape") {
+      if (rangePicking) {
+        return;
+      }
       e.preventDefault();
       remove();
     }
@@ -386,6 +419,11 @@ export function showFormatAsTableDialog(
     }
   });
   document.addEventListener("keydown", onKey, true);
+  if (pick !== undefined) {
+    pickBtn.addEventListener("click", () => {
+      void runRangePick();
+    });
+  }
   queueMicrotask(() => {
     rangeInput.focus();
     rangeInput.select();

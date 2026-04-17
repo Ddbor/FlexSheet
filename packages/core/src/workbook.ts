@@ -51,6 +51,26 @@ export class Workbook {
   }
 
   /**
+   * 在指定位置插入工作表（0 = 第一张表之前），并修正各表上透视元数据中的 `sourceSheetIndex`。
+   */
+  insertSheetAt(index: number, sheet: Worksheet): void {
+    const i = Math.trunc(index);
+    const clamped = Math.max(0, Math.min(i, this.sheets.length));
+    for (const sh of this.sheets) {
+      sh.bumpPivotSourceSheetIndexAfterInsert(clamped);
+    }
+    this.sheets.splice(clamped, 0, sheet);
+    const unsub = sheet.subscribe(() => {
+      this.emit();
+    });
+    this.sheetUnsubs.set(sheet, unsub);
+    if (clamped <= this._activeSheetIndex) {
+      this._activeSheetIndex++;
+    }
+    this.emit();
+  }
+
+  /**
    * 按索引移除工作表；至少保留一张表时返回 true。
    * 移除后会收紧 `activeSheetIndex` 并通知监听者。
    */
@@ -58,6 +78,9 @@ export class Workbook {
     const i = Math.trunc(index);
     if (i < 0 || i >= this.sheets.length || this.sheets.length <= 1) {
       return false;
+    }
+    for (const sh of this.sheets) {
+      sh.bumpPivotSourceSheetIndexAfterRemove(i);
     }
     const [removed] = this.sheets.splice(i, 1);
     if (removed !== undefined) {

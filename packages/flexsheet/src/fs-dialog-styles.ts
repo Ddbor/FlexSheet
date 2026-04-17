@@ -127,6 +127,112 @@ export const FS_SHEET_PROMPT_BASE_STYLE_TEXT = `
 .fs-sheet-prompt__btn--secondary:hover {
   background: #f3f2f1;
 }
+.fs-sheet-prompt-overlay.fs-sheet-prompt-overlay--range-pick {
+  pointer-events: none;
+  background: transparent;
+}
+.fs-sheet-prompt-overlay.fs-sheet-prompt-overlay--range-pick .fs-sheet-prompt {
+  visibility: hidden;
+  pointer-events: none;
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.fs-sheet-prompt-range-pick-bar {
+  display: none;
+  box-sizing: border-box;
+  position: fixed;
+  left: 50%;
+  top: 20px;
+  transform: translateX(-50%);
+  z-index: 10003;
+  min-width: min(420px, calc(100vw - 32px));
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px 12px;
+  border-radius: 8px;
+  background: #f3f2f1;
+  border: 1px solid #d2d0ce;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  pointer-events: auto;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.fs-sheet-prompt-overlay.fs-sheet-prompt-overlay--range-pick .fs-sheet-prompt-range-pick-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fs-sheet-prompt-range-pick-bar__title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #323130;
+  text-align: center;
+}
+.fs-sheet-prompt-range-pick-bar__hint {
+  margin: 0;
+  font-size: 11px;
+  color: #605e5c;
+  text-align: center;
+}
+.fs-sheet-prompt-range-pick-bar__row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.fs-sheet-prompt-range-pick-bar__input {
+  flex: 1;
+  min-width: 0;
+  padding: 7px 10px;
+  font-size: 13px;
+  border: 1px solid #217346;
+  border-radius: 4px;
+  outline: none;
+  background: #fff;
+  color: #323130;
+  box-sizing: border-box;
+}
+.fs-sheet-prompt-range-pick-bar__icon-wrap {
+  flex-shrink: 0;
+  width: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  color: #605e5c;
+}
+.fs-sheet-prompt-range-pick-bar__icon-wrap svg {
+  width: 18px;
+  height: 18px;
+}
+.fs-sheet-prompt__range-pick {
+  flex-shrink: 0;
+  width: 36px;
+  padding: 0;
+  border: 1px solid #c8c6c4;
+  border-radius: 4px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #605e5c;
+}
+.fs-sheet-prompt__range-pick:not(:disabled) {
+  cursor: pointer;
+}
+.fs-sheet-prompt__range-pick:not(:disabled):hover {
+  background: #f3f2f1;
+  color: #323130;
+}
+.fs-sheet-prompt__range-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.fs-sheet-prompt__range-pick svg {
+  width: 18px;
+  height: 18px;
+}
 `;
 
 let fsSheetPromptBaseInjected = false;

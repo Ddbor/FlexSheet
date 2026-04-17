@@ -1,4 +1,5 @@
 import {
+  getPivotValueFieldCaption,
   normalizeSelectionRange,
   Worksheet,
   type CellScalar,
@@ -20,6 +21,8 @@ export interface PivotTableDestinationNewSheet {
 
 export interface PivotTableDestinationExistingSheet {
   readonly kind: "existingSheet";
+  /** 透视表输出写入的工作表；省略时与数据源工作表相同。 */
+  readonly targetSheet?: Worksheet;
   readonly startRow: number;
   readonly startCol: number;
 }
@@ -34,6 +37,10 @@ export interface PivotTableBuildOptions {
   readonly rowFieldCols: readonly number[];
   readonly columnFieldCols: readonly number[];
   readonly filterFieldCols: readonly number[];
+  /** 与 `filterFieldCols` 等长；省略或空子数组表示该筛选项不限制。 */
+  readonly filterSelectedKeys?: readonly (readonly string[])[];
+  /** 多值且无列字段时：度量在行展开（Excel「数值」在行）。 */
+  readonly valueFieldsOnRows?: boolean;
   readonly valueFields: readonly PivotValueFieldSpec[];
   readonly destination: PivotTableDestination;
 }
@@ -50,6 +57,12 @@ interface PivotAccumulator {
   min: number;
   max: number;
 }
+
+/** 单个值字段对应的累加状态（普通汇总 / 比率分子分母 / 占比分子）。 */
+type PivotFieldAggState =
+  | { readonly mode: "plain"; readonly acc: PivotAccumulator }
+  | { readonly mode: "ratio"; readonly num: PivotAccumulator; readonly den: PivotAccumulator }
+  | { readonly mode: "share"; readonly acc: PivotAccumulator };
 
 interface PivotRenderOutput {
   readonly rowCount: number;
@@ -93,6 +106,11 @@ function nextDefaultPivotSheetName(workbook: Workbook): string {
     }
   }
   return max === 0 ? "数据透视表1" : `数据透视表${max + 1}`;
+}
+
+/** 与透视行/列键、筛选项一致的单元格展示键。 */
+export function pivotFilterKeyFromCellValue(value: CellScalar): string {
+  return toPivotKey(value);
 }
 
 function toPivotKey(value: CellScalar): string {
@@ -202,25 +220,189 @@ function mergeAccumulator(target: PivotAccumulator, from: PivotAccumulator): voi
   target.max = Math.max(target.max, from.max);
 }
 
-function aggregateLabel(kind: PivotAggregateKind): string {
-  switch (kind) {
-    case "sum":
-      return "求和";
-    case "count":
-      return "计数";
-    case "average":
-      return "平均值";
-    case "max":
-      return "最大值";
-    case "min":
-      return "最小值";
-    default:
-      return "值";
+function createFieldAggState(vf: PivotValueFieldSpec): PivotFieldAggState {
+  if (vf.computed?.kind === "bucketRatio") {
+    return { mode: "ratio", num: createAccumulator(), den: createAccumulator() };
+  }
+  if (vf.computed?.kind === "shareOfGrandTotal") {
+    return { mode: "share", acc: createAccumulator() };
+  }
+  return { mode: "plain", acc: createAccumulator() };
+}
+
+function pushFieldAgg(
+  vf: PivotValueFieldSpec,
+  state: PivotFieldAggState,
+  sheet: Worksheet,
+  row: number,
+): void {
+  if (state.mode === "plain") {
+    pushAggregate(state.acc, sheet.getCell(row, vf.col).value);
+    return;
+  }
+  if (state.mode === "ratio" && vf.computed?.kind === "bucketRatio") {
+    pushAggregate(state.num, sheet.getCell(row, vf.col).value);
+    pushAggregate(state.den, sheet.getCell(row, vf.computed.denominatorCol).value);
+    return;
+  }
+  if (state.mode === "share") {
+    pushAggregate(state.acc, sheet.getCell(row, vf.col).value);
   }
 }
 
-export function dataFieldCaption(agg: PivotAggregateKind, valueFieldName: string): string {
-  return `${aggregateLabel(agg)}项:${valueFieldName}`;
+function mergeFieldAggState(target: PivotFieldAggState, from: PivotFieldAggState): void {
+  if (target.mode === "plain" && from.mode === "plain") {
+    mergeAccumulator(target.acc, from.acc);
+    return;
+  }
+  if (target.mode === "ratio" && from.mode === "ratio") {
+    mergeAccumulator(target.num, from.num);
+    mergeAccumulator(target.den, from.den);
+    return;
+  }
+  if (target.mode === "share" && from.mode === "share") {
+    mergeAccumulator(target.acc, from.acc);
+  }
+}
+
+function reduceFieldAgg(
+  vf: PivotValueFieldSpec,
+  state: PivotFieldAggState,
+  globalShareDenom: ReadonlyMap<number, number>,
+): CellScalar {
+  if (state.mode === "plain") {
+    return reduceAggregate(vf.aggregate, state.acc);
+  }
+  if (state.mode === "ratio") {
+    if (state.den.countNumeric === 0 || state.den.sum === 0) {
+      return null;
+    }
+    if (state.num.countNumeric === 0) {
+      return null;
+    }
+    return state.num.sum / state.den.sum;
+  }
+  const g = globalShareDenom.get(vf.col) ?? 0;
+  if (g <= 0 || state.acc.countNumeric === 0) {
+    return null;
+  }
+  return state.acc.sum / g;
+}
+
+function computeGlobalShareDenominators(
+  sheet: Worksheet,
+  rStart: number,
+  rEnd: number,
+  shareCols: ReadonlySet<number>,
+  rowInclude: (r: number) => boolean,
+): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const c of shareCols) {
+    out.set(c, 0);
+  }
+  for (let r = rStart; r <= rEnd; r++) {
+    if (!rowInclude(r)) {
+      continue;
+    }
+    for (const c of shareCols) {
+      const v = sheet.getCell(r, c).value;
+      if (typeof v === "number" && Number.isFinite(v)) {
+        out.set(c, (out.get(c) ?? 0) + v);
+      }
+    }
+  }
+  return out;
+}
+
+export function normalizeFilterSelectedKeys(
+  filterFieldCols: readonly number[],
+  input: readonly (readonly string[])[] | undefined,
+): readonly (readonly string[])[] {
+  const out: string[][] = [];
+  for (let i = 0; i < filterFieldCols.length; i++) {
+    const row = input?.[i];
+    out.push(row !== undefined && row.length > 0 ? [...row] : []);
+  }
+  return out;
+}
+
+/** 布局变更时保留仍存在的筛选列上的选中项。 */
+export function mergePivotFilterSelections(
+  oldCols: readonly number[],
+  oldKeys: readonly (readonly string[])[] | undefined,
+  newCols: readonly number[],
+  newKeysFromLayout: readonly (readonly string[])[] | undefined,
+): readonly (readonly string[])[] {
+  // oldKeys 缺省（旧数据）视为与 filterFieldCols 等长的空限制列表
+  const oldMap = new Map<number, readonly string[]>();
+  const ok = oldKeys ?? [];
+  for (let i = 0; i < oldCols.length; i++) {
+    oldMap.set(oldCols[i]!, ok[i] ?? []);
+  }
+  const out: string[][] = [];
+  for (let i = 0; i < newCols.length; i++) {
+    const c = newCols[i]!;
+    const fromLayout = newKeysFromLayout?.[i];
+    if (fromLayout !== undefined) {
+      out.push([...fromLayout]);
+      continue;
+    }
+    const prev = oldMap.get(c);
+    out.push(prev !== undefined ? [...prev] : []);
+  }
+  return out;
+}
+
+function rowPassesPivotFilters(
+  sheet: Worksheet,
+  row: number,
+  filterFieldCols: readonly number[],
+  filterSelectedKeys: readonly (readonly string[])[],
+): boolean {
+  for (let i = 0; i < filterFieldCols.length; i++) {
+    const allowed = filterSelectedKeys[i];
+    if (allowed === undefined || allowed.length === 0) {
+      continue;
+    }
+    const fc = filterFieldCols[i]!;
+    const key = toPivotKey(sheet.getCell(row, fc).value);
+    if (!allowed.includes(key)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function formatPivotFilterCaption(selectedKeys: readonly string[]): string {
+  if (selectedKeys.length === 0) {
+    return "(全部)";
+  }
+  if (selectedKeys.length === 1) {
+    return selectedKeys[0]!;
+  }
+  return "(多项)";
+}
+
+/** 数据源列上去重后的透视键（用于筛选面板列表）。 */
+export function collectPivotFilterDistinctKeys(
+  sheet: Worksheet,
+  rStart: number,
+  rEnd: number,
+  col: number,
+): string[] {
+  const set = new Set<string>();
+  for (let r = rStart; r <= rEnd; r++) {
+    set.add(toPivotKey(sheet.getCell(r, col).value));
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, "zh-Hans-CN"));
+}
+
+export function dataFieldCaption(
+  spec: PivotValueFieldSpec,
+  fieldName: string,
+  denominatorFieldName?: string,
+): string {
+  return getPivotValueFieldCaption(spec, fieldName, denominatorFieldName);
 }
 
 function styleForValueAggregate(agg: PivotAggregateKind): CellStyle | null {
@@ -230,14 +412,93 @@ function styleForValueAggregate(agg: PivotAggregateKind): CellStyle | null {
   return { numberFormat: "#,##0.00" };
 }
 
-function buildPivotRender(sheet: Worksheet, options: PivotTableBuildOptions): PivotRenderOutput {
+function styleForValueField(vf: PivotValueFieldSpec): CellStyle | null {
+  if (vf.computed?.kind === "bucketRatio" || vf.computed?.kind === "shareOfGrandTotal") {
+    return { numberFormat: "0.00%" };
+  }
+  return styleForValueAggregate(vf.aggregate);
+}
+
+function dedupeColsWithinZone(cols: number[]): void {
+  const seen = new Set<number>();
+  for (let i = cols.length - 1; i >= 0; i--) {
+    const c = cols[i]!;
+    if (seen.has(c)) {
+      cols.splice(i, 1);
+    } else {
+      seen.add(c);
+    }
+  }
+}
+
+function dedupeValueFieldsByColInPlace(valueFields: PivotValueFieldSpec[]): void {
+  const seen = new Set<number>();
+  for (let i = valueFields.length - 1; i >= 0; i--) {
+    const c = valueFields[i]!.col;
+    if (seen.has(c)) {
+      valueFields.splice(i, 1);
+    } else {
+      seen.add(c);
+    }
+  }
+}
+
+/** 同一列不可同时出现在筛选/列/行/值；优先级：筛选 > 列 > 行 > 值（从值区移除重复项）。 */
+function dedupePivotColumnAcrossZones(
+  filterFieldCols: number[],
+  columnFieldCols: number[],
+  rowFieldCols: number[],
+  valueFields: PivotValueFieldSpec[],
+): void {
+  dedupeColsWithinZone(filterFieldCols);
+  dedupeColsWithinZone(columnFieldCols);
+  dedupeColsWithinZone(rowFieldCols);
+  dedupeValueFieldsByColInPlace(valueFields);
+  const used = new Set<number>();
+  for (const c of filterFieldCols) {
+    used.add(c);
+  }
+  for (let i = columnFieldCols.length - 1; i >= 0; i--) {
+    const c = columnFieldCols[i]!;
+    if (used.has(c)) {
+      columnFieldCols.splice(i, 1);
+    } else {
+      used.add(c);
+    }
+  }
+  for (let i = rowFieldCols.length - 1; i >= 0; i--) {
+    const c = rowFieldCols[i]!;
+    if (used.has(c)) {
+      rowFieldCols.splice(i, 1);
+    } else {
+      used.add(c);
+    }
+  }
+  for (let i = valueFields.length - 1; i >= 0; i--) {
+    const c = valueFields[i]!.col;
+    if (used.has(c)) {
+      valueFields.splice(i, 1);
+    } else {
+      used.add(c);
+    }
+  }
+}
+
+export function buildPivotRender(
+  sheet: Worksheet,
+  options: PivotTableBuildOptions,
+): PivotRenderOutput {
   const n = normalizeSelectionRange(options.sourceRange);
   const fields = collectFields(sheet, n, options.hasHeaders);
   const fieldNameByCol = new Map<number, string>(fields.map((it) => [it.col, it.name]));
 
   const rowCols = [...options.rowFieldCols];
   const colDimCols = [...options.columnFieldCols];
-  let valueFields = [...options.valueFields];
+  let valueFields = [...options.valueFields.map((v) => ({ ...v }))];
+  const filterFieldCols = [...options.filterFieldCols];
+  dedupePivotColumnAcrossZones(filterFieldCols, colDimCols, rowCols, valueFields);
+  const filterSelectedKeysNorm = normalizeFilterSelectedKeys(filterFieldCols, options.filterSelectedKeys);
+
   if (rowCols.length === 0 || valueFields.length === 0) {
     return {
       rowCount: 1,
@@ -250,30 +511,45 @@ function buildPivotRender(sheet: Worksheet, options: PivotTableBuildOptions): Pi
     valueFields = [valueFields[0]!];
   }
 
-  const matrix = new Map<string, Map<string, PivotAccumulator[]>>();
+  const rStart = options.hasHeaders ? n.startRow + 1 : n.startRow;
+  const rEnd = n.endRow;
+
+  const rowInclude = (r: number): boolean =>
+    rowPassesPivotFilters(sheet, r, filterFieldCols, filterSelectedKeysNorm);
+
+  const shareCols = new Set<number>();
+  for (const vf of valueFields) {
+    if (vf.computed?.kind === "shareOfGrandTotal") {
+      shareCols.add(vf.col);
+    }
+  }
+  const globalShareDenom = computeGlobalShareDenominators(sheet, rStart, rEnd, shareCols, rowInclude);
+
+  const matrix = new Map<string, Map<string, PivotFieldAggState[]>>();
   const rowKeySet = new Set<string>();
   const colKeySet = new Set<string>();
 
-  const rStart = options.hasHeaders ? n.startRow + 1 : n.startRow;
-  const rEnd = n.endRow;
   for (let r = rStart; r <= rEnd; r++) {
+    if (!rowInclude(r)) {
+      continue;
+    }
     const rowKey = rowCompositeKey(sheet, r, rowCols);
     const colKey = colDimCols.length === 0 ? "__single__" : colCompositeKey(sheet, r, colDimCols);
     rowKeySet.add(rowKey);
     colKeySet.add(colKey);
     let rowMap = matrix.get(rowKey);
     if (rowMap === undefined) {
-      rowMap = new Map<string, PivotAccumulator[]>();
+      rowMap = new Map<string, PivotFieldAggState[]>();
       matrix.set(rowKey, rowMap);
     }
     let accs = rowMap.get(colKey);
     if (accs === undefined) {
-      accs = valueFields.map(() => createAccumulator());
+      accs = valueFields.map((vf) => createFieldAggState(vf));
       rowMap.set(colKey, accs);
     }
     for (let vi = 0; vi < valueFields.length; vi++) {
       const vf = valueFields[vi]!;
-      pushAggregate(accs[vi]!, sheet.getCell(r, vf.col).value);
+      pushFieldAgg(vf, accs[vi]!, sheet, r);
     }
   }
 
@@ -283,19 +559,49 @@ function buildPivotRender(sheet: Worksheet, options: PivotTableBuildOptions): Pi
   const showColDim = colDimCols.length > 0;
   const singleValueNoColDim = !showColDim && valueFields.length === 1;
   const multiValueNoColDim = !showColDim && valueFields.length > 1;
+  const multiValueTall =
+    multiValueNoColDim && options.valueFieldsOnRows === true;
+  const multiValueWide = multiValueNoColDim && !multiValueTall;
 
   const colKeysOrdered = colKeys.length === 0 ? ["__single__"] : colKeys;
-  const dataColCount = showColDim ? colKeysOrdered.length : valueFields.length;
+  let dataColCount: number;
+  if (showColDim) {
+    dataColCount = colKeysOrdered.length;
+  } else if (multiValueTall) {
+    dataColCount = 1;
+  } else {
+    dataColCount = valueFields.length;
+  }
   const rowTotalColCount = singleValueNoColDim ? 1 : 0;
   const tableCols = 1 + dataColCount + rowTotalColCount;
-  const tableRows = 1 + rowKeys.length + 1;
+  const innerBodyRowCount = multiValueTall ? rowKeys.length * valueFields.length : rowKeys.length;
+  const grandRowCount = multiValueTall ? valueFields.length : 1;
+  const innerTableRows = 1 + innerBodyRowCount + grandRowCount;
+  const top = filterFieldCols.length;
+  const totalRows = top + innerTableRows;
 
-  const values: CellScalar[][] = Array.from({ length: tableRows }, () =>
+  const values: CellScalar[][] = Array.from({ length: totalRows }, () =>
     Array.from<CellScalar>({ length: tableCols }).fill(null),
   );
-  const styles: (CellStyle | null)[][] = Array.from({ length: tableRows }, () =>
+  const styles: (CellStyle | null)[][] = Array.from({ length: totalRows }, () =>
     Array.from<CellStyle | null>({ length: tableCols }).fill(null),
   );
+
+  const filterLabelStyle: CellStyle = {
+    bold: true,
+    fillArgb: "FFF2F2F2",
+  };
+  const filterValueStyle: CellStyle = {
+    fillArgb: "FFFFFFFF",
+  };
+
+  for (let fi = 0; fi < top; fi++) {
+    const fc = filterFieldCols[fi]!;
+    values[fi][0] = fieldNameByCol.get(fc) ?? `列${fc - n.startCol + 1}`;
+    values[fi][1] = formatPivotFilterCaption(filterSelectedKeysNorm[fi] ?? []);
+    styles[fi][0] = filterLabelStyle;
+    styles[fi][1] = filterValueStyle;
+  }
 
   const headStyle: CellStyle = {
     bold: true,
@@ -309,129 +615,190 @@ function buildPivotRender(sheet: Worksheet, options: PivotTableBuildOptions): Pi
 
   const rowHeaderLabel =
     rowCols.length === 1 ? (fieldNameByCol.get(rowCols[0]!) ?? "行") : "行标签";
-  const colDimFirstName =
-    colDimCols.length > 0 ? (fieldNameByCol.get(colDimCols[0]!) ?? "列") : "";
+  const colDimFirstName = colDimCols.length > 0 ? (fieldNameByCol.get(colDimCols[0]!) ?? "列") : "";
 
-  values[0][0] =
+  const headerRow = top;
+  values[headerRow][0] =
     showColDim && colDimCols.length > 1
       ? `${rowHeaderLabel}\\${colDimCols.map((c) => fieldNameByCol.get(c) ?? "").join("\\")}`
       : showColDim
         ? `${rowHeaderLabel}\\${colDimFirstName}`
         : rowHeaderLabel;
-  styles[0][0] = headStyle;
+  styles[headerRow][0] = headStyle;
 
   if (showColDim) {
     const vf0 = valueFields[0]!;
     const vfName = fieldNameByCol.get(vf0.col) ?? "值";
     for (let ci = 0; ci < colKeysOrdered.length; ci++) {
       const ck = colKeysOrdered[ci]!;
-      values[0][ci + 1] = ck === "__single__" ? vfName : ck;
-      styles[0][ci + 1] = headStyle;
+      values[headerRow][ci + 1] = ck === "__single__" ? vfName : ck;
+      styles[headerRow][ci + 1] = headStyle;
     }
-    values[0][tableCols - 1] = "总计";
-    styles[0][tableCols - 1] = headStyle;
-  } else if (multiValueNoColDim) {
+    values[headerRow][tableCols - 1] = "总计";
+    styles[headerRow][tableCols - 1] = headStyle;
+  } else if (multiValueWide) {
     for (let vi = 0; vi < valueFields.length; vi++) {
       const vf = valueFields[vi]!;
       const nm = fieldNameByCol.get(vf.col) ?? "值";
-      values[0][vi + 1] = dataFieldCaption(vf.aggregate, nm);
-      styles[0][vi + 1] = headStyle;
+      const denNm =
+        vf.computed?.kind === "bucketRatio"
+          ? (fieldNameByCol.get(vf.computed.denominatorCol) ?? "")
+          : undefined;
+      values[headerRow][vi + 1] = getPivotValueFieldCaption(vf, nm, denNm);
+      styles[headerRow][vi + 1] = headStyle;
     }
+  } else if (multiValueTall) {
+    values[headerRow][1] = "汇总";
+    styles[headerRow][1] = headStyle;
   } else {
     const vf0 = valueFields[0]!;
     const vfName = fieldNameByCol.get(vf0.col) ?? "值";
-    values[0][1] = dataFieldCaption(vf0.aggregate, vfName);
-    styles[0][1] = headStyle;
-    values[0][2] = "总计";
-    styles[0][2] = headStyle;
+    const denNm =
+      vf0.computed?.kind === "bucketRatio"
+        ? (fieldNameByCol.get(vf0.computed.denominatorCol) ?? "")
+        : undefined;
+    values[headerRow][1] = getPivotValueFieldCaption(vf0, vfName, denNm);
+    styles[headerRow][1] = headStyle;
+    values[headerRow][2] = "总计";
+    styles[headerRow][2] = headStyle;
   }
 
-  const colTotals: PivotAccumulator[] = colKeysOrdered.map(() => createAccumulator());
-  const allTotal: PivotAccumulator[] = valueFields.map(() => createAccumulator());
+  const vf0ForColDim = valueFields[0]!;
+  const colTotals: PivotFieldAggState[] = colKeysOrdered.map(() =>
+    createFieldAggState(vf0ForColDim),
+  );
+  const allTotal: PivotFieldAggState[] = valueFields.map((vf) => createFieldAggState(vf));
 
-  for (let ri = 0; ri < rowKeys.length; ri++) {
-    const rowKey = rowKeys[ri]!;
-    const rowMap = matrix.get(rowKey) ?? new Map<string, PivotAccumulator[]>();
-    values[ri + 1][0] = rowKey.split(KEY_SEP).join(" ");
-    styles[ri + 1][0] = null;
-    const rowTotalsAcc: PivotAccumulator[] = valueFields.map(() => createAccumulator());
+  if (multiValueTall) {
+    const colKeySingle = colKeysOrdered[0]!;
+    let dst = headerRow + 1;
+    for (let ri = 0; ri < rowKeys.length; ri++) {
+      const rowKey = rowKeys[ri]!;
+      const rowKeyText = rowKey.split(KEY_SEP).join(" ");
+      const rowMap = matrix.get(rowKey) ?? new Map<string, PivotFieldAggState[]>();
+      for (let vi = 0; vi < valueFields.length; vi++) {
+        const vf = valueFields[vi]!;
+        const nm = fieldNameByCol.get(vf.col) ?? "值";
+        const denNm =
+          vf.computed?.kind === "bucketRatio"
+            ? (fieldNameByCol.get(vf.computed.denominatorCol) ?? "")
+            : undefined;
+        const caption = getPivotValueFieldCaption(vf, nm, denNm);
+        values[dst][0] = vi === 0 ? rowKeyText : `　${caption}`;
+        const accs = rowMap.get(colKeySingle);
+        const acc = accs?.[vi];
+        const out = acc === undefined ? null : reduceFieldAgg(vf, acc, globalShareDenom);
+        values[dst][1] = out;
+        styles[dst][0] = null;
+        styles[dst][1] = styleForValueField(vf);
+        if (acc !== undefined) {
+          mergeFieldAggState(allTotal[vi]!, acc);
+        }
+        dst++;
+      }
+    }
+    let tRow = dst;
+    for (let vi = 0; vi < valueFields.length; vi++) {
+      const vf = valueFields[vi]!;
+      const nm = fieldNameByCol.get(vf.col) ?? "值";
+      const denNm =
+        vf.computed?.kind === "bucketRatio"
+          ? (fieldNameByCol.get(vf.computed.denominatorCol) ?? "")
+          : undefined;
+      const cap = getPivotValueFieldCaption(vf, nm, denNm);
+      values[tRow][0] = `总计 ${cap}`;
+      values[tRow][1] = reduceFieldAgg(vf, allTotal[vi]!, globalShareDenom);
+      styles[tRow][0] = totalStyle;
+      styles[tRow][1] = totalStyle;
+      tRow++;
+    }
+  } else {
+    for (let ri = 0; ri < rowKeys.length; ri++) {
+      const rowKey = rowKeys[ri]!;
+      const rowMap = matrix.get(rowKey) ?? new Map<string, PivotFieldAggState[]>();
+      const dst = headerRow + 1 + ri;
+      values[dst][0] = rowKey.split(KEY_SEP).join(" ");
+      styles[dst][0] = null;
+      const rowTotalsAcc: PivotFieldAggState[] = valueFields.map((vf) => createFieldAggState(vf));
 
-    for (let ci = 0; ci < colKeysOrdered.length; ci++) {
-      const colKey = colKeysOrdered[ci]!;
-      const accs = rowMap.get(colKey);
+      for (let ci = 0; ci < colKeysOrdered.length; ci++) {
+        const colKey = colKeysOrdered[ci]!;
+        const accs = rowMap.get(colKey);
+        if (showColDim) {
+          const vf0 = valueFields[0]!;
+          const acc = accs?.[0];
+          const out = acc === undefined ? null : reduceFieldAgg(vf0, acc, globalShareDenom);
+          values[dst][ci + 1] = out;
+          styles[dst][ci + 1] = styleForValueField(vf0);
+          if (acc !== undefined) {
+            mergeFieldAggState(rowTotalsAcc[0]!, acc);
+            mergeFieldAggState(colTotals[ci]!, acc);
+            mergeFieldAggState(allTotal[0]!, acc);
+          }
+        } else if (multiValueWide) {
+          for (let vi = 0; vi < valueFields.length; vi++) {
+            const vf = valueFields[vi]!;
+            const acc = accs?.[vi];
+            const out = acc === undefined ? null : reduceFieldAgg(vf, acc, globalShareDenom);
+            values[dst][vi + 1] = out;
+            styles[dst][vi + 1] = styleForValueField(vf);
+            if (acc !== undefined) {
+              mergeFieldAggState(rowTotalsAcc[vi]!, acc);
+              mergeFieldAggState(allTotal[vi]!, acc);
+            }
+          }
+        } else {
+          const vf0 = valueFields[0]!;
+          const acc = accs?.[0];
+          const out = acc === undefined ? null : reduceFieldAgg(vf0, acc, globalShareDenom);
+          values[dst][1] = out;
+          styles[dst][1] = styleForValueField(vf0);
+          if (acc !== undefined) {
+            mergeFieldAggState(rowTotalsAcc[0]!, acc);
+            mergeFieldAggState(colTotals[ci]!, acc);
+            mergeFieldAggState(allTotal[0]!, acc);
+          }
+          values[dst][2] = reduceFieldAgg(vf0, rowTotalsAcc[0]!, globalShareDenom);
+          styles[dst][2] = totalStyle;
+        }
+      }
+
       if (showColDim) {
         const vf0 = valueFields[0]!;
-        const acc = accs?.[0];
-        const out = acc === undefined ? null : reduceAggregate(vf0.aggregate, acc);
-        values[ri + 1][ci + 1] = out;
-        styles[ri + 1][ci + 1] = styleForValueAggregate(vf0.aggregate);
-        if (acc !== undefined) {
-          mergeAccumulator(rowTotalsAcc[0]!, acc);
-          mergeAccumulator(colTotals[ci]!, acc);
-          mergeAccumulator(allTotal[0]!, acc);
-        }
-      } else if (multiValueNoColDim) {
-        for (let vi = 0; vi < valueFields.length; vi++) {
-          const vf = valueFields[vi]!;
-          const acc = accs?.[vi];
-          const out = acc === undefined ? null : reduceAggregate(vf.aggregate, acc);
-          values[ri + 1][vi + 1] = out;
-          styles[ri + 1][vi + 1] = styleForValueAggregate(vf.aggregate);
-          if (acc !== undefined) {
-            mergeAccumulator(rowTotalsAcc[vi]!, acc);
-            mergeAccumulator(allTotal[vi]!, acc);
-          }
-        }
-      } else {
-        const vf0 = valueFields[0]!;
-        const acc = accs?.[0];
-        const out = acc === undefined ? null : reduceAggregate(vf0.aggregate, acc);
-        values[ri + 1][1] = out;
-        styles[ri + 1][1] = styleForValueAggregate(vf0.aggregate);
-        if (acc !== undefined) {
-          mergeAccumulator(rowTotalsAcc[0]!, acc);
-          mergeAccumulator(colTotals[ci]!, acc);
-          mergeAccumulator(allTotal[0]!, acc);
-        }
-        values[ri + 1][2] = reduceAggregate(vf0.aggregate, rowTotalsAcc[0]!);
-        styles[ri + 1][2] = totalStyle;
+        values[dst][tableCols - 1] = reduceFieldAgg(vf0, rowTotalsAcc[0]!, globalShareDenom);
+        styles[dst][tableCols - 1] = totalStyle;
       }
     }
 
+    const totalRowIdx = headerRow + rowKeys.length + 1;
+    values[totalRowIdx][0] = "总计";
+    styles[totalRowIdx][0] = totalStyle;
     if (showColDim) {
       const vf0 = valueFields[0]!;
-      values[ri + 1][tableCols - 1] = reduceAggregate(vf0.aggregate, rowTotalsAcc[0]!);
-      styles[ri + 1][tableCols - 1] = totalStyle;
+      for (let ci = 0; ci < colKeysOrdered.length; ci++) {
+        const colTotal = colTotals[ci]!;
+        values[totalRowIdx][ci + 1] = reduceFieldAgg(vf0, colTotal, globalShareDenom);
+        styles[totalRowIdx][ci + 1] = totalStyle;
+      }
+      values[totalRowIdx][tableCols - 1] = reduceFieldAgg(vf0, allTotal[0]!, globalShareDenom);
+      styles[totalRowIdx][tableCols - 1] = totalStyle;
+    } else if (multiValueWide) {
+      for (let vi = 0; vi < valueFields.length; vi++) {
+        const vf = valueFields[vi]!;
+        values[totalRowIdx][vi + 1] = reduceFieldAgg(vf, allTotal[vi]!, globalShareDenom);
+        styles[totalRowIdx][vi + 1] = totalStyle;
+      }
+    } else {
+      const vf0 = valueFields[0]!;
+      values[totalRowIdx][1] = reduceFieldAgg(vf0, allTotal[0]!, globalShareDenom);
+      styles[totalRowIdx][1] = totalStyle;
+      values[totalRowIdx][2] = reduceFieldAgg(vf0, allTotal[0]!, globalShareDenom);
+      styles[totalRowIdx][2] = totalStyle;
     }
-  }
-
-  values[tableRows - 1][0] = "总计";
-  styles[tableRows - 1][0] = totalStyle;
-  if (showColDim) {
-    const vf0 = valueFields[0]!;
-    for (let ci = 0; ci < colKeysOrdered.length; ci++) {
-      const colTotal = colTotals[ci]!;
-      values[tableRows - 1][ci + 1] = reduceAggregate(vf0.aggregate, colTotal);
-      styles[tableRows - 1][ci + 1] = totalStyle;
-    }
-    values[tableRows - 1][tableCols - 1] = reduceAggregate(vf0.aggregate, allTotal[0]!);
-    styles[tableRows - 1][tableCols - 1] = totalStyle;
-  } else if (multiValueNoColDim) {
-    for (let vi = 0; vi < valueFields.length; vi++) {
-      const vf = valueFields[vi]!;
-      values[tableRows - 1][vi + 1] = reduceAggregate(vf.aggregate, allTotal[vi]!);
-      styles[tableRows - 1][vi + 1] = totalStyle;
-    }
-  } else {
-    const vf0 = valueFields[0]!;
-    values[tableRows - 1][1] = reduceAggregate(vf0.aggregate, allTotal[0]!);
-    styles[tableRows - 1][1] = totalStyle;
-    values[tableRows - 1][2] = reduceAggregate(vf0.aggregate, allTotal[0]!);
-    styles[tableRows - 1][2] = totalStyle;
   }
 
   return {
-    rowCount: tableRows,
+    rowCount: totalRows,
     colCount: tableCols,
     values,
     styles,
@@ -568,7 +935,9 @@ function clonePivotDef(def: WorksheetPivotTableDefinition): WorksheetPivotTableD
     rowFieldCols: [...def.rowFieldCols],
     columnFieldCols: [...def.columnFieldCols],
     filterFieldCols: [...def.filterFieldCols],
+    filterSelectedKeys: (def.filterSelectedKeys ?? []).map((k) => [...k]),
     valueFields: def.valueFields.map((v) => ({ ...v })),
+    valueFieldsOnRows: def.valueFieldsOnRows,
   };
 }
 
@@ -644,7 +1013,9 @@ export class CreatePivotTableCommand implements ICommand {
       );
     }
     if (findSheetIndex(this.workbook, this.createdSheet) < 0) {
-      this.workbook.addSheet(this.createdSheet);
+      const sourceIdx = findSheetIndex(this.workbook, this.sourceSheet);
+      const insertAt = sourceIdx >= 0 ? sourceIdx + 1 : this.workbook.sheetCount;
+      this.workbook.insertSheetAt(insertAt, this.createdSheet);
     }
     this.createdSheet.clearPivotTableDefinitions();
     writePivotResult(this.createdSheet, 0, 0, this.output);
@@ -671,7 +1042,7 @@ export class CreatePivotTableCommand implements ICommand {
     if (this.options.destination.kind !== "existingSheet") {
       return;
     }
-    this.targetSheet = this.sourceSheet;
+    this.targetSheet = this.options.destination.targetSheet ?? this.sourceSheet;
     this.targetStartRow = this.options.destination.startRow;
     this.targetStartCol = this.options.destination.startCol;
     if (this.beforeSnapshots === null) {
@@ -709,16 +1080,29 @@ export class CreatePivotTableCommand implements ICommand {
     if (sourceIdx < 0) {
       return;
     }
+    const filterFieldCols = [...this.options.filterFieldCols];
+    const columnFieldCols = [...this.options.columnFieldCols];
+    const rowFieldCols = [...this.options.rowFieldCols];
+    const valueFieldsForDef = this.options.valueFields.map((v) => ({ ...v }));
+    dedupePivotColumnAcrossZones(filterFieldCols, columnFieldCols, rowFieldCols, valueFieldsForDef);
     const def: WorksheetPivotTableDefinition = {
       id: this.pivotDefId,
       name: nextPivotTableExcelName(this.workbook),
       sourceSheetIndex: sourceIdx,
       sourceRange: { ...this.sourceRange },
       hasHeaders: this.options.hasHeaders,
-      rowFieldCols: [...this.options.rowFieldCols],
-      columnFieldCols: [...this.options.columnFieldCols],
-      filterFieldCols: [...this.options.filterFieldCols],
-      valueFields: this.options.valueFields.map((v) => ({ ...v })),
+      rowFieldCols,
+      columnFieldCols,
+      filterFieldCols,
+      filterSelectedKeys: normalizeFilterSelectedKeys(
+        filterFieldCols,
+        this.options.filterSelectedKeys,
+      ).map((k) => [...k]),
+      valueFields: valueFieldsForDef,
+      valueFieldsOnRows:
+        this.options.valueFields.length > 1 && this.options.columnFieldCols.length === 0
+          ? this.options.valueFieldsOnRows === true
+          : undefined,
       destinationRow: destRow,
       destinationCol: destCol,
       outputRowCount: this.output.rowCount,
@@ -755,7 +1139,9 @@ export class UpdatePivotTableLayoutCommand implements ICommand {
       readonly rowFieldCols: readonly number[];
       readonly columnFieldCols: readonly number[];
       readonly filterFieldCols: readonly number[];
+      readonly filterSelectedKeys?: readonly (readonly string[])[];
       readonly valueFields: readonly PivotValueFieldSpec[];
+      readonly valueFieldsOnRows?: boolean;
     },
   ) {}
 
@@ -773,12 +1159,7 @@ export class UpdatePivotTableLayoutCommand implements ICommand {
     if (this.state === "undone") {
       if (this.nextOutput !== null && this.nextDef !== null) {
         this.pivotSheet.removePivotTableDefinitionById(this.pivotDefId);
-        writePivotResult(
-          this.pivotSheet,
-          this.pivotDestRow,
-          this.pivotDestCol,
-          this.nextOutput,
-        );
+        writePivotResult(this.pivotSheet, this.pivotDestRow, this.pivotDestCol, this.nextOutput);
         clearPivotOutputOverflow(
           this.pivotSheet,
           this.pivotDestRow,
@@ -797,13 +1178,169 @@ export class UpdatePivotTableLayoutCommand implements ICommand {
       return;
     }
 
+    const layoutFilterCols = [...this.layout.filterFieldCols];
+    const layoutColumnCols = [...this.layout.columnFieldCols];
+    const layoutRowCols = [...this.layout.rowFieldCols];
+    const layoutValueFields = this.layout.valueFields.map((v) => ({ ...v }));
+    dedupePivotColumnAcrossZones(layoutFilterCols, layoutColumnCols, layoutRowCols, layoutValueFields);
+    const mergedFilterKeys = mergePivotFilterSelections(
+      current.filterFieldCols,
+      current.filterSelectedKeys ?? [],
+      layoutFilterCols,
+      this.layout.filterSelectedKeys,
+    );
+    const mergedValueFieldsOnRows =
+      layoutColumnCols.length > 0 || layoutValueFields.length <= 1
+        ? false
+        : this.layout.valueFieldsOnRows !== undefined
+          ? this.layout.valueFieldsOnRows
+          : (current.valueFieldsOnRows === true);
     const buildOpts: PivotTableBuildOptions = {
       sourceRange: this.layout.sourceRange,
       hasHeaders: this.layout.hasHeaders,
-      rowFieldCols: this.layout.rowFieldCols,
-      columnFieldCols: this.layout.columnFieldCols,
-      filterFieldCols: this.layout.filterFieldCols,
-      valueFields: this.layout.valueFields,
+      rowFieldCols: layoutRowCols,
+      columnFieldCols: layoutColumnCols,
+      filterFieldCols: layoutFilterCols,
+      filterSelectedKeys: normalizeFilterSelectedKeys(layoutFilterCols, mergedFilterKeys),
+      valueFields: layoutValueFields,
+      valueFieldsOnRows: mergedValueFieldsOnRows ? true : undefined,
+      destination: {
+        kind: "existingSheet",
+        startRow: current.destinationRow,
+        startCol: current.destinationCol,
+      },
+    };
+    const out = buildPivotRender(sourceSheet, buildOpts);
+    this.snapRows = Math.max(current.outputRowCount, out.rowCount);
+    this.snapCols = Math.max(current.outputColCount, out.colCount);
+    this.pivotDestRow = current.destinationRow;
+    this.pivotDestCol = current.destinationCol;
+    this.beforeSnapshots = captureSnapshots(
+      this.pivotSheet,
+      this.pivotDestRow,
+      this.pivotDestCol,
+      this.snapRows,
+      this.snapCols,
+    );
+    this.prevDef = clonePivotDef(current);
+
+    this.pivotSheet.removePivotTableDefinitionById(this.pivotDefId);
+    writePivotResult(this.pivotSheet, this.pivotDestRow, this.pivotDestCol, out);
+    clearPivotOutputOverflow(
+      this.pivotSheet,
+      this.pivotDestRow,
+      this.pivotDestCol,
+      this.snapRows,
+      this.snapCols,
+      out.rowCount,
+      out.colCount,
+    );
+
+    const persistedFilterKeys = normalizeFilterSelectedKeys(layoutFilterCols, mergedFilterKeys);
+    const nextDef: WorksheetPivotTableDefinition = {
+      id: current.id,
+      name: current.name,
+      sourceSheetIndex: current.sourceSheetIndex,
+      sourceRange: { ...normalizeSelectionRange(this.layout.sourceRange) },
+      hasHeaders: this.layout.hasHeaders,
+      rowFieldCols: [...layoutRowCols],
+      columnFieldCols: [...layoutColumnCols],
+      filterFieldCols: [...layoutFilterCols],
+      filterSelectedKeys: persistedFilterKeys.map((k) => [...k]),
+      valueFields: layoutValueFields.map((v) => ({ ...v })),
+      valueFieldsOnRows:
+        layoutValueFields.length > 1 && layoutColumnCols.length === 0
+          ? mergedValueFieldsOnRows === true
+          : undefined,
+      destinationRow: current.destinationRow,
+      destinationCol: current.destinationCol,
+      outputRowCount: out.rowCount,
+      outputColCount: out.colCount,
+    };
+    this.pivotSheet.registerPivotTableDefinition(nextDef);
+    this.nextOutput = out;
+    this.nextDef = nextDef;
+    this.state = "done";
+  }
+
+  undo(): void {
+    if (this.state !== "done" || this.beforeSnapshots === null || this.prevDef === null) {
+      return;
+    }
+    this.pivotSheet.removePivotTableDefinitionById(this.pivotDefId);
+    restoreSnapshots(this.pivotSheet, this.beforeSnapshots);
+    this.pivotSheet.registerPivotTableDefinition(this.prevDef);
+    this.state = "undone";
+  }
+}
+
+type PivotFilterCmdState = "idle" | "done" | "undone";
+
+/** 仅更新透视表筛选项并重新汇总（可撤销）。 */
+export class UpdatePivotTableFiltersCommand implements ICommand {
+  readonly id = "feature.updatePivotTableFilters";
+  readonly label = "更新数据透视表筛选";
+
+  private state: PivotFilterCmdState = "idle";
+  private beforeSnapshots: readonly CellSnapshot[] | null = null;
+  private prevDef: WorksheetPivotTableDefinition | null = null;
+  private snapRows = 0;
+  private snapCols = 0;
+  private pivotDestRow = 0;
+  private pivotDestCol = 0;
+  private nextOutput: PivotRenderOutput | null = null;
+  private nextDef: WorksheetPivotTableDefinition | null = null;
+
+  constructor(
+    private readonly workbook: Workbook,
+    private readonly pivotSheet: Worksheet,
+    private readonly pivotDefId: string,
+    private readonly nextFilterSelectedKeys: readonly (readonly string[])[],
+  ) {}
+
+  execute(): void {
+    const current = this.pivotSheet
+      .getPivotTableDefinitionsSnapshot()
+      .find((d) => d.id === this.pivotDefId);
+    if (current === undefined) {
+      return;
+    }
+    const sourceSheet = this.workbook.getSheet(current.sourceSheetIndex);
+    if (sourceSheet === undefined) {
+      return;
+    }
+    if (this.state === "undone") {
+      if (this.nextOutput !== null && this.nextDef !== null) {
+        this.pivotSheet.removePivotTableDefinitionById(this.pivotDefId);
+        writePivotResult(this.pivotSheet, this.pivotDestRow, this.pivotDestCol, this.nextOutput);
+        clearPivotOutputOverflow(
+          this.pivotSheet,
+          this.pivotDestRow,
+          this.pivotDestCol,
+          this.snapRows,
+          this.snapCols,
+          this.nextOutput.rowCount,
+          this.nextOutput.colCount,
+        );
+        this.pivotSheet.registerPivotTableDefinition(this.nextDef);
+      }
+      this.state = "done";
+      return;
+    }
+    if (this.state === "done") {
+      return;
+    }
+
+    const normalized = normalizeFilterSelectedKeys(current.filterFieldCols, this.nextFilterSelectedKeys);
+    const buildOpts: PivotTableBuildOptions = {
+      sourceRange: current.sourceRange,
+      hasHeaders: current.hasHeaders,
+      rowFieldCols: current.rowFieldCols,
+      columnFieldCols: current.columnFieldCols,
+      filterFieldCols: current.filterFieldCols,
+      filterSelectedKeys: normalized,
+      valueFields: current.valueFields,
+      valueFieldsOnRows: current.valueFieldsOnRows === true ? true : undefined,
       destination: {
         kind: "existingSheet",
         startRow: current.destinationRow,
@@ -840,12 +1377,14 @@ export class UpdatePivotTableLayoutCommand implements ICommand {
       id: current.id,
       name: current.name,
       sourceSheetIndex: current.sourceSheetIndex,
-      sourceRange: { ...normalizeSelectionRange(this.layout.sourceRange) },
-      hasHeaders: this.layout.hasHeaders,
-      rowFieldCols: [...this.layout.rowFieldCols],
-      columnFieldCols: [...this.layout.columnFieldCols],
-      filterFieldCols: [...this.layout.filterFieldCols],
-      valueFields: this.layout.valueFields.map((v) => ({ ...v })),
+      sourceRange: { ...current.sourceRange },
+      hasHeaders: current.hasHeaders,
+      rowFieldCols: [...current.rowFieldCols],
+      columnFieldCols: [...current.columnFieldCols],
+      filterFieldCols: [...current.filterFieldCols],
+      filterSelectedKeys: normalized.map((k) => [...k]),
+      valueFields: current.valueFields.map((v) => ({ ...v })),
+      valueFieldsOnRows: current.valueFieldsOnRows,
       destinationRow: current.destinationRow,
       destinationCol: current.destinationCol,
       outputRowCount: out.rowCount,

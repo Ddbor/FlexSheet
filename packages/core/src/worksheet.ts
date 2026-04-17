@@ -487,7 +487,55 @@ export class Worksheet {
     return this.pivotTableDefinitions.map((it) => ({
       ...it,
       sourceRange: { ...it.sourceRange },
+      filterSelectedKeys: (it.filterSelectedKeys ?? []).map((keys) => [...keys]),
     }));
+  }
+
+  /**
+   * 在工作簿 `insertSheetAt(insertIndex, …)` 之前调用：插入点后方的表索引整体 +1，
+   * 透视定义中的 `sourceSheetIndex` 需同步位移，避免指向错误工作表。
+   */
+  bumpPivotSourceSheetIndexAfterInsert(insertIndex: number): void {
+    const at = Math.trunc(insertIndex);
+    let changed = false;
+    const next: WorksheetPivotTableDefinition[] = [];
+    for (const d of this.pivotTableDefinitions) {
+      if (d.sourceSheetIndex >= at) {
+        changed = true;
+        next.push({ ...d, sourceSheetIndex: d.sourceSheetIndex + 1 });
+      } else {
+        next.push(d);
+      }
+    }
+    if (changed) {
+      this.pivotTableDefinitions = next;
+      this.touchData();
+    }
+  }
+
+  /**
+   * 移除 `removedIndex` 处工作表之前调用：其后方索引 -1；指向被删表的定义丢弃。
+   */
+  bumpPivotSourceSheetIndexAfterRemove(removedIndex: number): void {
+    const ri = Math.trunc(removedIndex);
+    let changed = false;
+    const next: WorksheetPivotTableDefinition[] = [];
+    for (const d of this.pivotTableDefinitions) {
+      if (d.sourceSheetIndex === ri) {
+        changed = true;
+        continue;
+      }
+      if (d.sourceSheetIndex > ri) {
+        changed = true;
+        next.push({ ...d, sourceSheetIndex: d.sourceSheetIndex - 1 });
+      } else {
+        next.push(d);
+      }
+    }
+    if (changed) {
+      this.pivotTableDefinitions = next;
+      this.touchData();
+    }
   }
 
   /**

@@ -81,12 +81,16 @@ import {
 import { SelectionMergeCommand } from "./merge-commands.js";
 import { useSheetChromeGuard } from "./sheet-chrome-guard-plugin.js";
 import { openColumnFilterPanel } from "./column-filter-panel.js";
+import { openPivotFilterPanel } from "./pivot-filter-panel.js";
 import { showFormatAsTableDialog } from "./format-as-table-dialog.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { showFillSeriesDialog } from "./fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./new-table-style-dialog.js";
 import { showPivotTableDialog } from "./pivot-table-dialog.js";
-import { tryOpenPivotFieldsPaneForSelection } from "./pivot-table-fields-pane.js";
+import {
+  syncPivotTableFieldsPaneWithSelection,
+  tryOpenPivotFieldsPaneForSelection,
+} from "./pivot-table-fields-pane.js";
 import { useSheetContextMenu } from "./sheet-context-menu-plugin.js";
 import { mountFormatCellsDialog } from "./format-cells-dialog.js";
 import { useUndoRedo } from "./undo-redo-plugin.js";
@@ -190,6 +194,18 @@ export class FlexSheet {
   private pendingClipboardCut: { sheet: Worksheet; range: SelectionRange } | null = null;
   /** 「自定义排序」对话框根节点（打开时独占，关闭时移除）。 */
   private customSortOverlay: HTMLDivElement | null = null;
+  /**
+   * 对话框「从工作表选定区域」：框选结束写入引用；ESC 取消并恢复进入前的选区。
+   */
+  private rangeReferencePick:
+    | {
+        readonly resolve: (value: string | null) => void;
+        readonly mode: "range" | "singleCell";
+        readonly savedSelection: SelectionRange;
+        readonly escHandler: (ev: KeyboardEvent) => void;
+        readonly onRangePreview?: (displayRef: string) => void;
+      }
+    | null = null;
   /** 卸载 `chromeRoot` 上 ⇧⌘R 捕获监听。 */
   private chromeRootSortShortcutCleanup: (() => void) | null = null;
   /** Ribbon「套用表格格式 -> 自定义」样式条目（当前以内置样式命令作为应用后端）。 */
@@ -352,6 +368,7 @@ export class FlexSheet {
         this.renderer.ensureScrollClamped();
         this.cellEditor.syncLayout();
         this.rebindActiveSheetFormattingListener();
+        this.syncPivotTableFieldsPaneToSelection();
       }
       this.renderer.requestRedraw();
     });
@@ -379,6 +396,7 @@ export class FlexSheet {
     }
     this.rebindActiveSheetFormattingListener();
     this.renderer.requestRedraw();
+    this.syncPivotTableFieldsPaneToSelection();
   }
 
   getTheme(): SheetTheme {
@@ -470,6 +488,11 @@ export class FlexSheet {
   refresh(): void {
     this.cellEditor.syncLayout();
     this.renderer.requestRedraw();
+  }
+
+  /** 表体 Canvas 所在挂载节点；数据透视字段面板与之并排插入同一父级 flex 行。 */
+  getSheetContainerElement(): HTMLElement {
+    return this.host;
   }
 
   /**
@@ -1304,6 +1327,47 @@ export class FlexSheet {
   }
 
   /**
+   * 收起对话框后在表格上拖拽框选，返回与「套用表格格式 / 数据透视表」输入框一致的绝对引用（如 `=$A$1:$C$10`）。
+   * `mode: "singleCell"` 时仅取活动单元格（如 `=$A$1`）。按 ESC 取消，返回 `null`。
+   * 使用箭头函数属性，避免对话框内 `const pick = host.pickRangeReferenceFromSheet` 解构后丢失 `this`。
+   */
+  pickRangeReferenceFromSheet = (options?: {
+    readonly mode?: "range" | "singleCell";
+    readonly onRangePreview?: (displayRef: string) => void;
+  }): Promise<string | null> => {
+    if (this.rangeReferencePick !== null) {
+      return Promise.resolve(null);
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return Promise.resolve(null);
+    }
+    return new Promise<string | null>((resolve) => {
+      const savedSelection = normalizeSelectionRange(this.selection.getNormalizedRange());
+      const mode = options?.mode ?? "range";
+      const escHandler = (ev: KeyboardEvent): void => {
+        if (ev.key !== "Escape" || ev.isComposing) {
+          return;
+        }
+        ev.preventDefault();
+        this.cancelRangeReferencePick();
+      };
+      document.addEventListener("keydown", escHandler, true);
+      this.rangeReferencePick = {
+        resolve,
+        mode,
+        savedSelection,
+        escHandler,
+        onRangePreview: options?.onRangePreview,
+      };
+      queueMicrotask(() => {
+        this.emitRangePickPreviewIfNeeded();
+        this.canvas.focus();
+      });
+    });
+  };
+
+  /**
    * 注册一个新建表样式，并返回稳定 id。
    * 当前实现先将自定义样式映射到一套可用的内置预设，保证样式库中可见且可套用。
    */
@@ -1370,6 +1434,56 @@ export class FlexSheet {
   /** 打开列筛选面板（`col` 须已启用自动筛选）。 */
   openColumnFilterUi(col: number, clientX: number, clientY: number): void {
     openColumnFilterPanel({ flex: this, col, clientX, clientY });
+  }
+
+  /** 打开数据透视表某一筛选项的多选面板。 */
+  openPivotFilterUi(
+    pivotSheet: Worksheet,
+    pivotDefId: string,
+    filterFieldIndex: number,
+    clientX: number,
+    clientY: number,
+  ): void {
+    openPivotFilterPanel({
+      flex: this,
+      pivotSheet,
+      pivotDefId,
+      filterFieldIndex,
+      clientX,
+      clientY,
+    });
+  }
+
+  private tryOpenPivotFilterFromClient(clientX: number, clientY: number): boolean {
+    if (this.rangeReferencePick !== null) {
+      return false;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return false;
+    }
+    const hit = this.hitTestClient(clientX, clientY);
+    if (hit === null) {
+      return false;
+    }
+    for (const def of sheet.getPivotTableDefinitionsSnapshot()) {
+      const fCount = def.filterFieldCols.length;
+      if (fCount === 0) {
+        continue;
+      }
+      const r0 = def.destinationRow;
+      const c0 = def.destinationCol;
+      for (let i = 0; i < fCount; i++) {
+        if (
+          hit.row === r0 + i &&
+          (hit.col === c0 || hit.col === c0 + 1)
+        ) {
+          this.openPivotFilterUi(sheet, def.id, i, clientX, clientY);
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   destroy(): void {
@@ -1496,6 +1610,7 @@ export class FlexSheet {
         }
       }
       this.afterSelectionChanged();
+      this.tryCommitRangeReferencePick();
       return;
     }
 
@@ -1543,6 +1658,54 @@ export class FlexSheet {
       }
     }
     this.afterSelectionChanged();
+    this.tryCommitRangeReferencePick();
+  }
+
+  private formatAbsoluteRangeRefString(range: SelectionRange): string {
+    const n = normalizeSelectionRange(range);
+    const c0 = columnIndexToLabel(n.startCol);
+    const c1 = columnIndexToLabel(n.endCol);
+    const r0 = n.startRow + 1;
+    const r1 = n.endRow + 1;
+    return `=$${c0}$${r0}:$${c1}$${r1}`;
+  }
+
+  private formatAbsoluteCellRefString(row: number, col: number): string {
+    return `=$${columnIndexToLabel(col)}$${row + 1}`;
+  }
+
+  private tryCommitRangeReferencePick(): void {
+    const session = this.rangeReferencePick;
+    if (session === null) {
+      return;
+    }
+    document.removeEventListener("keydown", session.escHandler, true);
+    if (this.workbook.getActiveSheet() === undefined) {
+      session.resolve(null);
+      this.rangeReferencePick = null;
+      return;
+    }
+    const text =
+      session.mode === "singleCell"
+        ? (() => {
+            const ac = this.selection.getActiveCell();
+            return this.formatAbsoluteCellRefString(ac.row, ac.col);
+          })()
+        : this.formatAbsoluteRangeRefString(this.selection.getNormalizedRange());
+    session.resolve(text);
+    this.rangeReferencePick = null;
+  }
+
+  private cancelRangeReferencePick(): void {
+    const session = this.rangeReferencePick;
+    if (session === null) {
+      return;
+    }
+    document.removeEventListener("keydown", session.escHandler, true);
+    this.selection.setNormalizedRange(session.savedSelection);
+    this.afterSelectionChanged();
+    session.resolve(null);
+    this.rangeReferencePick = null;
   }
 
   private bindSelectionKeyboard(): void {
@@ -1806,12 +1969,14 @@ export class FlexSheet {
           this.renderer.viewZoom,
         );
         if (filterCol !== null) {
-          ev.preventDefault();
-          if (this.cellEditor.isEditing()) {
-            this.cellEditor.cancelWithoutCommit();
+          if (this.rangeReferencePick === null) {
+            ev.preventDefault();
+            if (this.cellEditor.isEditing()) {
+              this.cellEditor.cancelWithoutCommit();
+            }
+            this.openColumnFilterUi(filterCol, ev.clientX, ev.clientY);
+            return;
           }
-          this.openColumnFilterUi(filterCol, ev.clientX, ev.clientY);
-          return;
         }
       }
       ev.preventDefault();
@@ -1842,11 +2007,21 @@ export class FlexSheet {
 
     const bodyFilterCol = this.tryHitBodyAutoFilterFromClient(ev.clientX, ev.clientY);
     if (bodyFilterCol !== null) {
+      if (this.rangeReferencePick === null) {
+        ev.preventDefault();
+        if (this.cellEditor.isEditing()) {
+          this.cellEditor.cancelWithoutCommit();
+        }
+        this.openColumnFilterUi(bodyFilterCol, ev.clientX, ev.clientY);
+        return;
+      }
+    }
+
+    if (this.tryOpenPivotFilterFromClient(ev.clientX, ev.clientY)) {
       ev.preventDefault();
       if (this.cellEditor.isEditing()) {
         this.cellEditor.cancelWithoutCommit();
       }
-      this.openColumnFilterUi(bodyFilterCol, ev.clientX, ev.clientY);
       return;
     }
 
@@ -1936,6 +2111,9 @@ export class FlexSheet {
   private beginResizing(kind: "row" | "col", index: number, ev: PointerEvent): void {
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) return;
+    if (this.rangeReferencePick !== null) {
+      this.cancelRangeReferencePick();
+    }
     this.resizing = true;
     this.resizingKind = kind;
     this.resizingIndex = index;
@@ -2311,6 +2489,9 @@ export class FlexSheet {
   }
 
   private tryHitFillHandle(clientX: number, clientY: number): boolean {
+    if (this.rangeReferencePick !== null) {
+      return false;
+    }
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined || this.cellEditor.isEditing()) {
       return false;
@@ -2482,6 +2663,52 @@ export class FlexSheet {
     this.renderer.requestRedraw();
     this.notifyFormattingChrome();
     this.syncFormulaBar();
+    this.syncPivotTableFieldsPaneToSelection();
+    this.emitRangePickPreviewIfNeeded();
+  }
+
+  /** Excel 风格显示用引用：`表名!$A$1:$B$2`（无 `=`），供选区模式悬浮条实时预览。 */
+  private emitRangePickPreviewIfNeeded(): void {
+    const session = this.rangeReferencePick;
+    if (session === null || session.onRangePreview === undefined) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const qName = this.quoteSheetNameForRef(sheet.name);
+    let display: string;
+    if (session.mode === "singleCell") {
+      const ac = this.selection.getActiveCell();
+      const col = columnIndexToLabel(ac.col);
+      display = `${qName}!$${col}$${ac.row + 1}`;
+    } else {
+      const n = normalizeSelectionRange(this.selection.getNormalizedRange());
+      const c0 = columnIndexToLabel(n.startCol);
+      const c1 = columnIndexToLabel(n.endCol);
+      display = `${qName}!$${c0}$${n.startRow + 1}:$${c1}$${n.endRow + 1}`;
+    }
+    try {
+      session.onRangePreview(display);
+    } catch {
+      /* 宿主预览回调异常不影响选区 */
+    }
+  }
+
+  /** 工作表名在区域引用中的转义（与 Excel 单引号规则一致）。 */
+  private quoteSheetNameForRef(name: string): string {
+    if (/^[A-Za-z0-9_.]+$/i.test(name)) {
+      return name;
+    }
+    return `'${name.replace(/'/g, "''")}'`;
+  }
+
+  /** 活动单元格在透视输出区域内时打开字段窗格，离开时关闭。 */
+  private syncPivotTableFieldsPaneToSelection(): void {
+    const sh = this.workbook.getActiveSheet();
+    const ac = this.selection.getActiveCell();
+    syncPivotTableFieldsPaneWithSelection(this, sh, ac.row, ac.col);
   }
 
   private notifyFormattingChrome(): void {

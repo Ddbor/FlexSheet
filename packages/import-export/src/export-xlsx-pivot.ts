@@ -1,4 +1,5 @@
 import {
+  getPivotValueFieldCaption,
   normalizeSelectionRange,
   type CellScalar,
   type PivotAggregateKind,
@@ -82,22 +83,6 @@ function ooxmlDataSubtotal(agg: PivotAggregateKind): string {
   }
 }
 
-function dataFieldCaption(agg: PivotAggregateKind, valueFieldName: string): string {
-  const label =
-    agg === "sum"
-      ? "求和"
-      : agg === "count"
-        ? "计数"
-        : agg === "average"
-          ? "平均值"
-          : agg === "max"
-            ? "最大值"
-            : agg === "min"
-              ? "最小值"
-              : "汇总";
-  return `${label}: ${valueFieldName}`;
-}
-
 function buildPivotCacheDefinitionXml(
   def: WorksheetPivotTableDefinition,
   sheetNames: readonly string[],
@@ -141,7 +126,13 @@ function buildPivotTableDefinitionXml(
   const c1 = c0 + def.outputColCount - 1;
   const locRef = `${formatCellRef(r0, c0)}:${formatCellRef(r1, c1)}`;
 
-  const dataFieldIndices = new Set(valueSpecs.map((v) => toOff(v.col)));
+  const dataFieldIndices = new Set<number>();
+  for (const v of valueSpecs) {
+    dataFieldIndices.add(toOff(v.col));
+    if (v.computed?.kind === "bucketRatio") {
+      dataFieldIndices.add(toOff(v.computed.denominatorCol));
+    }
+  }
   const rowOffSet = new Set(rowOffs);
   const colOffSet = new Set(colOffs);
 
@@ -182,10 +173,15 @@ function buildPivotTableDefinitionXml(
   for (const vf of valueSpecs) {
     const valOff = toOff(vf.col);
     const valueFieldName = fieldNames[valOff] ?? "Values";
-    const dataName = escapeXml(dataFieldCaption(vf.aggregate, valueFieldName));
+    const denName =
+      vf.computed?.kind === "bucketRatio"
+        ? (fieldNames[toOff(vf.computed.denominatorCol)] ?? "")
+        : undefined;
+    const dataName = escapeXml(getPivotValueFieldCaption(vf, valueFieldName, denName));
+    const subAgg: PivotAggregateKind = vf.computed !== undefined ? "sum" : vf.aggregate;
     dataFieldParts.push(
       `<dataField name="${dataName}" fld="${valOff}" subtotal="${escapeXml(
-        ooxmlDataSubtotal(vf.aggregate),
+        ooxmlDataSubtotal(subAgg),
       )}" baseField="0" baseItem="0" numFmtId="0"/>`,
     );
   }

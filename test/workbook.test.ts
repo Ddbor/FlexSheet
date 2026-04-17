@@ -103,4 +103,96 @@ describe("Workbook", () => {
     expect(wb.removeSheetAt(-1)).toBe(false);
     expect(wb.removeSheetAt(2)).toBe(false);
   });
+
+  it("insertSheetAt inserts at index and shifts activeSheetIndex when needed", () => {
+    const wb = new Workbook();
+    const a = new Worksheet("A");
+    const b = new Worksheet("B");
+    wb.addSheet(a);
+    wb.addSheet(b);
+    wb.activeSheetIndex = 1;
+    const mid = new Worksheet("Mid");
+    wb.insertSheetAt(1, mid);
+    expect(wb.sheetCount).toBe(3);
+    expect(wb.getSheet(1)).toBe(mid);
+    expect(wb.activeSheetIndex).toBe(2);
+  });
+
+  it("insertSheetAt bumps pivotTableDefinition sourceSheetIndex at or after insert", () => {
+    const wb = new Workbook();
+    const s0 = new Worksheet("S0");
+    const s1 = new Worksheet("S1");
+    wb.addSheet(s0);
+    wb.addSheet(s1);
+    s1.registerPivotTableDefinition({
+      id: "p1",
+      name: "PivotTable1",
+      sourceSheetIndex: 1,
+      sourceRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+      hasHeaders: true,
+      rowFieldCols: [0],
+      columnFieldCols: [],
+      filterFieldCols: [],
+      filterSelectedKeys: [],
+      valueFields: [{ col: 1, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 3,
+      outputColCount: 2,
+    });
+    wb.insertSheetAt(1, new Worksheet("Pivot"));
+    expect(s1.getPivotTableDefinitionsSnapshot()[0]?.sourceSheetIndex).toBe(2);
+  });
+
+  it("removeSheetAt drops pivot defs whose sourceSheetIndex equals removed index", () => {
+    const wb = new Workbook();
+    const s0 = new Worksheet("S0");
+    const s1 = new Worksheet("S1");
+    wb.addSheet(s0);
+    wb.addSheet(s1);
+    s0.registerPivotTableDefinition({
+      id: "self-src",
+      name: "PivotTable1",
+      sourceSheetIndex: 0,
+      sourceRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+      hasHeaders: true,
+      rowFieldCols: [0],
+      columnFieldCols: [],
+      filterFieldCols: [],
+      filterSelectedKeys: [],
+      valueFields: [{ col: 1, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 1,
+      outputColCount: 1,
+    });
+    wb.removeSheetAt(0);
+    expect(s1.getPivotTableDefinitionsSnapshot().length).toBe(0);
+  });
+
+  it("removeSheetAt decrements pivot sourceSheetIndex when it was above removed index", () => {
+    const wb = new Workbook();
+    const s0 = new Worksheet("S0");
+    const s1 = new Worksheet("S1");
+    wb.addSheet(s0);
+    wb.addSheet(s1);
+    s1.registerPivotTableDefinition({
+      id: "p",
+      name: "PivotTable1",
+      sourceSheetIndex: 1,
+      sourceRange: { startRow: 0, endRow: 1, startCol: 0, endCol: 1 },
+      hasHeaders: true,
+      rowFieldCols: [0],
+      columnFieldCols: [],
+      filterFieldCols: [],
+      filterSelectedKeys: [],
+      valueFields: [{ col: 1, aggregate: "sum" }],
+      destinationRow: 0,
+      destinationCol: 0,
+      outputRowCount: 1,
+      outputColCount: 1,
+    });
+    wb.removeSheetAt(0);
+    expect(s1.getPivotTableDefinitionsSnapshot()[0]?.sourceSheetIndex).toBe(0);
+  });
 });
