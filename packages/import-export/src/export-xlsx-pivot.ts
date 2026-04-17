@@ -26,7 +26,7 @@ export interface PivotExportPiece {
   readonly pivotTableName: string;
   readonly workbookRelTarget: string;
   readonly pivotCacheDefinitionXml: string;
-  /** Excel 通常要求 cache 部件通过关系引用 `pivotCacheRecords` 部件（可与 `recordCount=0` 一致）。 */
+  /** 与 `pivotCacheDefinition/@recordCount` 条数一致；每条 `<r>` 对应源表一行。 */
   readonly pivotCacheRecordsXml: string;
   readonly pivotCacheDefinitionRelsXml: string;
   readonly pivotTableXml: string;
@@ -68,7 +68,131 @@ function collectFieldNames(
       : fallback;
     names.push(nm);
   }
-  return names;
+  return dedupePivotFieldNames(names);
+}
+
+/**
+ * Excel 要求 cacheField/@name 在透视缓存内唯一；重复列标题需加后缀（与 Excel「名称2」风格一致）。
+ */
+function dedupePivotFieldNames(names: readonly string[]): string[] {
+  const used = new Set<string>();
+  const out: string[] = [];
+  for (const raw of names) {
+    let base = raw.trim();
+    if (base === "") {
+      base = "Column";
+    }
+    let candidate = raw.trim() === "" ? base : raw.trim();
+    let suffix = 1;
+    while (used.has(candidate)) {
+      suffix++;
+      candidate = `${base}${suffix}`;
+    }
+    used.add(candidate);
+    out.push(candidate);
+  }
+  return out;
+}
+
+/**
+ * 与 `pivotCacheRecords` 中该列单元格类型一致；Excel 会校验 sharedItems 与记录行的对应关系，
+ * 仅有 `containsBlank` 而无具体子项时，配合 `pivotField/items@x` 易导致「文件损坏无法修复」。
+ */
+function buildSharedItemsXmlForField(
+  src: Worksheet,
+  def: WorksheetPivotTableDefinition,
+  fieldCol: number,
+): string {
+  const n = normalizeSelectionRange(def.sourceRange);
+  const rStart = def.hasHeaders ? n.startRow + 1 : n.startRow;
+  const rEnd = n.endRow;
+  const numbers = new Set<number>();
+  const strings = new Set<string>();
+  let hasFalse = false;
+  let hasTrue = false;
+  let hasBlank = false;
+  for (let r = rStart; r <= rEnd; r++) {
+    const v = src.getCell(r, fieldCol).value;
+    if (v === null || v === "") {
+      hasBlank = true;
+      continue;
+    }
+    if (typeof v === "number") {
+      if (Number.isFinite(v)) {
+        numbers.add(v);
+      } else {
+        hasBlank = true;
+      }
+      continue;
+    }
+    if (typeof v === "boolean") {
+      if (v) {
+        hasTrue = true;
+      } else {
+        hasFalse = true;
+      }
+      continue;
+    }
+    strings.add(String(v));
+  }
+  const parts: string[] = [];
+  const numsSorted = [...numbers].sort((a, b) => a - b);
+  for (const nv of numsSorted) {
+    parts.push(`<n v="${String(nv)}"/>`);
+  }
+  const strsSorted = [...strings].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "accent" }));
+  for (const s of strsSorted) {
+    parts.push(`<s v="${escapeXml(s)}"/>`);
+  }
+  if (hasFalse) {
+    parts.push(`<b v="0"/>`);
+  }
+  if (hasTrue) {
+    parts.push(`<b v="1"/>`);
+  }
+  if (hasBlank) {
+    parts.push(`<m/>`);
+  }
+  const mixed =
+    (numbers.size > 0 && strings.size > 0) ||
+    (numbers.size > 0 && (hasFalse || hasTrue)) ||
+    (strings.size > 0 && (hasFalse || hasTrue)) ||
+    (hasFalse && hasTrue);
+  const attrs: string[] = [];
+  if (hasBlank) {
+    attrs.push('containsBlank="1"');
+  }
+  if (mixed) {
+    attrs.push('containsSemiMixedTypes="1"');
+  }
+  const cnt = parts.length;
+  if (cnt > 0) {
+    attrs.push(`count="${cnt}"`);
+  }
+  const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+  return `<sharedItems${attrStr}>${parts.join("")}</sharedItems>`;
+}
+
+/**
+ * 透视结果占位矩形（与 `pivotTableDefinition/location/@ref` 一致）。
+ * 行/列数异常（≤0）时按 1 处理，避免出现 `maxR < minR` 导致 worksheet `dimension` 与 OOXML 非法。
+ */
+export function pivotOutputExtents(def: WorksheetPivotTableDefinition): {
+  minR: number;
+  maxR: number;
+  minC: number;
+  maxC: number;
+} {
+  const r0 = def.destinationRow;
+  const c0 = def.destinationCol;
+  const rows = Math.max(1, def.outputRowCount);
+  const cols = Math.max(1, def.outputColCount);
+  return {
+    minR: r0,
+    maxR: r0 + rows - 1,
+    minC: c0,
+    maxC: c0 + cols - 1,
+  };
 }
 
 function ooxmlDataSubtotal(agg: PivotAggregateKind): string {
@@ -88,11 +212,48 @@ function ooxmlDataSubtotal(agg: PivotAggregateKind): string {
   }
 }
 
-function buildPivotCacheRecordsXml(): string {
-  return (
+/**
+ * 按数据源区域逐行写入缓存记录，使 `recordCount` / `count` 与 `<r>` 条数一致。
+ * 仅 `count="0"` 且无 `<r>` 时，部分 Excel 版本会报损坏或无法修复。
+ */
+function buildPivotCacheRecordsXml(
+  src: Worksheet,
+  def: WorksheetPivotTableDefinition,
+): { readonly xml: string; readonly recordCount: number } {
+  const n = normalizeSelectionRange(def.sourceRange);
+  const rStart = def.hasHeaders ? n.startRow + 1 : n.startRow;
+  const rEnd = n.endRow;
+  const rowsXml: string[] = [];
+  let recordCount = 0;
+  for (let r = rStart; r <= rEnd; r++) {
+    const cells: string[] = [];
+    for (let c = n.startCol; c <= n.endCol; c++) {
+      cells.push(pivotRecordFragmentFromScalar(src.getCell(r, c).value));
+    }
+    rowsXml.push(`<r>${cells.join("")}</r>`);
+    recordCount++;
+  }
+  const inner = rowsXml.join("");
+  const xml =
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-    `<pivotCacheRecords xmlns="${SS_MAIN}" count="0"/>`
-  );
+    `<pivotCacheRecords xmlns="${SS_MAIN}" count="${recordCount}">${inner}</pivotCacheRecords>`;
+  return { xml, recordCount };
+}
+
+function pivotRecordFragmentFromScalar(value: CellScalar): string {
+  if (value === null || value === "") {
+    return "<m/>";
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      return "<m/>";
+    }
+    return `<n v="${String(value)}"/>`;
+  }
+  if (typeof value === "boolean") {
+    return `<b v="${value ? 1 : 0}"/>`;
+  }
+  return `<s v="${escapeXml(String(value))}"/>`;
 }
 
 function buildPivotCacheDefinitionRelsXml(cacheIdx: number): string {
@@ -106,21 +267,26 @@ function buildPivotCacheDefinitionRelsXml(cacheIdx: number): string {
 
 function buildPivotCacheDefinitionXml(
   def: WorksheetPivotTableDefinition,
+  src: Worksheet,
   sheetNames: readonly string[],
   fieldNames: readonly string[],
+  recordCount: number,
 ): string {
   const n = normalizeSelectionRange(def.sourceRange);
   const sheetName = sheetNames[def.sourceSheetIndex] ?? `Sheet${def.sourceSheetIndex + 1}`;
   const ref = `${formatCellRef(n.startRow, n.startCol)}:${formatCellRef(n.endRow, n.endCol)}`;
   const fieldsXml = fieldNames
-    .map(
-      (nm) => `<cacheField name="${escapeXml(nm)}"><sharedItems containsBlank="1"/></cacheField>`,
-    )
+    .map((nm, fi) => {
+      const col = n.startCol + fi;
+      const shared = buildSharedItemsXmlForField(src, def, col);
+      return `<cacheField name="${escapeXml(nm)}">${shared}</cacheField>`;
+    })
     .join("");
+  const saveData = recordCount > 0 ? 1 : 0;
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<pivotCacheDefinition xmlns="${SS_MAIN}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"` +
-    ` refreshOnLoad="1" recordCount="0" createdVersion="6" refreshedVersion="6" minRefreshableVersion="3" saveData="0">` +
+    ` refreshOnLoad="1" recordCount="${recordCount}" createdVersion="6" refreshedVersion="6" minRefreshableVersion="3" saveData="${saveData}">` +
     `<cacheSource type="worksheet">` +
     `<worksheetSource ref="${escapeXml(ref)}" sheet="${escapeXml(sheetName)}"/>` +
     `</cacheSource>` +
@@ -141,11 +307,8 @@ function buildPivotTableDefinitionXml(
   const colOffs = def.columnFieldCols.map(toOff);
   const valueSpecs = def.valueFields;
 
-  const r0 = def.destinationRow;
-  const c0 = def.destinationCol;
-  const r1 = r0 + def.outputRowCount - 1;
-  const c1 = c0 + def.outputColCount - 1;
-  const locRef = `${formatCellRef(r0, c0)}:${formatCellRef(r1, c1)}`;
+  const ext = pivotOutputExtents(def);
+  const locRef = `${formatCellRef(ext.minR, ext.minC)}:${formatCellRef(ext.maxR, ext.maxC)}`;
 
   const dataFieldIndices = new Set<number>();
   for (const v of valueSpecs) {
@@ -156,11 +319,17 @@ function buildPivotTableDefinitionXml(
   }
   const rowOffSet = new Set(rowOffs);
   const colOffSet = new Set(colOffs);
+  const filterOffs = def.filterFieldCols.map(toOff);
+  const filterOffSet = new Set(filterOffs);
 
   const pivotFieldsXml: string[] = [];
   for (let fi = 0; fi < fieldNames.length; fi++) {
     if (dataFieldIndices.has(fi)) {
       pivotFieldsXml.push(`<pivotField dataField="1" showAll="0"/>`);
+    } else if (filterOffSet.has(fi)) {
+      pivotFieldsXml.push(
+        `<pivotField axis="axisPage" showAll="1"><items count="1"><item x="0"/></items></pivotField>`,
+      );
     } else if (rowOffSet.has(fi)) {
       pivotFieldsXml.push(
         `<pivotField axis="axisRow" showAll="1"><items count="1"><item x="0"/></items></pivotField>`,
@@ -208,6 +377,13 @@ function buildPivotTableDefinitionXml(
   }
   const dataFieldsXml = `<dataFields count="${dataFieldParts.length}">${dataFieldParts.join("")}</dataFields>`;
 
+  const pageFieldsXml =
+    filterOffs.length === 0
+      ? ""
+      : `<pageFields count="${filterOffs.length}">${filterOffs
+          .map((o) => `<field x="${o}"/>`)
+          .join("")}</pageFields>`;
+
   const styleXml = `<pivotTableStyleInfo name="PivotStyleLight16" showRowHeaders="1" showColHeaders="1" showRowStripes="0" showColStripes="0"/>`;
 
   return (
@@ -235,6 +411,7 @@ function buildPivotTableDefinitionXml(
     rowItemsXml +
     colFieldsXml +
     colItemsXml +
+    pageFieldsXml +
     dataFieldsXml +
     styleXml +
     `</pivotTableDefinition>`
@@ -275,8 +452,14 @@ export function collectPivotExportPieces(
       if (fieldNames.length === 0) {
         continue;
       }
-      const pivotCacheDefinitionXml = buildPivotCacheDefinitionXml(def, sheetNames, fieldNames);
-      const pivotCacheRecordsXml = buildPivotCacheRecordsXml();
+      const { xml: pivotCacheRecordsXml, recordCount } = buildPivotCacheRecordsXml(src, def);
+      const pivotCacheDefinitionXml = buildPivotCacheDefinitionXml(
+        def,
+        src,
+        sheetNames,
+        fieldNames,
+        recordCount,
+      );
       const pivotCacheDefinitionRelsXml = buildPivotCacheDefinitionRelsXml(cacheIdx);
       const pivotTableXml = buildPivotTableDefinitionXml(def, fieldNames, cacheId);
       const pivotTableRelsXml = buildPivotTableRelsXml(cacheIdx);

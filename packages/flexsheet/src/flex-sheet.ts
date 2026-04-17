@@ -188,6 +188,8 @@ export class FlexSheet {
   private lastWorkbookActiveIndex = 0;
   private activeSheetFormattingUnsub: (() => void) | null = null;
   private readonly formattingChromeListeners = new Set<() => void>();
+  /** `loadWorkbook` 替换工作簿实例后通知（Chrome 等需重新 `Workbook.subscribe`）。 */
+  private readonly workbookReplacedListeners = new Set<() => void>();
   /** 复制/剪切后的走马灯虚线框范围（与当前选区独立）。 */
   private clipboardMarqueeRange: SelectionRange | null = null;
   /** 延迟剪切：已写入剪贴板但源格尚未清空，粘贴匹配内部载荷后再清源区（与 Excel 一致）。 */
@@ -397,6 +399,7 @@ export class FlexSheet {
     this.rebindActiveSheetFormattingListener();
     this.renderer.requestRedraw();
     this.syncPivotTableFieldsPaneToSelection();
+    this.emitWorkbookReplaced();
   }
 
   getTheme(): SheetTheme {
@@ -452,6 +455,25 @@ export class FlexSheet {
     return () => {
       this.formattingChromeListeners.delete(listener);
     };
+  }
+
+  /**
+   * `loadWorkbook` 会替换 `Workbook` 实例；对旧实例的 `subscribe` 不会随新表生效。
+   * 需在回调中重新订阅 `workbook` 并刷新依赖表列表的 UI（如底部标签栏）。
+   * 注册后会立即回调一次。
+   */
+  subscribeWorkbookReplaced(listener: () => void): () => void {
+    this.workbookReplacedListeners.add(listener);
+    listener();
+    return () => {
+      this.workbookReplacedListeners.delete(listener);
+    };
+  }
+
+  private emitWorkbookReplaced(): void {
+    for (const fn of this.workbookReplacedListeners) {
+      fn();
+    }
   }
 
   /** 是否处于单元格内联编辑态（供右键菜单等扩展判断）。 */

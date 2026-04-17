@@ -659,6 +659,30 @@ function parseSheet(
   return sheet;
 }
 
+/** OOXML `workbookView/@activeTab`：与工作表列表顺序一致的从 0 开始的可见活动表索引。 */
+function readActiveSheetIndexFromWorkbookXml(wbDoc: Document, sheetCount: number): number {
+  if (sheetCount <= 0) {
+    return 0;
+  }
+  const bookViews = firstLocal(wbDoc.documentElement, "bookViews");
+  if (bookViews === undefined) {
+    return 0;
+  }
+  const wbView = firstLocal(bookViews, "workbookView");
+  if (wbView === undefined) {
+    return 0;
+  }
+  const raw = wbView.getAttribute("activeTab");
+  if (raw === null || raw.trim().length === 0) {
+    return 0;
+  }
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n < 0) {
+    return 0;
+  }
+  return Math.min(n, sheetCount - 1);
+}
+
 function resolveWorkbookRels(relsXml: string): Map<string, string> {
   const doc = parseXml(relsXml);
   const map = new Map<string, string>();
@@ -733,6 +757,8 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
   if (out.sheetCount === 0) {
     throw new Error("XLSX：未解析到任何工作表");
   }
+
+  out.activeSheetIndex = readActiveSheetIndexFromWorkbookXml(wbDoc, out.sheetCount);
 
   for (let i = 0; i < out.sheetCount; i++) {
     const sh = out.getSheet(i);

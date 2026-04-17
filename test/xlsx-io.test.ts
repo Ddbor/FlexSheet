@@ -7,6 +7,7 @@ import {
   importXlsxToWorkbook,
   unzipToMap,
 } from "@flexsheet/import-export";
+import { buildZipArchive, type ZipEntryInput } from "../packages/import-export/src/zip-writer.js";
 
 function parseA1Range(ref: string): { minR: number; maxR: number; minC: number; maxC: number } {
   const parts = ref.split(":");
@@ -88,6 +89,28 @@ describe("xlsx export/import", () => {
     const s1 = back.getSheet(1);
     expect(s1?.getCell(0, 0).value).toBe("b1");
     expect(s1?.getCell(0, 1).formula).toContain("第一页");
+  });
+
+  it("import sets activeSheetIndex from workbook.xml activeTab", async () => {
+    const wb = new Workbook();
+    wb.addSheet(new Worksheet("A"));
+    wb.addSheet(new Worksheet("B"));
+    const bytes = exportWorkbookToXlsxBytes(wb);
+    const map = unzipToMap(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const wbXml = map.get("xl/workbook.xml");
+    expect(wbXml).toBeDefined();
+    const txt = new TextDecoder("utf-8").decode(wbXml!);
+    const patched = txt.replace(/<workbookView\b/, '<workbookView activeTab="1" ');
+    const next = new Map(map);
+    next.set("xl/workbook.xml", new TextEncoder().encode(patched));
+    const entries: ZipEntryInput[] = [...next.entries()].map(([path, data]) => ({ path, data }));
+    const rebuilt = buildZipArchive(entries);
+    const back = await importXlsxToWorkbook(
+      new Blob([new Uint8Array(rebuilt)], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    expect(back.activeSheetIndex).toBe(1);
   });
 
   it("sharedStrings count is total refs, uniqueCount is distinct strings (Excel SST)", () => {
@@ -408,7 +431,16 @@ describe("xlsx export/import", () => {
     expect(map.has("xl/pivotCache/pivotCacheRecords1.xml")).toBe(true);
     expect(map.has("xl/pivotCache/_rels/pivotCacheDefinition1.xml.rels")).toBe(true);
     const records = new TextDecoder().decode(map.get("xl/pivotCache/pivotCacheRecords1.xml"));
-    expect(records).toContain('count="0"');
+    expect(records).toContain('count="1"');
+    expect(records).toContain("<r>");
+    expect(records).toContain('<s v="x"/>');
+    expect(records).toContain('<n v="1"/>');
+    const defXml = new TextDecoder().decode(map.get("xl/pivotCache/pivotCacheDefinition1.xml"));
+    expect(defXml).toContain('recordCount="1"');
+    expect(defXml).toContain('saveData="1"');
+    // Excel 会校验 cacheField/sharedItems 与 pivotCacheRecords 一致；空 sharedItems 易导致无法打开
+    expect(defXml).toContain('<s v="x"/>');
+    expect(defXml).toContain('<n v="1"/>');
     const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
     expect(pivotTable).toContain("<dataField ");
     expect(pivotTable).not.toContain('baseField="0"');

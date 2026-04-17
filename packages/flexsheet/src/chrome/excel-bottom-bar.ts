@@ -595,7 +595,18 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
     flexSheet.refresh();
   });
 
-  const unsubWb = flexSheet.workbook.subscribe(() => {
+  let unsubWb: () => void = () => {};
+
+  const bindWorkbookSubscription = (): void => {
+    unsubWb();
+    unsubWb = flexSheet.workbook.subscribe(() => {
+      renderTabs();
+      syncGridHScrollbar();
+    });
+  };
+
+  const unsubWorkbookReplaced = flexSheet.subscribeWorkbookReplaced(() => {
+    bindWorkbookSubscription();
     renderTabs();
     syncGridHScrollbar();
   });
@@ -621,12 +632,10 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
       : null;
   roSheetBar?.observe(sheetBar);
 
-  renderTabs();
-  syncGridHScrollbar();
-
   return (): void => {
     closeMenu();
     unsubWb();
+    unsubWorkbookReplaced();
     unsubZoom();
     unsubScroll();
     unsubStats();

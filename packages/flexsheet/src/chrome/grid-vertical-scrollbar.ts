@@ -179,7 +179,17 @@ export function mountGridVerticalScrollbar(options: MountGridVerticalScrollbarOp
   const unsubZoom = renderer.subscribeViewZoom(() => {
     syncVScrollbar();
   });
-  const unsubWb = flexSheet.workbook.subscribe(() => {
+  let unsubWb: () => void = () => {};
+
+  const bindWorkbookSubscription = (): void => {
+    unsubWb();
+    unsubWb = flexSheet.workbook.subscribe(() => {
+      syncVScrollbar();
+    });
+  };
+
+  const unsubWorkbookReplaced = flexSheet.subscribeWorkbookReplaced(() => {
+    bindWorkbookSubscription();
     syncVScrollbar();
   });
 
@@ -201,6 +211,7 @@ export function mountGridVerticalScrollbar(options: MountGridVerticalScrollbarOp
     unsubScroll();
     unsubZoom();
     unsubWb();
+    unsubWorkbookReplaced();
     roHost?.disconnect();
     container.replaceChildren();
     container.classList.remove("fs-grid-vscroll");

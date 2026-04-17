@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
+import type { WorksheetPivotTableDefinition } from "@flexsheet/core";
 import { parseCellRef } from "../packages/import-export/src/a1.js";
+import { pivotOutputExtents } from "../packages/import-export/src/export-xlsx-pivot.js";
 import { exportWorkbookToXlsxBytes, importXlsxToWorkbook, unzipToMap } from "@flexsheet/import-export";
 import { createDemoWorkbook } from "../packages/flexsheet/src/demo/demo-workbook.js";
 import { CreatePivotTableCommand } from "../packages/flexsheet/src/pivot/pivot-table-command.js";
@@ -30,6 +32,21 @@ function findSheetByName(wb: ReturnType<typeof createDemoWorkbook>, name: string
 }
 
 describe("demo workbook xlsx export", () => {
+  it("pivotOutputExtents clamps zero row/col span so dimension can match pivot location", () => {
+    const stub = {
+      destinationRow: 5,
+      destinationCol: 2,
+      outputRowCount: 0,
+      outputColCount: 0,
+    } as unknown as WorksheetPivotTableDefinition;
+    expect(pivotOutputExtents(stub)).toEqual({
+      minR: 5,
+      maxR: 5,
+      minC: 2,
+      maxC: 2,
+    });
+  });
+
   it("every XML entry parses as well-formed and import roundtrips (no pivot)", async () => {
     const wb = createDemoWorkbook();
     const bytes = exportWorkbookToXlsxBytes(wb);

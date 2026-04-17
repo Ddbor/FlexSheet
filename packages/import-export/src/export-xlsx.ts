@@ -14,7 +14,11 @@ import {
   buildWorkbookConditionalFormatDxfIndex,
   expandBoundsWithConditionalFormatRanges,
 } from "./export-xlsx-cf.js";
-import { buildPivotSheetPlans, collectPivotExportPieces } from "./export-xlsx-pivot.js";
+import {
+  buildPivotSheetPlans,
+  collectPivotExportPieces,
+  pivotOutputExtents,
+} from "./export-xlsx-pivot.js";
 import { escapeXml, sanitizeXml10Text } from "./xml-escape.js";
 import { buildZipArchive, type ZipEntryInput } from "./zip-writer.js";
 
@@ -684,18 +688,15 @@ function expandBoundsWithPivotOutput(
 ): { minR: number; maxR: number; minC: number; maxC: number } | null {
   let cur = b;
   for (const p of sheet.getPivotTableDefinitionsSnapshot()) {
-    const r0 = p.destinationRow;
-    const c0 = p.destinationCol;
-    const r1 = r0 + p.outputRowCount - 1;
-    const c1 = c0 + p.outputColCount - 1;
+    const box = pivotOutputExtents(p);
     if (cur === null) {
-      cur = { minR: r0, maxR: r1, minC: c0, maxC: c1 };
+      cur = { minR: box.minR, maxR: box.maxR, minC: box.minC, maxC: box.maxC };
     } else {
       cur = {
-        minR: Math.min(cur.minR, r0),
-        maxR: Math.max(cur.maxR, r1),
-        minC: Math.min(cur.minC, c0),
-        maxC: Math.max(cur.maxC, c1),
+        minR: Math.min(cur.minR, box.minR),
+        maxR: Math.max(cur.maxR, box.maxR),
+        minC: Math.min(cur.minC, box.minC),
+        maxC: Math.max(cur.maxC, box.maxC),
       };
     }
   }
