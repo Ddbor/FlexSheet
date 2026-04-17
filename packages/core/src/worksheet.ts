@@ -537,23 +537,6 @@ export class Worksheet {
     }
   }
 
-  /**
-   * XLSX 导出：位于任一已注册透视输出矩形内的单元格不写入工作表部件，
-   * 避免与 Excel 原生透视缓存布局冲突（打开后由 Excel 填充显示区）。
-   */
-  isPivotExportSuppressedCell(row: number, col: number): boolean {
-    for (const p of this.pivotTableDefinitions) {
-      const r0 = p.destinationRow;
-      const c0 = p.destinationCol;
-      const r1 = r0 + p.outputRowCount - 1;
-      const c1 = c0 + p.outputColCount - 1;
-      if (row >= r0 && row <= r1 && col >= c0 && col <= c1) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /** 列中曾出现过的字体前景色 ARGB（去重，用于「按颜色」子菜单）；仅扫描该列筛选作用行范围。 */
   collectUniqueFontColorArgbsInColumn(col: number): string[] {
     if (!Number.isInteger(col) || col < 0 || col >= this.colCount) {

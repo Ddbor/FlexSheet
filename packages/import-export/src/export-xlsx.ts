@@ -608,9 +608,6 @@ function effectiveCellStyleForXlsxExport(
 }
 
 function shouldExportCellForXlsx(sheet: Worksheet, cell: Cell, opts: XlsxExportOptions): boolean {
-  if (sheet.isPivotExportSuppressedCell(cell.row, cell.col)) {
-    return false;
-  }
   if (sheet.isMergeCoveredCell(cell.row, cell.col)) {
     return false;
   }
@@ -677,6 +674,10 @@ function usedBoundsForSheet(
   );
 }
 
+/**
+ * 透视输出区内可能有「无值、无样式」的占位格：`shouldExportCellForXlsx` 不会导出它们，
+ * 但 `pivotTableDefinition/location` 仍覆盖整块矩形。若 `dimension` 小于该矩形，Excel 会报文件损坏。
+ */
 function expandBoundsWithPivotOutput(
   sheet: Worksheet,
   b: { minR: number; maxR: number; minC: number; maxC: number } | null,

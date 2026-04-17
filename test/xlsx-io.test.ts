@@ -1,11 +1,27 @@
 import { describe, expect, it } from "vitest";
 import { type ConditionalFormatRule, Workbook, Worksheet } from "@flexsheet/core";
+import { parseCellRef } from "../packages/import-export/src/a1.js";
 import {
   crc32,
   exportWorkbookToXlsxBytes,
   importXlsxToWorkbook,
   unzipToMap,
 } from "@flexsheet/import-export";
+
+function parseA1Range(ref: string): { minR: number; maxR: number; minC: number; maxC: number } {
+  const parts = ref.split(":");
+  const a = parseCellRef(parts[0]!.trim());
+  const b = parseCellRef((parts[1] ?? parts[0])!.trim());
+  if (a === null || b === null) {
+    throw new Error(`bad ref ${ref}`);
+  }
+  return {
+    minR: Math.min(a.row, b.row),
+    maxR: Math.max(a.row, b.row),
+    minC: Math.min(a.col, b.col),
+    maxC: Math.max(a.col, b.col),
+  };
+}
 
 describe("crc32", () => {
   it("matches IEEE / PKZIP test vector 123456789", () => {
@@ -397,5 +413,17 @@ describe("xlsx export/import", () => {
     expect(pivotTable).toContain("<dataField ");
     expect(pivotTable).not.toContain('baseField="0"');
     expect(pivotTable).not.toContain('baseItem="0"');
+
+    const sheetXml = new TextDecoder().decode(map.get("xl/worksheets/sheet2.xml"));
+    const dimM = /dimension ref="([^"]+)"/.exec(sheetXml);
+    const locM = /location ref="([^"]+)"/.exec(pivotTable);
+    expect(dimM).not.toBeNull();
+    expect(locM).not.toBeNull();
+    const dimBox = parseA1Range(dimM![1]!);
+    const locBox = parseA1Range(locM![1]!);
+    expect(dimBox.minR).toBeLessThanOrEqual(locBox.minR);
+    expect(dimBox.minC).toBeLessThanOrEqual(locBox.minC);
+    expect(dimBox.maxR).toBeGreaterThanOrEqual(locBox.maxR);
+    expect(dimBox.maxC).toBeGreaterThanOrEqual(locBox.maxC);
   });
 });
