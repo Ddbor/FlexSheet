@@ -179,10 +179,11 @@ export function computeTableFormatCellStyle(
   const bodyIndex = hasHeaders && distinctHeader ? row - n.startRow - 1 : row - n.startRow;
   const bandOdd = bodyIndex >= 0 && bodyIndex % 2 === 0;
 
-  const base = (): CellStyle => ({
+  /** 表头居中；表体首列左对齐、其余右对齐（与 Excel 表格默认一致）。 */
+  const base = (fg: string = fgDark): CellStyle => ({
     fontSizePt: 11,
-    fgArgb: fgDark,
-    hAlign: "center",
+    fgArgb: fg,
+    hAlign: isHeaderRow ? "center" : _col === n.startCol ? "left" : "right",
     vAlign: "middle",
   });
 
@@ -197,14 +198,14 @@ export function computeTableFormatCellStyle(
       }
       return {
         ...base(),
-        fillArgb: "FFFFFFFF",
+        fillArgb: bandOdd ? palette.lightStripe : "FFFFFFFF",
         ...uniformBorders(borderThin),
       };
     }
     if (patRow === 1) {
       return {
         ...base(),
-        fillArgb: "FFFFFFFF",
+        fillArgb: bandOdd ? palette.lightStripe : "FFFFFFFF",
         ...uniformBorders(borderThin),
       };
     }
@@ -219,14 +220,14 @@ export function computeTableFormatCellStyle(
     if (patRow === 0) {
       if (isHeaderRow) {
         return {
-          ...base(),
+          ...base(fgLight),
           fillArgb: palette.mediumHeader,
           ...uniformBorders(borderThin),
         };
       }
       return {
         ...base(),
-        fillArgb: "FFFFFFFF",
+        fillArgb: bandOdd ? palette.mediumStripeA : palette.mediumStripeB,
         ...uniformBorders(borderThin),
       };
     }
@@ -240,7 +241,7 @@ export function computeTableFormatCellStyle(
     if (patRow === 2) {
       if (isHeaderRow) {
         return {
-          ...base(),
+          ...base(fgLight),
           fillArgb: palette.mediumHeader,
           ...uniformBorders(borderThin),
         };
@@ -253,7 +254,7 @@ export function computeTableFormatCellStyle(
     }
     if (isHeaderRow) {
       return {
-        ...base(),
+        ...base(fgLight),
         fillArgb: palette.mediumHeader,
         ...uniformBorders(borderMed),
       };
@@ -291,7 +292,7 @@ export function computeTableFormatCellStyle(
 
 /**
  * 将 OOXML `tableStyleInfo/@name`（如 TableStyleLight1）映射为内置「套用表格格式」参数。
- * 采用 Excel 库中 7 列 ×（浅 3 / 中 4 / 深 2）的展开顺序近似映射。
+ * 与 Excel 样式库一致：**每行 7 列** 从左到右、自上而下编号（Light 21=3×7，Medium 28=4×7，Dark 11）。
  */
 export function ooxmlTableStyleNameToParsed(name: string | null | undefined): ParsedTableStyleCommand | null {
   if (name === null || name === undefined) {
@@ -306,8 +307,8 @@ export function ooxmlTableStyleNameToParsed(name: string | null | undefined): Pa
     const num = Number(light[1]);
     if (Number.isInteger(num) && num >= 1 && num <= 21) {
       const idx = num - 1;
-      const row = idx % 3;
-      const col = Math.min(6, Math.floor(idx / 3) % 7);
+      const row = Math.min(2, Math.floor(idx / 7));
+      const col = idx % 7;
       return { section: "light", row, col };
     }
   }
@@ -316,8 +317,8 @@ export function ooxmlTableStyleNameToParsed(name: string | null | undefined): Pa
     const num = Number(medium[1]);
     if (Number.isInteger(num) && num >= 1 && num <= 28) {
       const idx = num - 1;
-      const row = idx % 4;
-      const col = Math.min(6, Math.floor(idx / 4) % 7);
+      const row = Math.min(3, Math.floor(idx / 7));
+      const col = idx % 7;
       return { section: "medium", row, col };
     }
   }
@@ -326,8 +327,8 @@ export function ooxmlTableStyleNameToParsed(name: string | null | undefined): Pa
     const num = Number(dark[1]);
     if (Number.isInteger(num) && num >= 1 && num <= 11) {
       const idx = num - 1;
-      const row = idx % 2;
-      const col = Math.min(6, Math.floor(idx / 2) % 7);
+      const row = Math.min(1, Math.floor(idx / 7));
+      const col = idx % 7;
       return { section: "dark", row, col };
     }
   }
