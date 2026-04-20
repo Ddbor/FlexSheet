@@ -96,7 +96,9 @@ describe("xlsx export/import", () => {
     wb.addSheet(new Worksheet("A"));
     wb.addSheet(new Worksheet("B"));
     const bytes = exportWorkbookToXlsxBytes(wb);
-    const map = unzipToMap(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
+    );
     const wbXml = map.get("xl/workbook.xml");
     expect(wbXml).toBeDefined();
     const txt = new TextDecoder("utf-8").decode(wbXml!);
@@ -546,7 +548,9 @@ describe("xlsx export/import", () => {
     );
     const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
     expect(pivotTable).toContain('axis="axisPage"');
-    expect(pivotTable).toContain('<pageFields count="1"><pageField fld="0" hier="-1"/></pageFields>');
+    expect(pivotTable).toContain(
+      '<pageFields count="1"><pageField fld="0" hier="-1"/></pageFields>',
+    );
     expect(pivotTable).toContain('showAll="0"');
     expect(pivotTable).toContain('<item x="1"/>');
     expect(pivotTable).toContain('<item x="0" h="1"/>');
@@ -591,7 +595,7 @@ describe("xlsx export/import", () => {
     const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
     expect(pivotTable).toContain('<rowFields count="2"><field x="0"/><field x="1"/></rowFields>');
     expect(pivotTable).toContain('<rowItems count="1"><i><x v="0"/><x v="0"/></i></rowItems>');
-    expect(pivotTable).toContain("<colItems count=\"1\"><i/></colItems>");
+    expect(pivotTable).toContain('<colItems count="1"><i/></colItems>');
   });
 
   it("exports valueFieldsOnRows layout via dataOnRows", () => {
@@ -680,7 +684,10 @@ describe("xlsx export/import", () => {
       );
     const next = new Map(map);
     next.set("xl/pivotTables/pivotTable1.xml", new TextEncoder().encode(patchedPivot));
-    const rebuiltEntries: ZipEntryInput[] = [...next.entries()].map(([path, data]) => ({ path, data }));
+    const rebuiltEntries: ZipEntryInput[] = [...next.entries()].map(([path, data]) => ({
+      path,
+      data,
+    }));
     const rebuilt = buildZipArchive(rebuiltEntries);
 
     const back = await importXlsxToWorkbook(

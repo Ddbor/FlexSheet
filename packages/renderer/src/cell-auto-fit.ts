@@ -63,7 +63,8 @@ export function computeColumnAutoWidth(sheet: Worksheet, col: number, viewZoom: 
     for (const line of lines) {
       maxLineW = Math.max(maxLineW, ctx.measureText(line).width);
     }
-    const filterReserve = bodyColumnAutoFilterTextReservePx(sheet, r, col);
+    const filterReserve =
+      bodyColumnAutoFilterTextReservePx(sheet, r, col) + sheet.getPivotPageFilterDropdownReservePx(r, col);
     const need = Math.ceil(indentPx + maxLineW + PAD * 2 + filterReserve);
     maxNeed = Math.max(maxNeed, need);
   }

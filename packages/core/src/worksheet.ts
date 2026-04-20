@@ -63,6 +63,9 @@ function cloneColumnAutoFilterState(st: ColumnAutoFilterMutable): ColumnAutoFilt
   };
 }
 
+/** 列筛选完整快照，供命令撤销栈使用（与 `cloneColumnAutoFilterState` 同形）。 */
+export type ColumnAutoFilterUndoSnapshot = ColumnAutoFilterMutable;
+
 /** 工作表数据或网格规模变更时触发；由 `Workbook` 汇聚后通知宿主刷新视图。 */
 export type WorksheetChangeListener = () => void;
 
@@ -429,6 +432,108 @@ export class Worksheet {
     if (!this.autoFilterByCol.delete(col)) {
       return;
     }
+    this.refreshAutoFilterConcealment();
+  }
+
+  /**
+   * XLSX 导入：恢复 Excel「表格」的列筛选（表头行在表体绘制下拉按钮，作用域为数据行闭区间）。
+   * 应在单元格与 `registerTableStyleRegion` 写入之后调用。
+   */
+  applyImportedTableColumnAutoFilters(params: {
+    headerRow: number;
+    bodyRowStart: number;
+    bodyRowEnd: number;
+    startCol: number;
+    endCol: number;
+  }): void {
+    const { headerRow, bodyRowStart, bodyRowEnd, startCol, endCol } = params;
+    if (
+      !Number.isInteger(headerRow) ||
+      !Number.isInteger(bodyRowStart) ||
+      !Number.isInteger(bodyRowEnd) ||
+      headerRow < 0 ||
+      bodyRowStart < 0 ||
+      bodyRowEnd < bodyRowStart ||
+      startCol < 0 ||
+      endCol < startCol
+    ) {
+      return;
+    }
+    this.batch(() => {
+      for (let c = startCol; c <= endCol; c++) {
+        if (c >= this.colCount) {
+          continue;
+        }
+        const checkedKeys = new Set<string>();
+        let includeBlank = false;
+        const seenNonBlank = new Set<string>();
+        for (let r = bodyRowStart; r <= bodyRowEnd; r++) {
+          if (r >= this.rowCount) {
+            continue;
+          }
+          const key = cellToAutoFilterDisplayKey(this.getCell(r, c));
+          if (key === AUTO_FILTER_BLANK_KEY) {
+            includeBlank = true;
+          } else if (!seenNonBlank.has(key)) {
+            seenNonBlank.add(key);
+            checkedKeys.add(key);
+          }
+        }
+        this.autoFilterByCol.set(c, {
+          checkedKeys,
+          includeBlank,
+          fontColorArgb: null,
+          rowStart: bodyRowStart,
+          rowEnd: bodyRowEnd,
+          uiKind: "body",
+          bodyAnchorRow: headerRow,
+          lastSortDirection: null,
+        });
+      }
+      this.refreshAutoFilterConcealment();
+    });
+  }
+
+  /**
+   * 透视表页字段「值」格右侧下拉按钮预留宽度（与列筛选按钮同尺寸），供表体文本截断与命中计算。
+   */
+  getPivotPageFilterDropdownReservePx(row: number, col: number): number {
+    const btn = 20;
+    const pad = 4;
+    for (const p of this.pivotTableDefinitions) {
+      const n = p.filterFieldCols.length;
+      if (n === 0) {
+        continue;
+      }
+      const base = p.pageFilterStartRow ?? p.destinationRow;
+      const c0 = p.destinationCol;
+      for (let i = 0; i < n; i++) {
+        if (row === base + i && col === c0 + 1) {
+          return btn + pad;
+        }
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * 撤销用：深拷贝该列当前筛选状态；无筛选时返回 `undefined`。
+   * 与 `restoreColumnAutoFilterFromUndoSnapshot` 成对使用。
+   */
+  snapshotColumnAutoFilterForUndo(col: number): ColumnAutoFilterUndoSnapshot | undefined {
+    const st = this.autoFilterByCol.get(col);
+    return st === undefined ? undefined : cloneColumnAutoFilterState(st);
+  }
+
+  /**
+   * 撤销用：恢复 `snapshotColumnAutoFilterForUndo` 的快照；`undefined` 表示移除该列筛选。
+   */
+  restoreColumnAutoFilterFromUndoSnapshot(col: number, snapshot: ColumnAutoFilterUndoSnapshot | undefined): void {
+    if (snapshot === undefined) {
+      this.removeColumnAutoFilter(col);
+      return;
+    }
+    this.autoFilterByCol.set(col, cloneColumnAutoFilterState(snapshot));
     this.refreshAutoFilterConcealment();
   }
 

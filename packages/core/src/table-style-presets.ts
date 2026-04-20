@@ -288,3 +288,48 @@ export function computeTableFormatCellStyle(
     ...uniformBorders(borderThin),
   };
 }
+
+/**
+ * 将 OOXML `tableStyleInfo/@name`（如 TableStyleLight1）映射为内置「套用表格格式」参数。
+ * 采用 Excel 库中 7 列 ×（浅 3 / 中 4 / 深 2）的展开顺序近似映射。
+ */
+export function ooxmlTableStyleNameToParsed(name: string | null | undefined): ParsedTableStyleCommand | null {
+  if (name === null || name === undefined) {
+    return null;
+  }
+  const raw = name.trim();
+  if (raw === "") {
+    return null;
+  }
+  const light = /^TableStyleLight(\d+)$/i.exec(raw);
+  if (light !== null) {
+    const num = Number(light[1]);
+    if (Number.isInteger(num) && num >= 1 && num <= 21) {
+      const idx = num - 1;
+      const row = idx % 3;
+      const col = Math.min(6, Math.floor(idx / 3) % 7);
+      return { section: "light", row, col };
+    }
+  }
+  const medium = /^TableStyleMedium(\d+)$/i.exec(raw);
+  if (medium !== null) {
+    const num = Number(medium[1]);
+    if (Number.isInteger(num) && num >= 1 && num <= 28) {
+      const idx = num - 1;
+      const row = idx % 4;
+      const col = Math.min(6, Math.floor(idx / 4) % 7);
+      return { section: "medium", row, col };
+    }
+  }
+  const dark = /^TableStyleDark(\d+)$/i.exec(raw);
+  if (dark !== null) {
+    const num = Number(dark[1]);
+    if (Number.isInteger(num) && num >= 1 && num <= 11) {
+      const idx = num - 1;
+      const row = idx % 2;
+      const col = Math.min(6, Math.floor(idx / 2) % 7);
+      return { section: "dark", row, col };
+    }
+  }
+  return null;
+}

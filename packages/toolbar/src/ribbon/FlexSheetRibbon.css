@@ -256,7 +256,7 @@
   display: none;
 }
 
-/* 插入 -> 数据透视表：单按钮分组在带区内垂直/水平居中 */
+/* 插入 -> 表格（表格 + 数据透视表）：分组在带区内垂直/水平居中 */
 .fs-ribbon-group__content.fs-ribbon-insert-pivot {
   justify-content: center;
   align-items: center;

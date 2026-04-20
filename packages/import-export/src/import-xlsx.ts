@@ -6,10 +6,12 @@ import type {
   CellScalar,
   CellStyle,
   CellTextOrientation,
+  ParsedTableStyleCommand,
   PivotAggregateKind,
   PivotValueFieldSpec,
   WorksheetPivotTableDefinition,
 } from "@flexsheet/core";
+import { ooxmlTableStyleNameToParsed } from "@flexsheet/core";
 import { isCellFillPatternType } from "@flexsheet/core";
 import { parseCellRef } from "./a1.js";
 import { unzipToMap } from "./zip-reader.js";
@@ -851,6 +853,190 @@ function parsePivotFieldOffsets(container: Element | undefined): number[] {
   return out;
 }
 
+function inferPivotPageFilterStartRow(
+  destSheet: Worksheet,
+  pivotInnerTopRow: number,
+  pivotInnerLeftCol: number,
+  filterFieldCount: number,
+): number | undefined {
+  if (filterFieldCount <= 0 || pivotInnerTopRow <= 0) {
+    return undefined;
+  }
+  const rows: number[] = [];
+  for (let r = 0; r < pivotInnerTopRow; r++) {
+    const a = destSheet.getCell(r, pivotInnerLeftCol).value;
+    const b = destSheet.getCell(r, pivotInnerLeftCol + 1).value;
+    const sa = a === null || a === "" ? "" : String(a).trim();
+    const sb = b === null || b === "" ? "" : String(b).trim();
+    if (sa !== "" || sb !== "") {
+      rows.push(r);
+    }
+  }
+  if (rows.length === 0) {
+    return undefined;
+  }
+  return rows[0];
+}
+
+function pivotHeaderCaptionAt(sheet: Worksheet, headerRow: number, col: number): string {
+  const v = sheet.getCell(headerRow, col).value;
+  if (typeof v === "string") {
+    return v.trim();
+  }
+  if (typeof v === "number" && Number.isFinite(v)) {
+    return String(v);
+  }
+  return "";
+}
+
+function inferPivotDataNumberFormatFromHeaderCaption(caption: string): string | undefined {
+  const t = caption.replace(/\s/g, "");
+  if (t === "") {
+    return undefined;
+  }
+  if (/花费占比|占比项/.test(t) || (/占比/.test(t) && !/点击/.test(t))) {
+    return "0.00%";
+  }
+  if (/点击率/.test(t) || /CTR/i.test(t)) {
+    return "0.00%";
+  }
+  if (/平均点击花费|CPC/i.test(t)) {
+    return "0.0000";
+  }
+  if (/求和项:花费|花费/.test(t) && !/占比/.test(t)) {
+    return "#,##0.00";
+  }
+  if (/点击量|展现量/.test(t)) {
+    return "#,##0";
+  }
+  return undefined;
+}
+
+/** Excel 透视表缓存区样式：表头/行标签/总计行与列数字格式（与 PivotStyleLight16 接近）。 */
+function applyPivotImportedPresentation(
+  sheet: Worksheet,
+  _def: WorksheetPivotTableDefinition,
+  pivotTableXml: string,
+): void {
+  const doc = parseXml(pivotTableXml);
+  const root = doc.documentElement;
+  if (root.localName !== "pivotTableDefinition") {
+    return;
+  }
+  const loc = firstLocal(root, "location");
+  const ref = loc?.getAttribute("ref") ?? "";
+  const dstRange = parseRangeA1(ref);
+  if (dstRange === null) {
+    return;
+  }
+  const firstHdr = Number(loc?.getAttribute("firstHeaderRow") ?? "0");
+  if (!Number.isFinite(firstHdr) || firstHdr < 0) {
+    return;
+  }
+  const headerRow = dstRange.startRow + Math.trunc(firstHdr);
+  const innerLast = dstRange.endRow;
+  const headerFill = "FFBDD7EE";
+  const rowLabelFill = "FFF2F2F2";
+  const totalFill = "FFD9E1F2";
+
+  sheet.batch(() => {
+    for (let r = dstRange.startRow; r <= dstRange.endRow; r++) {
+      const isGrand = r === innerLast && dstRange.endRow > dstRange.startRow;
+      const isHeader = r === headerRow;
+      for (let c = dstRange.startCol; c <= dstRange.endCol; c++) {
+        const cell = sheet.getCell(r, c);
+        const prev = cell.style !== undefined && cell.style !== null ? { ...cell.style } : ({} as CellStyle);
+        if (isHeader) {
+          prev.bold = true;
+          prev.fillArgb = headerFill;
+          prev.hAlign = c === dstRange.startCol ? "left" : "center";
+          prev.vAlign = "middle";
+        } else if (isGrand) {
+          prev.bold = true;
+          prev.fillArgb = totalFill;
+          prev.hAlign = c === dstRange.startCol ? "left" : "right";
+          prev.vAlign = "middle";
+        } else {
+          if (c === dstRange.startCol) {
+            prev.fillArgb = rowLabelFill;
+          }
+          prev.hAlign = c === dstRange.startCol ? "left" : "right";
+          prev.vAlign = "middle";
+        }
+        if (!isHeader) {
+          const cap = pivotHeaderCaptionAt(sheet, headerRow, c);
+          const nf = inferPivotDataNumberFormatFromHeaderCaption(cap);
+          if (nf !== undefined) {
+            prev.numberFormat = nf;
+          }
+        }
+        cell.style = prev;
+      }
+    }
+  });
+}
+
+function applyImportedTablesFromSheetRels(
+  files: ReadonlyMap<string, Uint8Array>,
+  binding: { readonly sheetPath: string },
+  sheet: Worksheet,
+): void {
+  const relsPath = relsPartPathFor(binding.sheetPath);
+  const relsBytes = files.get(relsPath);
+  if (relsBytes === undefined) {
+    return;
+  }
+  const relsXml = new TextDecoder("utf-8").decode(relsBytes);
+  const tableTargets = findRelTargetsByType(relsXml, REL_TABLE);
+  for (const target of tableTargets) {
+    const tablePath = resolvePartTarget(binding.sheetPath, target);
+    const tableBytes = files.get(tablePath);
+    if (tableBytes === undefined) {
+      continue;
+    }
+    const tableXml = new TextDecoder("utf-8").decode(tableBytes);
+    const tableDoc = parseXml(tableXml);
+    const tableEl = tableDoc.documentElement;
+    if (tableEl.localName !== "table") {
+      continue;
+    }
+    const tableRef = tableEl.getAttribute("ref");
+    if (tableRef === null || tableRef === "") {
+      continue;
+    }
+    const rng = parseRangeA1(tableRef);
+    if (rng === null) {
+      continue;
+    }
+    const styleEl = firstLocal(tableEl, "tableStyleInfo");
+    const styleName = styleEl?.getAttribute("name");
+    let parsed: ParsedTableStyleCommand | null = ooxmlTableStyleNameToParsed(styleName);
+    if (parsed === null) {
+      parsed = { section: "light", row: 0, col: 1 };
+    }
+    const hasHeaders = true;
+    sheet.registerTableStyleRegion(
+      {
+        startRow: rng.startRow,
+        endRow: rng.endRow,
+        startCol: rng.startCol,
+        endCol: rng.endCol,
+      },
+      parsed,
+      hasHeaders,
+    );
+    if (rng.endRow > rng.startRow) {
+      sheet.applyImportedTableColumnAutoFilters({
+        headerRow: rng.startRow,
+        bodyRowStart: rng.startRow + 1,
+        bodyRowEnd: rng.endRow,
+        startCol: rng.startCol,
+        endCol: rng.endCol,
+      });
+    }
+  }
+}
+
 function parsePivotFilterSelectedKeys(
   pivotFieldEl: Element | undefined,
   sharedItems: readonly string[],
@@ -973,6 +1159,7 @@ function parseWorksheetPivotDefinitions(
   cache: PivotCacheMeta,
   sourceSheetIndex: number,
   sourceSheet: Worksheet | undefined,
+  destSheet: Worksheet,
   idSeed: string,
 ): WorksheetPivotTableDefinition[] {
   const doc = parseXml(pivotTableXml);
@@ -1048,6 +1235,18 @@ function parseWorksheetPivotDefinitions(
     valueFields.length > 1 &&
     colOffsets.length === 0 &&
     (root.getAttribute("dataOnRows") ?? "") === "1";
+
+  const pageFilterStart = inferPivotPageFilterStartRow(
+    destSheet,
+    dstRange.startRow,
+    dstRange.startCol,
+    filterOffsets.length,
+  );
+  const layoutStart =
+    pageFilterStart !== undefined ? Math.min(pageFilterStart, dstRange.startRow) : dstRange.startRow;
+  const outputRowCount = Math.max(1, dstRange.endRow - layoutStart + 1);
+  const outputColCount = Math.max(1, dstRange.endCol - dstRange.startCol + 1);
+
   return [
     {
       id: `pvt-import-${idSeed}`,
@@ -1063,8 +1262,9 @@ function parseWorksheetPivotDefinitions(
       valueFieldsOnRows: valueFieldsOnRows ? true : undefined,
       destinationRow: dstRange.startRow,
       destinationCol: dstRange.startCol,
-      outputRowCount: Math.max(1, dstRange.endRow - dstRange.startRow + 1),
-      outputColCount: Math.max(1, dstRange.endCol - dstRange.startCol + 1),
+      outputRowCount,
+      outputColCount,
+      pageFilterStartRow: pageFilterStart,
     },
   ];
 }
@@ -1217,11 +1417,20 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
         cacheMeta,
         sourceSheetIndex,
         sourceSheet,
+        destSheet,
         String(importedPivotSerial++),
       );
       for (const def of defs) {
         destSheet.registerPivotTableDefinition(def);
+        applyPivotImportedPresentation(destSheet, def, pivotTableXml);
       }
+    }
+  }
+
+  for (const binding of importedSheetBindings) {
+    const sh = out.getSheet(binding.importedIndex);
+    if (sh !== undefined) {
+      applyImportedTablesFromSheetRels(files, binding, sh);
     }
   }
 

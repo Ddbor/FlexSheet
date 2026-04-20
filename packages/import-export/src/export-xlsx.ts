@@ -26,7 +26,7 @@ const SS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 const PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
 const REL_PIVOT_CACHE =
-  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCache";
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition";
 const CP_NS = "http://schemas.openxmlformats.org/package/2006/metadata/core-properties";
 const DC_NS = "http://purl.org/dc/elements/1.1/";
 const DCTERMS_NS = "http://purl.org/dc/terms/";
@@ -83,10 +83,7 @@ function styleSignature(st: CellStyle | null | undefined): string {
   const fpStr = fpRaw !== undefined && fpRaw !== "none" ? fpRaw : "";
   const lk = st.locked === false ? 0 : 1;
   const fh = st.formulaHidden === true ? 1 : 0;
-  const fsc =
-    st.fontScript === "superscript" || st.fontScript === "subscript"
-      ? st.fontScript
-      : "";
+  const fsc = st.fontScript === "superscript" || st.fontScript === "subscript" ? st.fontScript : "";
   return JSON.stringify({
     b: st.bold === true,
     i: st.italic === true,

@@ -594,7 +594,8 @@ function paintBodyCellTexts(
           : env.theme.cellColor;
       ctx.textAlign = "left";
       const pad = 4;
-      const filterReservePx = bodyColumnAutoFilterTextReservePx(sheet, r, c);
+      const filterReservePx =
+        bodyColumnAutoFilterTextReservePx(sheet, r, c) + sheet.getPivotPageFilterDropdownReservePx(r, c);
       const hAlign = resolvedHAlign(cell.style);
       const vAlign = resolvedVAlign(cell.style);
       const baseLog = cellStyleLogicalFontSizeBasePx(cell.style);
@@ -814,6 +815,78 @@ function paintBodyCellTexts(
         }
       }
       ctx.restore();
+    }
+  }
+}
+
+/** 透视表页字段「值」格右侧下拉按钮（与列筛选同形）。 */
+function paintPivotPageFilterAnchors(
+  env: BodyPaintEnv,
+  sheet: Worksheet,
+  layout: FrozenLayout,
+  headerW: number,
+  headerH: number,
+  canvasW: number,
+  canvasH: number,
+  r0: number,
+  r1: number,
+  c0: number,
+  c1: number,
+): void {
+  const { ctx } = env;
+  for (const p of sheet.getPivotTableDefinitionsSnapshot()) {
+    const fc = p.filterFieldCols.length;
+    if (fc === 0) {
+      continue;
+    }
+    const base = p.pageFilterStartRow ?? p.destinationRow;
+    const dc = p.destinationCol;
+    for (let i = 0; i < fc; i++) {
+      const r = base + i;
+      const c = dc + 1;
+      if (r < r0 || r > r1 || c < c0 || c > c1) {
+        continue;
+      }
+      if (sheet.isMergeCoveredCell(r, c)) {
+        continue;
+      }
+      const anchor = sheet.getMergeAnchorCell(r, c);
+      if (anchor.row !== r || anchor.col !== c) {
+        continue;
+      }
+      const info = sheet.getMergedRectInfo(r, c);
+      let colW = scaledColWidthAt(sheet, c, env.viewZoom);
+      let rowH = scaledRowHeightAt(sheet, r, env.viewZoom);
+      let x = cellLeftX(sheet, layout, c, env.viewZoom, env.scrollX);
+      let y = cellTopY(sheet, layout, r, env.viewZoom, env.scrollY);
+      if (info.rowSpan > 1 || info.colSpan > 1) {
+        colW = 0;
+        for (let cc = info.anchorCol; cc < info.anchorCol + info.colSpan; cc++) {
+          colW += scaledColWidthAt(sheet, cc, env.viewZoom);
+        }
+        rowH = 0;
+        for (let rr = info.anchorRow; rr < info.anchorRow + info.rowSpan; rr++) {
+          rowH += scaledRowHeightAt(sheet, rr, env.viewZoom);
+        }
+        x = cellLeftX(sheet, layout, info.anchorCol, env.viewZoom, env.scrollX);
+        y = cellTopY(sheet, layout, info.anchorRow, env.viewZoom, env.scrollY);
+      }
+      if (colW <= 0 || rowH <= 0) {
+        continue;
+      }
+      if (!cellIntersectsCanvas(x, y, colW, rowH, headerW, headerH, canvasW, canvasH)) {
+        continue;
+      }
+      const pad = 2;
+      const innerW = COLUMN_HEADER_FILTER_BUTTON_CSS_PX - 4;
+      const innerH = 14;
+      const bx = x + colW - COLUMN_HEADER_FILTER_BUTTON_CSS_PX - pad;
+      const by = y + Math.max(1, (Math.min(rowH, 22) - innerH) / 2);
+      paintAutoFilterDropdownGlyph(ctx, bx, by, innerW, innerH, {
+        narrowed: false,
+        sortHint: null,
+        borderColor: env.theme.gridLineColor,
+      });
     }
   }
 }
@@ -1079,6 +1152,19 @@ function runBodyQuadrantPass(
     cfOverlayCellCache,
   );
   paintBodyAutoFilterAnchors(
+    env,
+    sheet,
+    layout,
+    headerW,
+    headerH,
+    canvasW,
+    canvasH,
+    r0,
+    r1,
+    c0,
+    c1,
+  );
+  paintPivotPageFilterAnchors(
     env,
     sheet,
     layout,

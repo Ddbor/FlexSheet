@@ -92,4 +92,17 @@ export interface WorksheetPivotTableDefinition {
   readonly destinationCol: number;
   readonly outputRowCount: number;
   readonly outputColCount: number;
+  /**
+   * Excel 导入：页字段筛选行首行（0 基）。Flex 自建透视为 `undefined`（页字段从 `destinationRow` 起）。
+   * 当页字段在 `pivotTableDefinition/location` 上方时，用于命中筛选与刷新写入起点。
+   */
+  readonly pageFilterStartRow?: number;
+}
+
+/** 透视块顶行：含页字段时取 `min(pageFilterStartRow, destinationRow)`。 */
+export function pivotLayoutStartRow(def: WorksheetPivotTableDefinition): number {
+  if (def.pageFilterStartRow === undefined) {
+    return def.destinationRow;
+  }
+  return Math.min(def.pageFilterStartRow, def.destinationRow);
 }

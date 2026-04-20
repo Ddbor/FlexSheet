@@ -257,8 +257,8 @@ export function showFormatAsTableDialog(
   cbLabel.className = "fs-fs-table__cb";
   const cb = document.createElement("input");
   cb.type = "checkbox";
-  const sel0 = normalizeSelectionRange(host.selection.getNormalizedRange());
-  cb.checked = sel0.endRow > sel0.startRow;
+  // 与 Excel 一致：默认勾选「表包含标题」，表头行自动显示列筛选下拉。
+  cb.checked = true;
   const cbText = document.createElement("span");
   cbText.textContent = "表包含标题";
   cbLabel.appendChild(cb);
@@ -398,11 +398,6 @@ export function showFormatAsTableDialog(
     }
     const hasHeaders = cb.checked;
     host.workspace.commands.execute(new ApplyFormatAsTableCommand(sheet, n, parsed, hasHeaders));
-    if (hasHeaders) {
-      for (let c = n.startCol; c <= n.endCol; c++) {
-        sheet.enableColumnAutoFilterFromSelection(n.startRow, c, n);
-      }
-    }
     host.refresh();
     remove();
     confirming = false;

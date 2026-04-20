@@ -1501,11 +1501,11 @@ export class FlexSheet {
       if (fCount === 0) {
         continue;
       }
-      const r0 = def.destinationRow;
+      const filterBase = def.pageFilterStartRow ?? def.destinationRow;
       const c0 = def.destinationCol;
       for (let i = 0; i < fCount; i++) {
         if (
-          hit.row === r0 + i &&
+          hit.row === filterBase + i &&
           (hit.col === c0 || hit.col === c0 + 1)
         ) {
           this.openPivotFilterUi(sheet, def.id, i, clientX, clientY);

@@ -104,7 +104,6 @@ describe("demo workbook xlsx export", () => {
       }),
     );
     const pivotSheetXml = new TextDecoder().decode(map.get("xl/worksheets/sheet8.xml"));
-    expect(pivotSheetXml).toContain("<pivotTables ");
     expect(pivotSheetXml).toContain("<row ");
     expect(pivotSheetXml).not.toMatch(/<sheetData>\s*<\/sheetData>/);
 

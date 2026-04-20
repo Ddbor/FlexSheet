@@ -5,6 +5,7 @@ import {
   TABLE_ACCENT_PALETTES,
   type CellStyle,
   type CellStylePatch,
+  type ColumnAutoFilterUndoSnapshot,
   type ICommand,
   type ParsedTableStyleCommand,
   type SelectionRange,
@@ -135,6 +136,8 @@ export class ApplyFormatAsTableCommand implements ICommand {
   readonly label = "套用表格格式";
   private readonly snapshots: CellStyleSnapshot[];
   private readonly normalizedRange: SelectionRange;
+  /** 套用前各列筛选状态，便于撤销时恢复（仅 `hasHeaders` 时写入新筛选）。 */
+  private readonly previousColumnAutoFilters: Map<number, ColumnAutoFilterUndoSnapshot | undefined>;
 
   constructor(
     private readonly sheet: Worksheet,
@@ -146,6 +149,11 @@ export class ApplyFormatAsTableCommand implements ICommand {
     this.normalizedRange = n;
     const palette = TABLE_ACCENT_PALETTES[parsed.col];
     const list: CellStyleSnapshot[] = [];
+    const prevFilters = new Map<number, ColumnAutoFilterUndoSnapshot | undefined>();
+    for (let c = n.startCol; c <= n.endCol; c++) {
+      prevFilters.set(c, this.sheet.snapshotColumnAutoFilterForUndo(c));
+    }
+    this.previousColumnAutoFilters = prevFilters;
     for (let r = n.startRow; r <= n.endRow; r++) {
       for (let c = n.startCol; c <= n.endCol; c++) {
         if (this.sheet.isMergeCoveredCell(r, c)) {
@@ -165,12 +173,24 @@ export class ApplyFormatAsTableCommand implements ICommand {
       this.sheet.setCellStyle(s.row, s.col, s.after === null ? null : { ...s.after });
     }
     this.sheet.registerTableStyleRegion(this.normalizedRange, this.parsed, this.hasHeaders);
+    if (this.hasHeaders) {
+      const n = this.normalizedRange;
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        this.sheet.enableColumnAutoFilterFromSelection(n.startRow, c, n);
+      }
+    }
   }
 
   undo(): void {
     this.sheet.unregisterTableStyleRegion(this.normalizedRange);
     for (const s of this.snapshots) {
       this.sheet.setCellStyle(s.row, s.col, cloneCellStyle(s.before));
+    }
+    if (this.hasHeaders) {
+      const n = this.normalizedRange;
+      for (let c = n.startCol; c <= n.endCol; c++) {
+        this.sheet.restoreColumnAutoFilterFromUndoSnapshot(c, this.previousColumnAutoFilters.get(c));
+      }
     }
   }
 }

@@ -33,6 +33,7 @@ export {
   Worksheet,
   type ColumnAutoFilterSortHint,
   type ColumnAutoFilterUiKind,
+  type ColumnAutoFilterUndoSnapshot,
   type WorksheetChangeListener,
 } from "./worksheet.js";
 export {
@@ -100,6 +101,7 @@ export { Workspace } from "./workspace.js";
 export {
   TABLE_ACCENT_PALETTES,
   computeTableFormatCellStyle,
+  ooxmlTableStyleNameToParsed,
   parseTableStyleRibbonCommand,
   tableStyleUsesDistinctHeaderRow,
   type ParsedTableStyleCommand,
@@ -108,6 +110,7 @@ export {
 } from "./table-style-presets.js";
 export {
   getPivotValueFieldCaption,
+  pivotLayoutStartRow,
   type PivotAggregateKind,
   type PivotValueComputed,
   type PivotValueFieldSpec,

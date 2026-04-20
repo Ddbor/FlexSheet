@@ -13,7 +13,7 @@ import { escapeXml } from "./xml-escape.js";
 const SS_MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
 const PKG_REL = "http://schemas.openxmlformats.org/package/2006/relationships";
 const REL_PIVOT_CACHE =
-  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCache";
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheDefinition";
 const REL_PIVOT_CACHE_RECORDS =
   "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotCacheRecords";
 const REL_PIVOT_TABLE =
@@ -477,14 +477,36 @@ function buildPivotTableDefinitionXml(
       : `<rowFields count="${rowOffs.length}">` +
         rowOffs.map((o) => `<field x="${o}"/>`).join("") +
         `</rowFields>`;
-  const rowItemsXml =
-    rowOffs.length === 0
-      ? `<rowItems count="1"><i/></rowItems>`
-      : `<rowItems count="1"><i>${rowOffs.map(() => `<x v="0"/>`).join("")}</i></rowItems>`;
+
+  let rowItemsXml: string;
+  if (rowOffs.length === 0) {
+    rowItemsXml = `<rowItems count="1"><i/></rowItems>`;
+  } else if (rowOffs.length === 1) {
+    const itemCount = sharedItemsResults[rowOffs[0]!]?.keys.length ?? 0;
+    if (itemCount === 0) {
+      rowItemsXml = `<rowItems count="1"><i/></rowItems>`;
+    } else {
+      const items = Array.from({ length: itemCount }, (_, i) => `<i><x v="${i}"/></i>`).join("");
+      rowItemsXml = `<rowItems count="${itemCount + 1}">${items}<i t="grand"><x/></i></rowItems>`;
+    }
+  } else {
+    // Multiple row fields: simplified single-entry placeholder (full combination enumeration is complex)
+    rowItemsXml = `<rowItems count="1"><i>${rowOffs.map(() => `<x v="0"/>`).join("")}</i></rowItems>`;
+  }
 
   let colFieldsXml = "";
   let colItemsXml = `<colItems count="1"><i/></colItems>`;
-  if (colOffs.length > 0) {
+  if (colOffs.length === 1) {
+    const itemCount = sharedItemsResults[colOffs[0]!]?.keys.length ?? 0;
+    if (itemCount === 0) {
+      colFieldsXml = `<colFields count="1"><field x="${colOffs[0]}"/></colFields>`;
+      colItemsXml = `<colItems count="1"><i/></colItems>`;
+    } else {
+      colFieldsXml = `<colFields count="1"><field x="${colOffs[0]}"/></colFields>`;
+      const items = Array.from({ length: itemCount }, (_, i) => `<i><x v="${i}"/></i>`).join("");
+      colItemsXml = `<colItems count="${itemCount + 1}">${items}<i t="grand"><x/></i></colItems>`;
+    }
+  } else if (colOffs.length > 1) {
     colFieldsXml =
       `<colFields count="${colOffs.length}">` +
       colOffs.map((o) => `<field x="${o}"/>`).join("") +
@@ -657,12 +679,8 @@ export function buildPivotSheetPlans(
     const relsXml =
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
       `<Relationships xmlns="${PKG_REL}">${rels.join("")}</Relationships>`;
-    const pivotTablesFragment =
-      `<pivotTables count="${list.length}">` +
-      list
-        .map((p, idx) => `<pivotTable name="${escapeXml(p.pivotTableName)}" r:id="rId${idx + 1}"/>`)
-        .join("") +
-      `</pivotTables>`;
+    // Excel discovers pivot tables via .rels only; the <pivotTables> worksheet element is non-standard
+    const pivotTablesFragment = "";
     plans.push({ sheetIndex, relsXml, pivotTablesFragment });
   }
   return plans;

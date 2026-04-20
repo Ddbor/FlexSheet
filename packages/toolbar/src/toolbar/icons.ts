@@ -754,6 +754,19 @@ export function iconPivotTableOption(): SVGSVGElement {
   );
 }
 
+/** 插入表格（32×32，单色；结构同表格式图标，无固定品牌色） */
+export function iconInsertTable(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-opacity="0.08" d="M3 4h26v23H3z"/>' +
+      '<path fill="currentColor" d="M30 3v25H2V3zm-1 1H3v23h26z"/>' +
+      '<path fill="currentColor" fill-opacity="0.48" d="M10 8v6h6V8h1v6h6V8h1v6h5v1h-5v6h5v1h-5v5h-1v-5h-6v5h-1v-5h-6v5H9v-5H3v-1h6v-6H3v-1h6V8zm6 7h-6v6h6zm7 0h-6v6h6z"/>' +
+      '<path fill="currentColor" fill-opacity="0.78" d="M2 3h28v6H2z"/>' +
+      "</g>",
+  );
+}
+
 export function iconOrientation(): SVGSVGElement {
   return svgEl(
     "0 0 24 24",

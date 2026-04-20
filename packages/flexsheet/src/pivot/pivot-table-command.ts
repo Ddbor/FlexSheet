@@ -1,6 +1,7 @@
 import {
   getPivotValueFieldCaption,
   normalizeSelectionRange,
+  pivotLayoutStartRow,
   Worksheet,
   type CellScalar,
   type CellStyle,
@@ -958,6 +959,7 @@ export function refreshPivotTableDefinition(
   if (sourceSheet === undefined) {
     return false;
   }
+  const layoutTop = pivotLayoutStartRow(current);
   const out = buildPivotRender(sourceSheet, {
     sourceRange: current.sourceRange,
     hasHeaders: current.hasHeaders,
@@ -969,7 +971,7 @@ export function refreshPivotTableDefinition(
     valueFieldsOnRows: current.valueFieldsOnRows === true ? true : undefined,
     destination: {
       kind: "existingSheet",
-      startRow: current.destinationRow,
+      startRow: layoutTop,
       startCol: current.destinationCol,
     },
   });
@@ -977,10 +979,10 @@ export function refreshPivotTableDefinition(
   const snapRows = Math.max(current.outputRowCount, out.rowCount);
   const snapCols = Math.max(current.outputColCount, out.colCount);
   pivotSheet.removePivotTableDefinitionById(pivotDefId);
-  writePivotResult(pivotSheet, current.destinationRow, current.destinationCol, out);
+  writePivotResult(pivotSheet, layoutTop, current.destinationCol, out);
   clearPivotOutputOverflow(
     pivotSheet,
-    current.destinationRow,
+    layoutTop,
     current.destinationCol,
     snapRows,
     snapCols,
@@ -1002,7 +1004,7 @@ export function findPivotTableDefinitionAtCell(
   col: number,
 ): WorksheetPivotTableDefinition | null {
   for (const p of sheet.getPivotTableDefinitionsSnapshot()) {
-    const r0 = p.destinationRow;
+    const r0 = pivotLayoutStartRow(p);
     const c0 = p.destinationCol;
     const r1 = r0 + p.outputRowCount - 1;
     const c1 = c0 + p.outputColCount - 1;
@@ -1250,6 +1252,7 @@ export class UpdatePivotTableLayoutCommand implements ICommand {
         : this.layout.valueFieldsOnRows !== undefined
           ? this.layout.valueFieldsOnRows
           : (current.valueFieldsOnRows === true);
+    const layoutTop = pivotLayoutStartRow(current);
     const buildOpts: PivotTableBuildOptions = {
       sourceRange: this.layout.sourceRange,
       hasHeaders: this.layout.hasHeaders,
@@ -1261,14 +1264,14 @@ export class UpdatePivotTableLayoutCommand implements ICommand {
       valueFieldsOnRows: mergedValueFieldsOnRows ? true : undefined,
       destination: {
         kind: "existingSheet",
-        startRow: current.destinationRow,
+        startRow: layoutTop,
         startCol: current.destinationCol,
       },
     };
     const out = buildPivotRender(sourceSheet, buildOpts);
     this.snapRows = Math.max(current.outputRowCount, out.rowCount);
     this.snapCols = Math.max(current.outputColCount, out.colCount);
-    this.pivotDestRow = current.destinationRow;
+    this.pivotDestRow = layoutTop;
     this.pivotDestCol = current.destinationCol;
     this.beforeSnapshots = captureSnapshots(
       this.pivotSheet,
@@ -1311,6 +1314,7 @@ export class UpdatePivotTableLayoutCommand implements ICommand {
       destinationCol: current.destinationCol,
       outputRowCount: out.rowCount,
       outputColCount: out.colCount,
+      pageFilterStartRow: current.pageFilterStartRow,
     };
     this.pivotSheet.registerPivotTableDefinition(nextDef);
     this.nextOutput = out;
@@ -1387,6 +1391,7 @@ export class UpdatePivotTableFiltersCommand implements ICommand {
     }
 
     const normalized = normalizeFilterSelectedKeys(current.filterFieldCols, this.nextFilterSelectedKeys);
+    const layoutTop = pivotLayoutStartRow(current);
     const buildOpts: PivotTableBuildOptions = {
       sourceRange: current.sourceRange,
       hasHeaders: current.hasHeaders,
@@ -1398,14 +1403,14 @@ export class UpdatePivotTableFiltersCommand implements ICommand {
       valueFieldsOnRows: current.valueFieldsOnRows === true ? true : undefined,
       destination: {
         kind: "existingSheet",
-        startRow: current.destinationRow,
+        startRow: layoutTop,
         startCol: current.destinationCol,
       },
     };
     const out = buildPivotRender(sourceSheet, buildOpts);
     this.snapRows = Math.max(current.outputRowCount, out.rowCount);
     this.snapCols = Math.max(current.outputColCount, out.colCount);
-    this.pivotDestRow = current.destinationRow;
+    this.pivotDestRow = layoutTop;
     this.pivotDestCol = current.destinationCol;
     this.beforeSnapshots = captureSnapshots(
       this.pivotSheet,
@@ -1444,6 +1449,7 @@ export class UpdatePivotTableFiltersCommand implements ICommand {
       destinationCol: current.destinationCol,
       outputRowCount: out.rowCount,
       outputColCount: out.colCount,
+      pageFilterStartRow: current.pageFilterStartRow,
     };
     this.pivotSheet.registerPivotTableDefinition(nextDef);
     this.nextOutput = out;
