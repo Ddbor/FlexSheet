@@ -699,6 +699,57 @@ function resolveWorkbookRels(relsXml: string): Map<string, string> {
   return map;
 }
 
+/** 从 .rels XML 中提取指定类型的所有 Target 路径。 */
+function findRelTargetsByType(relsXml: string, type: string): string[] {
+  const doc = parseXml(relsXml);
+  const targets: string[] = [];
+  for (const rel of childrenLocal(doc.documentElement, "Relationship")) {
+    if (rel.getAttribute("Type") === type) {
+      const target = rel.getAttribute("Target");
+      if (target !== null) {
+        targets.push(target);
+      }
+    }
+  }
+  return targets;
+}
+
+const REL_TABLE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/table";
+const REL_PIVOT_TABLE_IMPORT =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/pivotTable";
+
+/**
+ * 扫描所有工作表的 .rels，建立 Table 名称 → { sheetName, ref } 映射，
+ * 供 parsePivotCacheMeta 处理 worksheetSource name="..." 格式时使用。
+ */
+function buildTableNameToSheetRange(
+  files: ReadonlyMap<string, Uint8Array>,
+  sheetBindings: readonly { readonly sheetPath: string; readonly sheetName: string }[],
+): Map<string, { sheetName: string; ref: string }> {
+  const result = new Map<string, { sheetName: string; ref: string }>();
+  for (const binding of sheetBindings) {
+    const relsPath = relsPartPathFor(binding.sheetPath);
+    const relsBytes = files.get(relsPath);
+    if (relsBytes === undefined) continue;
+    const relsXml = new TextDecoder("utf-8").decode(relsBytes);
+    const tableTargets = findRelTargetsByType(relsXml, REL_TABLE);
+    for (const target of tableTargets) {
+      const tablePath = resolvePartTarget(binding.sheetPath, target);
+      const tableBytes = files.get(tablePath);
+      if (tableBytes === undefined) continue;
+      const tableXml = new TextDecoder("utf-8").decode(tableBytes);
+      const tableDoc = parseXml(tableXml);
+      const tableEl = tableDoc.documentElement;
+      const tableName = tableEl.getAttribute("name");
+      const tableRef = tableEl.getAttribute("ref");
+      if (tableName !== null && tableName !== "" && tableRef !== null && tableRef !== "") {
+        result.set(tableName, { sheetName: binding.sheetName, ref: tableRef });
+      }
+    }
+  }
+  return result;
+}
+
 function normalizePartPath(path: string): string {
   const raw = path.replace(/\\/g, "/").replace(/^\/+/, "");
   const segs = raw.split("/");
@@ -859,7 +910,10 @@ interface PivotCacheMeta {
   readonly sharedItemsByFieldOffset: ReadonlyMap<number, readonly string[]>;
 }
 
-function parsePivotCacheMeta(defXml: string): PivotCacheMeta | null {
+function parsePivotCacheMeta(
+  defXml: string,
+  tableNameToInfo?: ReadonlyMap<string, { sheetName: string; ref: string }>,
+): PivotCacheMeta | null {
   const doc = parseXml(defXml);
   const root = doc.documentElement;
   if (root.localName !== "pivotCacheDefinition") {
@@ -867,8 +921,21 @@ function parsePivotCacheMeta(defXml: string): PivotCacheMeta | null {
   }
   const cacheSource = firstLocal(root, "cacheSource");
   const wsSource = cacheSource !== undefined ? firstLocal(cacheSource, "worksheetSource") : undefined;
-  const sourceSheetName = wsSource?.getAttribute("sheet") ?? "";
-  const sourceRef = wsSource?.getAttribute("ref") ?? "";
+  let sourceSheetName = wsSource?.getAttribute("sheet") ?? "";
+  let sourceRef = wsSource?.getAttribute("ref") ?? "";
+
+  // 处理 worksheetSource name="tableName" 格式（Excel 命名表格引用）
+  if ((sourceSheetName === "" || sourceRef === "") && wsSource !== undefined) {
+    const tableName = wsSource.getAttribute("name");
+    if (tableName !== null && tableName !== "" && tableNameToInfo !== undefined) {
+      const info = tableNameToInfo.get(tableName);
+      if (info !== undefined) {
+        sourceSheetName = info.sheetName;
+        sourceRef = info.ref;
+      }
+    }
+  }
+
   const sourceRange = parseRangeA1(sourceRef);
   if (sourceSheetName.trim() === "" || sourceRange === null) {
     return null;
@@ -1076,6 +1143,8 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
 
   out.activeSheetIndex = readActiveSheetIndexFromWorkbookXml(wbDoc, out.sheetCount);
 
+  const tableNameToInfo = buildTableNameToSheetRange(files, importedSheetBindings);
+
   const cacheIdToMeta = new Map<number, PivotCacheMeta>();
   const pivotCaches = firstLocal(wbDoc.documentElement, "pivotCaches");
   if (pivotCaches !== undefined) {
@@ -1095,7 +1164,7 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
         continue;
       }
       const cacheDefXml = new TextDecoder("utf-8").decode(cacheDefBytes);
-      const meta = parsePivotCacheMeta(cacheDefXml);
+      const meta = parsePivotCacheMeta(cacheDefXml, tableNameToInfo);
       if (meta !== null) {
         cacheIdToMeta.set(Math.trunc(cacheId), meta);
       }
@@ -1108,35 +1177,21 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
   }
   let importedPivotSerial = 1;
   for (const binding of importedSheetBindings) {
-    const sheetPartBytes = files.get(binding.sheetPath);
-    if (sheetPartBytes === undefined) {
-      continue;
-    }
-    const sheetXml = new TextDecoder("utf-8").decode(sheetPartBytes);
-    const sheetDoc = parseXml(sheetXml);
-    const pivotTables = firstLocal(sheetDoc.documentElement, "pivotTables");
-    if (pivotTables === undefined) {
-      continue;
-    }
     const sheetRelsPath = relsPartPathFor(binding.sheetPath);
     const sheetRelsBytes = files.get(sheetRelsPath);
     if (sheetRelsBytes === undefined) {
       continue;
     }
-    const sheetRels = resolveWorkbookRels(new TextDecoder("utf-8").decode(sheetRelsBytes));
+    const sheetRelsXml = new TextDecoder("utf-8").decode(sheetRelsBytes);
+    const pivotTargets = findRelTargetsByType(sheetRelsXml, REL_PIVOT_TABLE_IMPORT);
+    if (pivotTargets.length === 0) {
+      continue;
+    }
     const destSheet = out.getSheet(binding.importedIndex);
     if (destSheet === undefined) {
       continue;
     }
-    for (const pt of childrenLocal(pivotTables, "pivotTable")) {
-      const relId = rId(pt);
-      if (relId === null) {
-        continue;
-      }
-      const target = sheetRels.get(relId);
-      if (target === undefined) {
-        continue;
-      }
+    for (const target of pivotTargets) {
       const pivotTablePath = resolvePartTarget(binding.sheetPath, target);
       const pivotTableBytes = files.get(pivotTablePath);
       if (pivotTableBytes === undefined) {

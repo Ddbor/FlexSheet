@@ -433,8 +433,10 @@ describe("xlsx export/import", () => {
     const records = new TextDecoder().decode(map.get("xl/pivotCache/pivotCacheRecords1.xml"));
     expect(records).toContain('count="1"');
     expect(records).toContain("<r>");
-    expect(records).toContain('<s v="x"/>');
-    expect(records).toContain('<n v="1"/>');
+    // Discrete fields (string/integer) must use index references in records
+    expect(records).toContain('<x v="0"/>');
+    expect(records).not.toContain('<s v="x"/>');
+    expect(records).not.toContain('<n v="1"/>');
     const defXml = new TextDecoder().decode(map.get("xl/pivotCache/pivotCacheDefinition1.xml"));
     expect(defXml).toContain('recordCount="1"');
     expect(defXml).toContain('saveData="1"');
@@ -544,7 +546,7 @@ describe("xlsx export/import", () => {
     );
     const pivotTable = new TextDecoder().decode(map.get("xl/pivotTables/pivotTable1.xml"));
     expect(pivotTable).toContain('axis="axisPage"');
-    expect(pivotTable).toContain('<pageFields count="1"><pageField fld="0"/></pageFields>');
+    expect(pivotTable).toContain('<pageFields count="1"><pageField fld="0" hier="-1"/></pageFields>');
     expect(pivotTable).toContain('showAll="0"');
     expect(pivotTable).toContain('<item x="1"/>');
     expect(pivotTable).toContain('<item x="0" h="1"/>');
