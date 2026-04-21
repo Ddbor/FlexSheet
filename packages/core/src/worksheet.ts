@@ -537,6 +537,58 @@ export class Worksheet {
     this.refreshAutoFilterConcealment();
   }
 
+  /** 导出用：返回筛选区域范围与各列的生效筛选值；无筛选时返回 `null`。 */
+  getAutoFilterStateForExport(): {
+    readonly headerRow: number;
+    readonly dataEndRow: number;
+    readonly startCol: number;
+    readonly endCol: number;
+    readonly columns: ReadonlyArray<{
+      readonly col: number;
+      readonly visibleDisplayValues: ReadonlyArray<string>;
+      readonly includeBlank: boolean;
+      readonly isNarrowed: boolean;
+    }>;
+  } | null {
+    if (this.autoFilterByCol.size === 0) return null;
+    let headerRow = Infinity;
+    let dataEndRow = -Infinity;
+    let startCol = Infinity;
+    let endCol = -Infinity;
+    for (const [col, st] of this.autoFilterByCol) {
+      const anchorRow = st.uiKind === "body" ? st.bodyAnchorRow : st.rowStart;
+      headerRow = Math.min(headerRow, anchorRow);
+      dataEndRow = Math.max(dataEndRow, st.rowEnd);
+      startCol = Math.min(startCol, col);
+      endCol = Math.max(endCol, col);
+    }
+    const columns = [];
+    for (const [col, st] of this.autoFilterByCol) {
+      columns.push({
+        col,
+        visibleDisplayValues: [...st.checkedKeys],
+        includeBlank: st.includeBlank,
+        isNarrowed: this.isColumnAutoFilterNarrowed(col),
+      });
+    }
+    return {
+      headerRow: Number.isFinite(headerRow) ? headerRow : 0,
+      dataEndRow: Number.isFinite(dataEndRow) ? dataEndRow : 0,
+      startCol: Number.isFinite(startCol) ? startCol : 0,
+      endCol: Number.isFinite(endCol) ? endCol : 0,
+      columns,
+    };
+  }
+
+  /** 导出用：返回所有隐藏行（手动隐藏 + 筛选遮盖）的行索引集合。 */
+  getHiddenRowsForExport(): ReadonlySet<number> {
+    if (this.hiddenRows.size === 0) return this.autoFilterConcealedRows;
+    if (this.autoFilterConcealedRows.size === 0) return this.hiddenRows;
+    const combined = new Set(this.hiddenRows);
+    for (const r of this.autoFilterConcealedRows) combined.add(r);
+    return combined;
+  }
+
   /** 注册「套用表格格式」区域，供排序/筛选后重新计算条纹与表头样式。 */
   registerTableStyleRegion(
     range: SelectionRange,

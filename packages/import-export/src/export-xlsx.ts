@@ -853,6 +853,25 @@ function mergeCellsXml(sheet: Worksheet): string {
   return `<mergeCells count="${parts.length}">${parts.join("")}</mergeCells>`;
 }
 
+function buildAutoFilterXml(sheet: Worksheet): string {
+  const state = sheet.getAutoFilterStateForExport();
+  if (state === null) return "";
+  const { headerRow, dataEndRow, startCol, endCol, columns } = state;
+  const ref = `${formatCellRef(headerRow, startCol)}:${formatCellRef(dataEndRow, endCol)}`;
+  const filterColsXml = columns
+    .filter((c) => c.isNarrowed)
+    .map((c) => {
+      const colId = c.col - startCol;
+      const blankAttr = c.includeBlank ? ` blank="1"` : "";
+      const filterVals = c.visibleDisplayValues
+        .map((v) => `<filter val="${escapeXml(v)}"/>`)
+        .join("");
+      return `<filterColumn colId="${colId}"><filters${blankAttr}>${filterVals}</filters></filterColumn>`;
+    })
+    .join("");
+  return `<autoFilter ref="${ref}">${filterColsXml}</autoFilter>`;
+}
+
 function buildSheetXml(
   sheet: Worksheet,
   sheetIndex: number,
@@ -903,7 +922,12 @@ function buildSheetXml(
       }
     }
   }
-  const rows = [...byRow.keys()].sort((a, b) => a - b);
+
+  const hiddenRows = sheet.getHiddenRowsForExport();
+  const allRowIndices = new Set<number>(byRow.keys());
+  for (const r of hiddenRows) allRowIndices.add(r);
+  const rows = [...allRowIndices].sort((a, b) => a - b);
+
   const rowXml: string[] = [];
   const defaultHtStr = rowHeightPxToOoxmlHt(sheet.defaultRowHeight);
   const defaultCwStr = colWidthPxToOoxmlWidth(sheet.defaultColWidth);
@@ -911,17 +935,20 @@ function buildSheetXml(
 
   for (const r of rows) {
     const cells = byRow.get(r);
+    const hiddenAttr = hiddenRows.has(r) ? ` hidden="1"` : "";
+    const rowHtAttr = rowXmlAttributesForHeight(sheet, r);
     if (cells === undefined) {
+      rowXml.push(`<row r="${r + 1}"${rowHtAttr}${hiddenAttr}/>`);
       continue;
     }
     cells.sort((a, b) => a.col - b.col);
     const spans =
       cells.length > 0 ? `${cells[0].col + 1}:${cells[cells.length - 1].col + 1}` : "1:1";
     const cXml = cells.map((c) => cellToXml(sheet, c, sst, xfBySig, opts)).join("");
-    const rowHtAttr = rowXmlAttributesForHeight(sheet, r);
-    rowXml.push(`<row r="${r + 1}" spans="${spans}"${rowHtAttr}>${cXml}</row>`);
+    rowXml.push(`<row r="${r + 1}" spans="${spans}"${rowHtAttr}${hiddenAttr}>${cXml}</row>`);
   }
 
+  const autoFilterXml = buildAutoFilterXml(sheet);
   const mergeXml = mergeCellsXml(sheet);
   const cfXml = buildSheetConditionalFormattingXml(
     sheetIndex,
@@ -937,6 +964,7 @@ function buildSheetXml(
     `<sheetFormatPr defaultRowHeight="${defaultHtStr}" defaultColWidth="${defaultCwStr}"/>` +
     colsXml +
     `<sheetData>${rowXml.join("")}</sheetData>` +
+    autoFilterXml +
     mergeXml +
     cfXml +
     pivotTablesFragment +
