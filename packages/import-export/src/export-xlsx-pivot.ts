@@ -373,7 +373,7 @@ function buildPivotCacheDefinitionXml(
   const fieldsXml = fieldNames
     .map((nm, fi) => {
       const shared = sharedItemsResults[fi]?.xml ?? `<sharedItems/>`;
-      return `<cacheField name="${escapeXml(nm)}">${shared}</cacheField>`;
+      return `<cacheField name="${escapeXml(nm)}" numFmtId="0">${shared}</cacheField>`;
     })
     .join("");
   const saveData = recordCount > 0 ? 1 : 0;
@@ -471,42 +471,90 @@ function buildPivotTableDefinitionXml(
     }
   }
 
-  const rowFieldsXml =
-    rowOffs.length === 0
-      ? ""
-      : `<rowFields count="${rowOffs.length}">` +
-        rowOffs.map((o) => `<field x="${o}"/>`).join("") +
-        `</rowFields>`;
+  // 值字段是否置于行轴（dataOnRows 模式）
+  const dataOnRows = def.valueFieldsOnRows === true && valueSpecs.length > 1 && colOffs.length === 0;
+  // firstDataCol：无行字段时为 0，有行字段时为 1（行标题列占据第 0 列）
+  const firstDataCol = rowOffs.length > 0 ? 1 : 0;
 
+  // --- rowFields / rowItems ---
+  let rowFieldsXml: string;
   let rowItemsXml: string;
-  if (rowOffs.length === 0) {
-    rowItemsXml = `<rowItems count="1"><i/></rowItems>`;
-  } else if (rowOffs.length === 1) {
-    const itemCount = sharedItemsResults[rowOffs[0]!]?.keys.length ?? 0;
-    if (itemCount === 0) {
-      rowItemsXml = `<rowItems count="1"><i/></rowItems>`;
+
+  if (dataOnRows) {
+    // 值字段在行轴：rowFields 须包含 -2（Values 占位字段）
+    if (rowOffs.length === 0) {
+      rowFieldsXml = `<rowFields count="1"><field x="-2"/></rowFields>`;
+      // 每个值字段对应一个 rowItem
+      const valueItemsXml = Array.from({ length: valueSpecs.length }, (_, i) =>
+        i === 0 ? `<i/>` : `<i><x v="${i}"/></i>`,
+      ).join("");
+      rowItemsXml = `<rowItems count="${valueSpecs.length}">${valueItemsXml}</rowItems>`;
     } else {
-      const items = Array.from({ length: itemCount }, (_, i) => `<i><x v="${i}"/></i>`).join("");
-      rowItemsXml = `<rowItems count="${itemCount + 1}">${items}<i t="grand"><x/></i></rowItems>`;
+      // 有行字段 + 值字段在行：-2 追加到 rowFields 末尾
+      const allFields =
+        rowOffs.map((o) => `<field x="${o}"/>`).join("") + `<field x="-2"/>`;
+      rowFieldsXml = `<rowFields count="${rowOffs.length + 1}">${allFields}</rowFields>`;
+      // 简化占位：完整枚举行字段×值字段组合过于复杂
+      const xs = rowOffs.map(() => `<x v="0"/>`).join("") + `<x v="0"/>`;
+      rowItemsXml = `<rowItems count="1"><i>${xs}</i></rowItems>`;
     }
   } else {
-    // Multiple row fields: simplified single-entry placeholder (full combination enumeration is complex)
-    rowItemsXml = `<rowItems count="1"><i>${rowOffs.map(() => `<x v="0"/>`).join("")}</i></rowItems>`;
+    if (rowOffs.length === 0) {
+      rowFieldsXml = "";
+      rowItemsXml = `<rowItems count="1"><i/></rowItems>`;
+    } else if (rowOffs.length === 1) {
+      rowFieldsXml = `<rowFields count="1"><field x="${rowOffs[0]}"/></rowFields>`;
+      const itemCount = sharedItemsResults[rowOffs[0]!]?.keys.length ?? 0;
+      if (itemCount === 0) {
+        rowItemsXml = `<rowItems count="1"><i/></rowItems>`;
+      } else {
+        const items = Array.from({ length: itemCount }, (_, i) => `<i><x v="${i}"/></i>`).join("");
+        rowItemsXml = `<rowItems count="${itemCount + 1}">${items}<i t="grand"><x/></i></rowItems>`;
+      }
+    } else {
+      // 多行字段：简化占位（完整枚举组合过于复杂，Excel 会在刷新时重算）
+      rowFieldsXml =
+        `<rowFields count="${rowOffs.length}">` +
+        rowOffs.map((o) => `<field x="${o}"/>`).join("") +
+        `</rowFields>`;
+      rowItemsXml = `<rowItems count="1"><i>${rowOffs.map(() => `<x v="0"/>`).join("")}</i></rowItems>`;
+    }
   }
 
-  let colFieldsXml = "";
-  let colItemsXml = `<colItems count="1"><i/></colItems>`;
-  if (colOffs.length === 1) {
-    const itemCount = sharedItemsResults[colOffs[0]!]?.keys.length ?? 0;
-    if (itemCount === 0) {
-      colFieldsXml = `<colFields count="1"><field x="${colOffs[0]}"/></colFields>`;
+  // --- colFields / colItems ---
+  // OOXML 规范：多个值字段在列轴时，colFields 必须含 field x="-2"（Values 占位字段）。
+  // 缺少该字段会导致 Excel 无法解析透视表结构，拒绝打开文件。
+  let colFieldsXml: string;
+  let colItemsXml: string;
+
+  if (dataOnRows) {
+    // 值字段已在行轴，列轴无需占位字段
+    colFieldsXml = "";
+    colItemsXml = `<colItems count="1"><i/></colItems>`;
+  } else if (colOffs.length === 0) {
+    if (valueSpecs.length <= 1) {
+      // 单值字段、无列维度：无需 colFields
+      colFieldsXml = "";
       colItemsXml = `<colItems count="1"><i/></colItems>`;
     } else {
-      colFieldsXml = `<colFields count="1"><field x="${colOffs[0]}"/></colFields>`;
+      // 多值字段在列：必须加 -2 占位字段，colItems 枚举各值字段 + 合计列
+      colFieldsXml = `<colFields count="1"><field x="-2"/></colFields>`;
+      const valueItemsXml = Array.from({ length: valueSpecs.length }, (_, i) =>
+        i === 0 ? `<i/>` : `<i><x v="${i}"/></i>`,
+      ).join("");
+      colItemsXml = `<colItems count="${valueSpecs.length + 1}">${valueItemsXml}<i t="grand"><x/></i></colItems>`;
+    }
+  } else if (colOffs.length === 1) {
+    const itemCount = sharedItemsResults[colOffs[0]!]?.keys.length ?? 0;
+    colFieldsXml = `<colFields count="1"><field x="${colOffs[0]}"/></colFields>`;
+    if (itemCount === 0) {
+      colItemsXml = `<colItems count="1"><i/></colItems>`;
+    } else {
       const items = Array.from({ length: itemCount }, (_, i) => `<i><x v="${i}"/></i>`).join("");
       colItemsXml = `<colItems count="${itemCount + 1}">${items}<i t="grand"><x/></i></colItems>`;
     }
-  } else if (colOffs.length > 1) {
+  } else {
+    // 多列字段：简化占位
     colFieldsXml =
       `<colFields count="${colOffs.length}">` +
       colOffs.map((o) => `<field x="${o}"/>`).join("") +
@@ -566,8 +614,8 @@ function buildPivotTableDefinitionXml(
     ` applyPatternFormats="0"` +
     ` applyAlignmentFormats="0"` +
     ` applyWidthHeightFormats="1"` +
-    `${def.valueFieldsOnRows === true && valueSpecs.length > 1 && colOffs.length === 0 ? ` dataOnRows="1"` : ""}>` +
-    `<location ref="${escapeXml(locRef)}" firstHeaderRow="${firstHeaderRow}" firstDataRow="${firstDataRow}" firstDataCol="1"/>` +
+    `${dataOnRows ? ` dataOnRows="1"` : ""}>` +
+    `<location ref="${escapeXml(locRef)}" firstHeaderRow="${firstHeaderRow}" firstDataRow="${firstDataRow}" firstDataCol="${firstDataCol}"/>` +
     `<pivotFields count="${fieldNames.length}">${pivotFieldsXml.join("")}</pivotFields>` +
     rowFieldsXml +
     rowItemsXml +
