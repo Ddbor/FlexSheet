@@ -13,6 +13,7 @@ import type {
 } from "@flexsheet/core";
 import { ooxmlTableStyleNameToParsed } from "@flexsheet/core";
 import { isCellFillPatternType } from "@flexsheet/core";
+import { isUnconfiguredPivotDefinition, writeUnconfiguredPivotPlaceholderToSheet } from "@flexsheet/core";
 import { parseCellRef } from "./a1.js";
 import { unzipToMap } from "./zip-reader.js";
 import { recalcWorksheet } from "@flexsheet/formula";
@@ -1180,9 +1181,6 @@ function parseWorksheetPivotDefinitions(
   const colOffsets = parsePivotFieldOffsets(firstLocal(root, "colFields"));
   const filterOffsets = parsePivotFieldOffsets(firstLocal(root, "pageFields"));
   const dataFields = childrenLocal(firstLocal(root, "dataFields") ?? root, "dataField");
-  if (dataFields.length === 0) {
-    return [];
-  }
   const valueFields: PivotValueFieldSpec[] = [];
   for (const df of dataFields) {
     const fld = Number(df.getAttribute("fld") ?? "");
@@ -1193,9 +1191,6 @@ function parseWorksheetPivotDefinitions(
       col: toAbsCol(Math.trunc(fld)),
       aggregate: parsePivotAggregateKind(df.getAttribute("subtotal")),
     });
-  }
-  if (valueFields.length === 0) {
-    return [];
   }
 
   const pivotFieldsRoot = firstLocal(root, "pivotFields");
@@ -1422,7 +1417,11 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
       );
       for (const def of defs) {
         destSheet.registerPivotTableDefinition(def);
-        applyPivotImportedPresentation(destSheet, def, pivotTableXml);
+        if (isUnconfiguredPivotDefinition(def)) {
+          writeUnconfiguredPivotPlaceholderToSheet(destSheet, def);
+        } else {
+          applyPivotImportedPresentation(destSheet, def, pivotTableXml);
+        }
       }
     }
   }

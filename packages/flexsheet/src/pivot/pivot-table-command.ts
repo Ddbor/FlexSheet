@@ -1,5 +1,7 @@
 import {
+  buildUnconfiguredPivotPlaceholderMatrix,
   getPivotValueFieldCaption,
+  isUnconfiguredPivotDefinition,
   normalizeSelectionRange,
   pivotLayoutStartRow,
   Worksheet,
@@ -44,6 +46,14 @@ export interface PivotTableBuildOptions {
   readonly valueFieldsOnRows?: boolean;
   readonly valueFields: readonly PivotValueFieldSpec[];
   readonly destination: PivotTableDestination;
+  /**
+   * 与 `isUnconfiguredPivotDefinition` 一致时：按给定尺寸绘制「尚未放置字段」占位（Excel 导入空透视 / 刷新）。
+   */
+  readonly unconfiguredPlaceholder?: {
+    readonly rowCount: number;
+    readonly colCount: number;
+    readonly title: string;
+  };
 }
 
 interface PivotFieldItem {
@@ -499,6 +509,23 @@ export function buildPivotRender(
   const filterFieldCols = [...options.filterFieldCols];
   dedupePivotColumnAcrossZones(filterFieldCols, colDimCols, rowCols, valueFields);
   const filterSelectedKeysNorm = normalizeFilterSelectedKeys(filterFieldCols, options.filterSelectedKeys);
+
+  const ph = options.unconfiguredPlaceholder;
+  if (
+    ph !== undefined &&
+    rowCols.length === 0 &&
+    colDimCols.length === 0 &&
+    valueFields.length === 0 &&
+    filterFieldCols.length === 0
+  ) {
+    const m = buildUnconfiguredPivotPlaceholderMatrix(ph.rowCount, ph.colCount, ph.title);
+    return {
+      rowCount: m.rowCount,
+      colCount: m.colCount,
+      values: m.values,
+      styles: m.styles,
+    };
+  }
 
   if (rowCols.length === 0 || valueFields.length === 0) {
     return {
@@ -960,6 +987,14 @@ export function refreshPivotTableDefinition(
     return false;
   }
   const layoutTop = pivotLayoutStartRow(current);
+  const unconfigured =
+    isUnconfiguredPivotDefinition(current) === true
+      ? {
+          rowCount: current.outputRowCount,
+          colCount: current.outputColCount,
+          title: current.name,
+        }
+      : undefined;
   const out = buildPivotRender(sourceSheet, {
     sourceRange: current.sourceRange,
     hasHeaders: current.hasHeaders,
@@ -974,6 +1009,7 @@ export function refreshPivotTableDefinition(
       startRow: layoutTop,
       startCol: current.destinationCol,
     },
+    ...(unconfigured !== undefined ? { unconfiguredPlaceholder: unconfigured } : {}),
   });
 
   const snapRows = Math.max(current.outputRowCount, out.rowCount);

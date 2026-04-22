@@ -408,9 +408,8 @@ function buildPivotTableDefinitionXml(
   const dataFieldIndices = new Set<number>();
   for (const v of valueSpecs) {
     dataFieldIndices.add(toOff(v.col));
-    if (v.computed?.kind === "bucketRatio") {
-      dataFieldIndices.add(toOff(v.computed.denominatorCol));
-    }
+    // bucketRatio denominator is used internally but must NOT appear as a separate dataField;
+    // marking it with dataField="1" without a matching <dataField> entry causes Excel to reject the file.
   }
   const rowOffSet = new Set(rowOffs);
   const colOffSet = new Set(colOffs);
@@ -472,7 +471,8 @@ function buildPivotTableDefinitionXml(
   }
 
   // 值字段是否置于行轴（dataOnRows 模式）
-  const dataOnRows = def.valueFieldsOnRows === true && valueSpecs.length > 1 && colOffs.length === 0;
+  const dataOnRows =
+    def.valueFieldsOnRows === true && valueSpecs.length > 1 && colOffs.length === 0;
   // firstDataCol：无行字段时为 0，有行字段时为 1（行标题列占据第 0 列）
   const firstDataCol = rowOffs.length > 0 ? 1 : 0;
 
@@ -491,8 +491,7 @@ function buildPivotTableDefinitionXml(
       rowItemsXml = `<rowItems count="${valueSpecs.length}">${valueItemsXml}</rowItems>`;
     } else {
       // 有行字段 + 值字段在行：-2 追加到 rowFields 末尾
-      const allFields =
-        rowOffs.map((o) => `<field x="${o}"/>`).join("") + `<field x="-2"/>`;
+      const allFields = rowOffs.map((o) => `<field x="${o}"/>`).join("") + `<field x="-2"/>`;
       rowFieldsXml = `<rowFields count="${rowOffs.length + 1}">${allFields}</rowFields>`;
       // 简化占位：完整枚举行字段×值字段组合过于复杂
       const xs = rowOffs.map(() => `<x v="0"/>`).join("") + `<x v="0"/>`;
@@ -537,12 +536,12 @@ function buildPivotTableDefinitionXml(
       colFieldsXml = "";
       colItemsXml = `<colItems count="1"><i/></colItems>`;
     } else {
-      // 多值字段在列：必须加 -2 占位字段，colItems 枚举各值字段 + 合计列
+      // 多值字段在列：必须加 -2 占位字段，colItems 仅枚举各值字段（无列维度无合计列）
       colFieldsXml = `<colFields count="1"><field x="-2"/></colFields>`;
       const valueItemsXml = Array.from({ length: valueSpecs.length }, (_, i) =>
         i === 0 ? `<i/>` : `<i><x v="${i}"/></i>`,
       ).join("");
-      colItemsXml = `<colItems count="${valueSpecs.length + 1}">${valueItemsXml}<i t="grand"><x/></i></colItems>`;
+      colItemsXml = `<colItems count="${valueSpecs.length}">${valueItemsXml}</colItems>`;
     }
   } else if (colOffs.length === 1) {
     const itemCount = sharedItemsResults[colOffs[0]!]?.keys.length ?? 0;
@@ -561,6 +560,11 @@ function buildPivotTableDefinitionXml(
       `</colFields>`;
     colItemsXml = `<colItems count="1"><i>${colOffs.map(() => `<x v="0"/>`).join("")}</i></colItems>`;
   }
+
+  // colGrandTotals: 仅当有列维度字段时才有合计列；多值无列维度时每个值字段各占一列，无合计。
+  const colGrandTotals = colOffs.length > 0 ? "1" : "0";
+  // rowGrandTotals: dataOnRows 且无行字段时，行轴是值字段本身，行合计无意义。
+  const rowGrandTotals = dataOnRows && rowOffs.length === 0 ? "0" : "1";
 
   const dataCaption = "Values";
   const dataFieldParts: string[] = [];
@@ -601,8 +605,8 @@ function buildPivotTableDefinitionXml(
     ` name="${escapeXml(def.name)}"` +
     ` cacheId="${cacheId}"` +
     ` dataCaption="${escapeXml(dataCaption)}"` +
-    ` rowGrandTotals="1"` +
-    ` colGrandTotals="1"` +
+    ` rowGrandTotals="${rowGrandTotals}"` +
+    ` colGrandTotals="${colGrandTotals}"` +
     ` updatedVersion="6"` +
     ` minRefreshableVersion="3"` +
     ` useAutoFormatting="0"` +

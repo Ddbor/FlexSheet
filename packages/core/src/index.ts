@@ -116,3 +116,8 @@ export {
   type PivotValueFieldSpec,
   type WorksheetPivotTableDefinition,
 } from "./pivot-table-model.js";
+export {
+  buildUnconfiguredPivotPlaceholderMatrix,
+  isUnconfiguredPivotDefinition,
+  writeUnconfiguredPivotPlaceholderToSheet,
+} from "./pivot-unconfigured-placeholder.js";

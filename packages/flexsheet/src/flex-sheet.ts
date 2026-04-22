@@ -1,10 +1,12 @@
 import {
+  isUnconfiguredPivotDefinition,
   normalizeSelectionRange,
   PLUGIN_SERVICE_KEYS,
   selectionRangesEqualNormalized,
   Workbook,
   Workspace,
   Worksheet,
+  writeUnconfiguredPivotPlaceholderToSheet,
   type CellStyle,
   type CellStylePatch,
   type ConditionalFormatRule,
@@ -402,6 +404,17 @@ export class FlexSheet {
       const sh = wb.getSheet(i);
       if (sh !== undefined) {
         recalcWorksheet(sh);
+      }
+    }
+    for (let i = 0; i < wb.sheetCount; i++) {
+      const sh = wb.getSheet(i);
+      if (sh === undefined) {
+        continue;
+      }
+      for (const d of sh.getPivotTableDefinitionsSnapshot()) {
+        if (isUnconfiguredPivotDefinition(d)) {
+          writeUnconfiguredPivotPlaceholderToSheet(sh, d);
+        }
       }
     }
     this.rebindActiveSheetFormattingListener();
