@@ -22,6 +22,7 @@ import {
   wrapCellLines,
 } from "./canvas-renderer-utils.js";
 import { paintBodyCellBorders } from "./canvas-renderer-body-borders.js";
+import { paintPivotUnconfiguredPlaceholderArt } from "./canvas-pivot-unconfigured-art.js";
 import { getConditionalFormattingCellOverlayCached } from "./canvas-renderer-cf-overlay.js";
 import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
 import {
@@ -1150,6 +1151,22 @@ function runBodyQuadrantPass(
     c0,
     c1,
     cfOverlayCellCache,
+  );
+  paintPivotUnconfiguredPlaceholderArt(
+    env.ctx,
+    sheet,
+    layout,
+    env.viewZoom,
+    env.scrollX,
+    env.scrollY,
+    headerW,
+    headerH,
+    canvasW,
+    canvasH,
+    r0,
+    r1,
+    c0,
+    c1,
   );
   paintBodyAutoFilterAnchors(
     env,

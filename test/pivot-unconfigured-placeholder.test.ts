@@ -14,7 +14,7 @@ describe("pivot unconfigured placeholder", () => {
     expect(m.rowCount).toBe(4);
     expect(m.colCount).toBe(3);
     expect(m.values[0]![0]).toBe("数据透视表1");
-    expect(m.values[1]![0]).toBe("若要生成报表，请从数据透视表字段列表中选择字段");
+    expect(m.values[1]![0]).toBe("在区域内单击可以使用数据透视表");
     expect(m.values[3]![2]).toBe(null);
     expect(m.styles[0]![1]?.fillArgb).toBe("FFBDD7EE");
   });
@@ -67,7 +67,7 @@ describe("pivot unconfigured placeholder", () => {
     };
     writeUnconfiguredPivotPlaceholderToSheet(sh, def);
     expect(sh.getCell(5, 1).value).toBe("透视1");
-    expect(sh.getCell(6, 1).value).toContain("字段列表");
+    expect(sh.getCell(6, 1).value).toContain("单击");
   });
 
   it("imports xlsx with empty dataFields as registered pivot and roundtrips name", async () => {
@@ -110,6 +110,6 @@ describe("pivot unconfigured placeholder", () => {
     expect(defs[0]!.rowFieldCols.length).toBe(0);
     expect(defs[0]!.name).toBe("数据透视表1");
     expect(importedPivot!.getCell(6, 0).value).toBe("数据透视表1");
-    expect(String(importedPivot!.getCell(7, 0).value ?? "")).toContain("字段列表");
+    expect(String(importedPivot!.getCell(7, 0).value ?? "")).toContain("单击");
   });
 });

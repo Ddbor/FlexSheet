@@ -3,8 +3,7 @@ import { pivotLayoutStartRow, type WorksheetPivotTableDefinition } from "./pivot
 import type { Worksheet } from "./worksheet.js";
 
 /** 与 Excel 中文界面一致的未配置透视提示（字段窗格为空时）。 */
-const PIVOT_UNCONFIGURED_HINT =
-  "若要生成报表，请从数据透视表字段列表中选择字段";
+const PIVOT_UNCONFIGURED_HINT = "在区域内单击可以使用数据透视表";
 
 export function isUnconfiguredPivotDefinition(def: WorksheetPivotTableDefinition): boolean {
   return (
