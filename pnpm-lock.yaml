@@ -200,6 +200,9 @@ importers:
       '@flexsheet/renderer':
         specifier: workspace:*
         version: link:../renderer
+      '@flexsheet/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@flexsheet/theme':
         specifier: workspace:*
         version: link:../theme

@@ -1,4 +1,5 @@
 import type { SelectionRange } from "@flexsheet/core";
+import { showMessageAlert } from "@flexsheet/shared";
 import type { FlexSheetLike, RibbonCommandEvent } from "./ribbon-types.js";
 import type { ViewTabHandles } from "./tabs/view-tab.js";
 
@@ -154,7 +155,7 @@ export class ViewRibbonController {
             /* ignore */
           }
         } else {
-          window.alert("当前没有可切换的其他窗口（请从「新建窗口」打开多实例）。");
+          showMessageAlert("当前没有可切换的其他窗口（请从「新建窗口」打开多实例）。");
         }
         break;
       }

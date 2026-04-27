@@ -300,9 +300,18 @@ const FS_SHEET_CUSTOM_SORT_STYLE_TEXT = `
   border-radius: 8px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
   border: 1px solid #d2d0ce;
-  padding: 16px 18px 14px 18px;
+  padding: 12px 18px 14px 18px;
   color: #323130;
   font-size: 13px;
+}
+.fs-custom-sort__options-drag-title {
+  margin: -2px 0 12px 0;
+  padding: 0 0 8px 0;
+  border-bottom: 1px solid #edebe9;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+  color: #1b1a19;
 }
 .fs-custom-sort__options-grid {
   display: grid;
@@ -570,14 +579,6 @@ const FS_FIND_REPLACE_STYLE_TEXT = `
   color: #1b1a19;
   user-select: none;
   -webkit-user-select: none;
-}
-.fs-fr__title--draggable {
-  cursor: move;
-  touch-action: none;
-  border-radius: 8px 8px 0 0;
-}
-.fs-fr__title--draggable:active {
-  cursor: grabbing;
 }
 .fs-fr__tabs {
   display: flex;

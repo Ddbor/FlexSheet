@@ -12,6 +12,7 @@
     }
   },
   "dependencies": {
+    "@flexsheet/shared": "workspace:*",
     "@flexsheet/core": "workspace:*",
     "@flexsheet/import-export": "workspace:*",
     "@flexsheet/renderer": "workspace:*",

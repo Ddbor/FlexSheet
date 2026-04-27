@@ -1,5 +1,6 @@
 import type { CellStylePatch } from "@flexsheet/core";
 import type { FlexSheet } from "../flex-sheet.js";
+import { attachDraggableDialogPanel } from "@flexsheet/shared";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { mountFormatCellsDialog } from "../format-cells/format-cells-dialog.js";
 import type { FormatCellsBorderState } from "../format-cells/format-cells-border.js";
@@ -393,6 +394,7 @@ export function showNewTableStyleDialog(
   });
   document.addEventListener("keydown", onKeyDown, true);
   document.body.appendChild(overlay);
+  attachDraggableDialogPanel(panel, header);
   queueMicrotask(() => {
     nameInput.focus();
     nameInput.select();

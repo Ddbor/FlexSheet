@@ -10,6 +10,7 @@ import {
   type SelectionRange,
   type Worksheet,
 } from "@flexsheet/core";
+import { attachDraggableDialogPanel } from "@flexsheet/shared";
 import { iconCopy, iconCut, iconPaste } from "@flexsheet/toolbar";
 
 import type { FlexSheet, FlexSheetSurfaceHit, SelectionCellDeleteMode } from "../flex-sheet.js";
@@ -853,6 +854,7 @@ export class SheetContextMenuPlugin extends PluginBase {
     panel.appendChild(footer);
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
+    attachDraggableDialogPanel(panel, header);
     this.promptRoot = overlay;
 
     const tryConfirm = (): void => {
@@ -1067,6 +1069,7 @@ export class SheetContextMenuPlugin extends PluginBase {
     panel.appendChild(footer);
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
+    attachDraggableDialogPanel(panel, header);
     this.promptRoot = overlay;
 
     const tryConfirm = (): void => {

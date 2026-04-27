@@ -1,4 +1,5 @@
 import { normalizeSelectionRange, type Worksheet } from "@flexsheet/core";
+import { attachDraggableDialogPanel } from "@flexsheet/shared";
 
 import type { FlexSheet } from "../flex-sheet.js";
 import {
@@ -213,6 +214,7 @@ export function openPivotFilterPanel(options: OpenPivotFilterPanelOptions): void
     root.style.top = `${Math.round(top)}px`;
   };
   place();
+  attachDraggableDialogPanel(root, title);
 
   const remove = (): void => {
     document.removeEventListener("keydown", onKey, true);

@@ -1,5 +1,5 @@
 import { normalizeSelectionRange, type SelectionRange, type Worksheet } from "@flexsheet/core";
-import { columnIndexToLabel } from "@flexsheet/shared";
+import { attachDraggableDialogPanel, columnIndexToLabel } from "@flexsheet/shared";
 import { CreatePivotTableCommand, type PivotAggregateKind } from "./pivot-table-command.js";
 import { showPivotTableFieldsPane, type PivotFieldsPaneHost } from "./pivot-table-fields-pane.js";
 import { ensureFsSheetPromptStyles } from "../dialogs/fs-dialog-styles.js";
@@ -421,6 +421,7 @@ export function showPivotTableDialog(host: PivotTableDialogHost): void {
   overlay.appendChild(rangePickBar);
 
   document.body.appendChild(overlay);
+  attachDraggableDialogPanel(panel, header);
 
   let currentFields: readonly PivotFieldOption[] = [];
   let rangePicking = false;

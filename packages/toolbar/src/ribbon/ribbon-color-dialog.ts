@@ -2,6 +2,8 @@
  * Ribbon「其他颜色」：Office 风格色盘（色相×饱和度平面 + 亮度条 + RGB + 新增/当前预览）。
  */
 
+import { attachDraggableDialogPanel } from "@flexsheet/shared";
+
 export interface Rgb {
   readonly r: number;
   readonly g: number;
@@ -284,6 +286,7 @@ export function showRibbonColorDialog(initialCssHex6?: string | null): Promise<s
       resolve(null);
       return;
     }
+    attachDraggableDialogPanel(dialog, header);
 
     const finish = (hex: string | null): void => {
       if (settled) {

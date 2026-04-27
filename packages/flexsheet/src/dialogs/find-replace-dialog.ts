@@ -1,5 +1,5 @@
 import { formatCellDisplayWithStyle, type Workbook, type Worksheet } from "@flexsheet/core";
-import { columnIndexToLabel } from "@flexsheet/shared";
+import { attachDraggableDialogPanel, columnIndexToLabel, showMessageAlert } from "@flexsheet/shared";
 import { ensureFindReplaceDialogStyles } from "./fs-dialog-styles.js";
 import {
   type FindHit,
@@ -149,66 +149,15 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
   panel.tabIndex = -1;
   overlay.appendChild(panel);
 
+  const header = document.createElement("div");
+  header.className = "fs-fr__header";
   const title = document.createElement("div");
   title.id = "fs-fr-title";
-  title.className = "fs-fr__title fs-fr__title--draggable";
+  title.className = "fs-fr__title";
   title.textContent = "查找和替换";
   title.title = "按住可拖动";
-  let drag: { x0: number; y0: number; l0: number; t0: number } | null = null;
-  const clampPanel = (): void => {
-    const w = panel.offsetWidth;
-    const h = panel.offsetHeight;
-    const left = Number.parseFloat(panel.style.left) || 0;
-    const top = Number.parseFloat(panel.style.top) || 0;
-    const maxL = Math.max(4, window.innerWidth - w - 4);
-    const maxT = Math.max(4, window.innerHeight - h - 4);
-    panel.style.left = `${Math.min(Math.max(4, left), maxL)}px`;
-    panel.style.top = `${Math.min(Math.max(4, top), maxT)}px`;
-  };
-  title.addEventListener("pointerdown", (ev) => {
-    if (ev.button !== 0) {
-      return;
-    }
-    const r = panel.getBoundingClientRect();
-    panel.style.position = "fixed";
-    panel.style.left = `${r.left}px`;
-    panel.style.top = `${r.top}px`;
-    panel.style.margin = "0";
-    drag = { x0: ev.clientX, y0: ev.clientY, l0: r.left, t0: r.top };
-    try {
-      title.setPointerCapture(ev.pointerId);
-    } catch {
-      /* ignore */
-    }
-    const onMove = (e: PointerEvent): void => {
-      if (drag === null) {
-        return;
-      }
-      const l = drag.l0 + (e.clientX - drag.x0);
-      const t = drag.t0 + (e.clientY - drag.y0);
-      panel.style.left = `${l}px`;
-      panel.style.top = `${t}px`;
-    };
-    const onUp = (e: PointerEvent): void => {
-      if (e.pointerId !== undefined) {
-        try {
-          title.releasePointerCapture(e.pointerId);
-        } catch {
-          /* ignore */
-        }
-      }
-      drag = null;
-      document.removeEventListener("pointermove", onMove);
-      document.removeEventListener("pointerup", onUp);
-      document.removeEventListener("pointercancel", onUp);
-      clampPanel();
-    };
-    document.addEventListener("pointermove", onMove);
-    document.addEventListener("pointerup", onUp);
-    document.addEventListener("pointercancel", onUp);
-    ev.preventDefault();
-  });
-  panel.appendChild(title);
+  header.appendChild(title);
+  panel.appendChild(header);
 
   const tabsRow = document.createElement("div");
   tabsRow.className = "fs-fr__tabs";
@@ -394,7 +343,7 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
   const onFindAll = (): void => {
     const opt = getScanOptions();
     if (opt.find.trim() === "") {
-      window.alert("请输入要查找的文本。");
+      showMessageAlert("请输入要查找的文本。");
       return;
     }
     updateHistory(findHistory, findRow.input.value);
@@ -403,7 +352,7 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
     if (hits.length === 0) {
       cursor = -1;
       clearFindResultTable();
-      window.alert("未找到所查询的数据。");
+      showMessageAlert("未找到所查询的数据。");
       return;
     }
     resultTbody.innerHTML = "";
@@ -434,7 +383,7 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
   const stepFind = (delta: 1 | -1): void => {
     const opt = getScanOptions();
     if (opt.find.trim() === "") {
-      window.alert("请输入要查找的文本。");
+      showMessageAlert("请输入要查找的文本。");
       return;
     }
     updateHistory(findHistory, findRow.input.value);
@@ -443,7 +392,7 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
     if (hits.length === 0) {
       cursor = -1;
       clearFindResultTable();
-      window.alert("未找到所查询的数据。");
+      showMessageAlert("未找到所查询的数据。");
       return;
     }
     if (resultBox.getAttribute("data-visible") === "1" && resultTbody.querySelectorAll("tr").length !== hits.length) {
@@ -460,11 +409,11 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
   const doReplaceOne = (): void => {
     const opt = getScanOptions();
     if (opt.find.trim() === "") {
-      window.alert("请输入要查找的文本。");
+      showMessageAlert("请输入要查找的文本。");
       return;
     }
     if (!isHitReplaceable(opt.lookIn)) {
-      window.alert("当前「查找范围」下无法执行替换。请选择「公式」或「值」。");
+      showMessageAlert("当前「查找范围」下无法执行替换。请选择「公式」或「值」。");
       return;
     }
     updateHistory(findHistory, findRow.input.value);
@@ -475,7 +424,7 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
     rebuildHits();
     if (hits.length === 0) {
       cursor = -1;
-      window.alert("未找到所查询的数据。");
+      showMessageAlert("未找到所查询的数据。");
       return;
     }
     if (cursor < 0 || cursor >= hits.length) {
@@ -508,11 +457,11 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
   const doReplaceAll = (): void => {
     const opt = getScanOptions();
     if (opt.find.trim() === "") {
-      window.alert("请输入要查找的文本。");
+      showMessageAlert("请输入要查找的文本。");
       return;
     }
     if (!isHitReplaceable(opt.lookIn)) {
-      window.alert("当前「查找范围」下无法执行全部替换。请选择「公式」或「值」。");
+      showMessageAlert("当前「查找范围」下无法执行全部替换。请选择「公式」或「值」。");
       return;
     }
     updateHistory(findHistory, findRow.input.value);
@@ -585,6 +534,7 @@ export function openFindReplaceDialogWithOverlay(options: OpenFindReplaceDialogO
   });
 
   setTab(initialTab);
+  attachDraggableDialogPanel(panel, header);
   requestAnimationFrame(() => {
     if (currentTab === "find") {
       findRow.input.focus();

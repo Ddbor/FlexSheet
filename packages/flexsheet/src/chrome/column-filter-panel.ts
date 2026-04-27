@@ -1,5 +1,5 @@
 import { AUTO_FILTER_BLANK_KEY } from "@flexsheet/core";
-import { columnIndexToLabel } from "@flexsheet/shared";
+import { attachDraggableDialogPanel, columnIndexToLabel } from "@flexsheet/shared";
 
 import type { FlexSheet } from "../flex-sheet.js";
 
@@ -29,6 +29,16 @@ function ensureColumnFilterStyles(): void {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+.fs-col-filter__head-drag {
+  flex-shrink: 0;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #323130;
+  background: #f3f2f1;
+  border-bottom: 1px solid #edebe9;
+  text-align: center;
 }
 .fs-col-filter__row {
   display: flex;
@@ -231,6 +241,12 @@ export function openColumnFilterPanel(options: OpenColumnFilterPanelOptions): vo
   root.setAttribute("aria-label", "列筛选");
 
   const colLetter = columnIndexToLabel(col);
+
+  const headDrag = document.createElement("div");
+  headDrag.className = "fs-col-filter__head-drag";
+  headDrag.textContent = `列 ${colLetter} · 筛选`;
+  headDrag.title = "按住可拖动";
+  root.appendChild(headDrag);
 
   const addRow = (
     label: string,
@@ -553,6 +569,7 @@ export function openColumnFilterPanel(options: OpenColumnFilterPanelOptions): vo
 
   renderList();
   positionPanel();
+  attachDraggableDialogPanel(root, headDrag);
   document.addEventListener("pointerdown", onDocDown, true);
   document.addEventListener("keydown", onKey, true);
   requestAnimationFrame(() => {

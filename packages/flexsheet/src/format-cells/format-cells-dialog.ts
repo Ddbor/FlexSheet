@@ -17,6 +17,7 @@ import {
   cssHexToFillArgb,
   showRibbonColorDialog,
 } from "@flexsheet/toolbar";
+import { attachDraggableDialogPanel } from "@flexsheet/shared";
 import { paintCellFillPatternOverlay } from "@flexsheet/renderer";
 import type { FlexSheet } from "../flex-sheet.js";
 import {
@@ -1760,6 +1761,7 @@ export function mountFormatCellsDialog(options: MountFormatCellsDialogOptions): 
   panel.appendChild(footer);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+  attachDraggableDialogPanel(panel, header);
 
   const scalar = readActiveScalar(flex);
   const sampleNum = sampleNumberForPreview(scalar);

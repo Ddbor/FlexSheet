@@ -23,6 +23,7 @@ import type {
   ConditionalFormatUiFamily,
   SelectionRange,
 } from "@flexsheet/core";
+import { attachDraggableDialogPanel, showMessageAlert } from "@flexsheet/shared";
 import { cfFormatPresetToOverlay, type CellStylePatch } from "@flexsheet/core";
 import { appendRibbonColorPaletteContent } from "./ribbon-color-picker-menu.js";
 import { cssHexToFillArgb } from "./ribbon-color-argb.js";
@@ -508,6 +509,7 @@ export function showConditionalFormatNewRuleDialog(
     dlg.appendChild(footer);
     backdrop.appendChild(dlg);
     document.body.appendChild(backdrop);
+    attachDraggableDialogPanel(dlg, header);
 
     const valueOpLabels: { v: CfValueOperator; t: string }[] = [
       { v: "between", t: "介于" },
@@ -2000,7 +2002,7 @@ export function showConditionalFormatNewRuleDialog(
     ok.addEventListener("click", () => {
       const rule = readRuleFromForm();
       if (rule === null) {
-        window.alert(
+        showMessageAlert(
           "无法应用当前规则：请选择「经典」「双色刻度」「三色刻度」或「数据条」，并填写完整条件。",
         );
         return;
@@ -2109,11 +2111,13 @@ export function showConditionalFormatManageRulesDialog(
     dlg.className = "fs-cf-dialog fs-cf-dialog--manage";
     dlg.setAttribute("role", "dialog");
     dlg.setAttribute("aria-modal", "true");
+    dlg.setAttribute("aria-labelledby", "fs-cf-manage-title");
 
     const header = document.createElement("div");
     header.className = "fs-cf-dialog__header";
     const title = document.createElement("div");
     title.className = "fs-cf-dialog__title";
+    title.id = "fs-cf-manage-title";
     title.textContent = `条件格式规则 — ${sheetLabel}`;
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
@@ -2181,6 +2185,7 @@ export function showConditionalFormatManageRulesDialog(
     dlg.appendChild(footer);
     backdrop.appendChild(dlg);
     document.body.appendChild(backdrop);
+    attachDraggableDialogPanel(dlg, header);
 
     let teardown: (() => void) | undefined = () => {
       backdrop.remove();

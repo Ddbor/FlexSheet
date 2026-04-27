@@ -6,7 +6,7 @@ import {
   type WorksheetCustomSortLevel,
 } from "@flexsheet/core";
 import { recalcWorksheet } from "@flexsheet/formula";
-import { columnIndexToLabel } from "@flexsheet/shared";
+import { attachDraggableDialogPanel, columnIndexToLabel, showMessageAlert } from "@flexsheet/shared";
 
 import { ensureCustomSortDialogStyles } from "./fs-dialog-styles.js";
 
@@ -187,6 +187,10 @@ export function openCustomSortDialogWithOverlay(options: OpenCustomSortDialogOpt
 
   const optionsPanel = document.createElement("div");
   optionsPanel.className = "fs-custom-sort__options-panel";
+  const optionsDragTitle = document.createElement("div");
+  optionsDragTitle.className = "fs-custom-sort__options-drag-title";
+  optionsDragTitle.textContent = "排序选项";
+  optionsDragTitle.title = "按住可拖动";
   const optionsGrid = document.createElement("div");
   optionsGrid.className = "fs-custom-sort__options-grid";
 
@@ -265,6 +269,7 @@ export function openCustomSortDialogWithOverlay(options: OpenCustomSortDialogOpt
   optOk.textContent = "确定";
   optActions.appendChild(optCancel);
   optActions.appendChild(optOk);
+  optionsPanel.appendChild(optionsDragTitle);
   optionsPanel.appendChild(optionsGrid);
   optionsPanel.appendChild(caseRow);
   optionsPanel.appendChild(optActions);
@@ -317,6 +322,8 @@ export function openCustomSortDialogWithOverlay(options: OpenCustomSortDialogOpt
   panel.appendChild(foot);
   overlay.appendChild(panel);
   overlay.appendChild(optionsScrim);
+  attachDraggableDialogPanel(panel, titlebar);
+  attachDraggableDialogPanel(optionsPanel, optionsDragTitle);
 
   let rowBindings: RowBinding[] = [];
   let selectedIndex = 0;
@@ -599,23 +606,23 @@ export function openCustomSortDialogWithOverlay(options: OpenCustomSortDialogOpt
 
   const tryApply = (): void => {
     if (sortOptionState.direction === "row") {
-      window.alert("按行排序功能尚未实现。");
+      showMessageAlert("按行排序功能尚未实现。");
       return;
     }
     if (sortOptionState.method === "stroke") {
-      window.alert("按笔划排序功能尚未实现。");
+      showMessageAlert("按笔划排序功能尚未实现。");
       return;
     }
     const b = getSortDataBounds();
     if (b === null) {
-      window.alert("数据行不足，无法排序。请扩大选区，或取消勾选「列表包含标题」。");
+      showMessageAlert("数据行不足，无法排序。请扩大选区，或取消勾选「列表包含标题」。");
       return;
     }
     const levels: WorksheetCustomSortLevel[] = [];
     for (const r of rowBindings) {
       const c = Math.trunc(Number(r.colSel.value));
       if (!Number.isInteger(c) || c < selectionColMin || c > selectionColMax || c < 0 || c >= colCount) {
-        window.alert("请选择有效的列。");
+        showMessageAlert("请选择有效的列。");
         return;
       }
       const so = readSortOn(r.sortOnSel.value);

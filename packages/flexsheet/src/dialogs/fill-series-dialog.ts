@@ -5,6 +5,7 @@ import {
   type Worksheet,
 } from "@flexsheet/core";
 import { FillSeriesCommand, type FillSeriesOptions } from "../commands/fill-series-command.js";
+import { attachDraggableDialogPanel } from "@flexsheet/shared";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 
 let fillSeriesStylesInjected = false;
@@ -260,6 +261,7 @@ export function showFillSeriesDialog(host: FillSeriesDialogHost): void {
   panel.appendChild(footer);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
+  attachDraggableDialogPanel(panel, header);
 
   const readType = (): FillSeriesOptions["type"] => {
     if (typeGrowth.checked) {

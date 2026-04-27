@@ -5,7 +5,7 @@ import {
   type SelectionRange,
   type Worksheet,
 } from "@flexsheet/core";
-import { columnIndexToLabel } from "@flexsheet/shared";
+import { attachDraggableDialogPanel, columnIndexToLabel } from "@flexsheet/shared";
 import { ApplyFormatAsTableCommand } from "../commands/cell-style-commands.js";
 import { ensureFsSheetPromptStyles } from "./fs-dialog-styles.js";
 import { parseFormatAsTableRangeRef } from "./format-as-table-range.js";
@@ -108,11 +108,18 @@ function showLargeTableStyleConfirmDialog(): Promise<boolean> {
     panel.setAttribute("aria-modal", "true");
     panel.setAttribute("aria-labelledby", "fs-large-op-confirm-title");
 
+    const largeHeader = document.createElement("div");
+    largeHeader.className = "fs-sheet-prompt__header";
+    const largeHeaderTitle = document.createElement("div");
+    largeHeaderTitle.id = "fs-large-op-confirm-title";
+    largeHeaderTitle.className = "fs-sheet-prompt__title";
+    largeHeaderTitle.textContent = "提示";
+    largeHeader.appendChild(largeHeaderTitle);
+
     const body = document.createElement("div");
     body.className = "fs-sheet-prompt__body fs-fs-large-confirm__body";
     const main = document.createElement("p");
     main.className = "fs-fs-large-confirm__main";
-    main.id = "fs-large-op-confirm-title";
     main.textContent = "将要执行的操作会影响大量单元格，而且可能需要很长的时间才能完成。是否继续？";
     const note = document.createElement("p");
     note.className = "fs-fs-large-confirm__note";
@@ -132,10 +139,12 @@ function showLargeTableStyleConfirmDialog(): Promise<boolean> {
     footer.appendChild(cancelBtn);
     footer.appendChild(okBtn);
 
+    panel.appendChild(largeHeader);
     panel.appendChild(body);
     panel.appendChild(footer);
     overlay.appendChild(panel);
     document.body.appendChild(overlay);
+    attachDraggableDialogPanel(panel, largeHeader);
 
     let done = false;
     note.textContent = "注意：请确认是否继续执行该操作。";
@@ -315,6 +324,7 @@ export function showFormatAsTableDialog(
   overlay.appendChild(rangePickBar);
 
   document.body.appendChild(overlay);
+  attachDraggableDialogPanel(panel, header);
 
   let rangePicking = false;
 
