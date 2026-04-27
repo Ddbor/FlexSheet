@@ -435,6 +435,22 @@ export class Worksheet {
     this.refreshAutoFilterConcealment();
   }
 
+  /** 清除工作表上全部列自动筛选（与 Excel「清除筛选」一致）。 */
+  clearAllColumnAutoFilters(): void {
+    if (this.autoFilterByCol.size === 0) {
+      return;
+    }
+    this.autoFilterByCol.clear();
+    this.refreshAutoFilterConcealment();
+  }
+
+  /**
+   * 按当前各列筛选条件重新计算应隐藏的行（与 Excel「重新应用」、数据变更后一致）。
+   */
+  reapplyAutoFilterConcealment(): void {
+    this.refreshAutoFilterConcealment();
+  }
+
   /**
    * XLSX 导入：恢复 Excel「表格」的列筛选（表头行在表体绘制下拉按钮，作用域为数据行闭区间）。
    * 应在单元格与 `registerTableStyleRegion` 写入之后调用。

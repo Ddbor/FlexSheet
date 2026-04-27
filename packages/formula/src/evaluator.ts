@@ -48,6 +48,45 @@ export function evaluateAst(node: AstNode, ctx: EvalContext): CellScalar {
         }
         return sum;
       }
+      if (name === "AVERAGE" || name === "AVG") {
+        const nums: number[] = [];
+        for (const arg of node.args) {
+          forEachNumericInCallArgument(arg, ctx, (n) => {
+            nums.push(n);
+          });
+        }
+        if (nums.length === 0) {
+          return null;
+        }
+        return nums.reduce((a, b) => a + b, 0) / nums.length;
+      }
+      if (name === "COUNT") {
+        let n = 0;
+        for (const arg of node.args) {
+          forEachNumericInCallArgument(arg, ctx, () => {
+            n += 1;
+          });
+        }
+        return n;
+      }
+      if (name === "MAX") {
+        let m: number | null = null;
+        for (const arg of node.args) {
+          forEachNumericInCallArgument(arg, ctx, (v) => {
+            m = m === null ? v : Math.max(m, v);
+          });
+        }
+        return m;
+      }
+      if (name === "MIN") {
+        let m: number | null = null;
+        for (const arg of node.args) {
+          forEachNumericInCallArgument(arg, ctx, (v) => {
+            m = m === null ? v : Math.min(m, v);
+          });
+        }
+        return m;
+      }
       return null;
     }
     default:
@@ -66,6 +105,43 @@ function evalSumArgument(node: AstNode, ctx: EvalContext): number {
     return s;
   }
   return toNumber(evaluateAst(node, ctx));
+}
+
+/** 与 Excel 接近：仅对可解析为数字的标量计值（`COUNT` / `AVERAGE` / `MAX` / `MIN`）。 */
+function tryNumberFromScalar(v: CellScalar): number | null {
+  if (v === null || v === "") {
+    return null;
+  }
+  if (typeof v === "number") {
+    return Number.isFinite(v) ? v : null;
+  }
+  if (typeof v === "boolean") {
+    return v ? 1 : 0;
+  }
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function forEachNumericInCallArgument(
+  node: AstNode,
+  ctx: EvalContext,
+  fn: (n: number) => void,
+): void {
+  if (node.type === "range") {
+    for (let r = node.startRow; r <= node.endRow; r++) {
+      for (let c = node.startCol; c <= node.endCol; c++) {
+        const t = tryNumberFromScalar(ctx.getScalar(r, c));
+        if (t !== null) {
+          fn(t);
+        }
+      }
+    }
+    return;
+  }
+  const t = tryNumberFromScalar(evaluateAst(node, ctx));
+  if (t !== null) {
+    fn(t);
+  }
 }
 
 export function toNumber(v: CellScalar): number {

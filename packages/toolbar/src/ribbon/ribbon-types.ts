@@ -108,6 +108,12 @@ export interface FlexSheetLike {
   ): void;
   /** 打开简单自定义排序对话框（列标 + 升/降序）。 */
   openCustomSortDialog?(): void;
+  /** 按选区与活动单元格启用列自动筛选（与右键「筛选」一致）。 */
+  enableColumnAutoFilterFromSelection?(): void;
+  /** 清除工作表上全部列自动筛选。 */
+  clearAllColumnAutoFilters?(): void;
+  /** 按当前筛选条件重新计算隐藏行。 */
+  reapplyAutoFilterConcealment?(): void;
   /** 条件格式：追加一条规则（Ribbon 对话框确定后调用，可撤销）。 */
   addConditionalFormatRuleFromUi?(rule: ConditionalFormatRule): void;
   /** 条件格式：替换当前表全部规则（管理规则对话框，可撤销）。 */
@@ -132,6 +138,14 @@ export interface FlexSheetLike {
   clearSelectionFormats?(): void;
   /** Ribbon「清除」：清除当前选区内容与格式。 */
   clearSelectionAll?(): void;
+  /**
+   * Ribbon「自动求和」主钮 / 下拉里「求和、平均值…」：在活跃格插入 `=SUM` 等并推测区域、显示参数提示。
+   */
+  applyAutoSumFromRibbon?(
+    aggregate: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN",
+  ): void;
+  /** Ribbon「其他函数…」（`formula.fn.more`、自动求和下拉）打开插入函数相关 UI。 */
+  openInsertFunctionDialogFromRibbon?(): void;
   /** Ribbon「套用表格格式」：读取“自定义”分组样式项。 */
   getCustomTableStyleEntries?(): readonly RibbonCustomTableStyleEntry[];
 }

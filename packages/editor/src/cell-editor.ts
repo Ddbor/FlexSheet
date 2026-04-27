@@ -40,6 +40,12 @@ export interface BeginEditOptions {
   /** 指针屏幕 X：传入时按该 X 定位插入点（通常由画布双击传入）。 */
   readonly cursorClientX?: number;
   /**
+   * 程序化设置插入/选中文本范围（如 `=SUM()` 将光标置于括号内）。
+   * 优先于 `selectAll`；与 `cursorClientX` 互斥时以 `cursorClientX` 为准。
+   */
+  readonly selectionStart?: number;
+  readonly selectionEnd?: number;
+  /**
    * 为 false 时插入点在文本末尾、不全选。
    * 未传 `cursorClientX` 时默认 true：全选（便于程序化打开后整格替换）。
    */
@@ -148,6 +154,12 @@ export class CellEditor {
       requestAnimationFrame(() => {
         this.applyTextCaretFromClientX(cx);
       });
+    } else if (options?.selectionStart !== undefined) {
+      const a = Math.max(0, Math.min(options.selectionStart, initialText.length));
+      const b = Math.max(0, Math.min(options.selectionEnd ?? a, initialText.length));
+      requestAnimationFrame(() => {
+        this.input.setSelectionRange(a, b);
+      });
     } else if (options?.selectAll === false) {
       const len = initialText.length;
       this.input.setSelectionRange(len, len);
@@ -160,6 +172,37 @@ export class CellEditor {
   /** 当前内联编辑中的文本；未编辑时为空串。 */
   getEditingText(): string {
     return this.editing ? this.input.value : "";
+  }
+
+  /** 内联编辑中的单元格（合并格为锚点格）；未编辑时返回 `null`。 */
+  getEditingCell(): { readonly row: number; readonly col: number } | null {
+    if (!this.editing) {
+      return null;
+    }
+    return { row: this.editingRow, col: this.editingCol };
+  }
+
+  /**
+   * 编程更新编辑中文本与选区（不结束编辑），并触发 `onEditTextChange`。
+   */
+  setEditingText(text: string, selectionStart?: number, selectionEnd?: number): void {
+    if (!this.editing) {
+      return;
+    }
+    this.input.value = text;
+    const len = text.length;
+    const a = selectionStart === undefined ? len : Math.max(0, Math.min(selectionStart, len));
+    const b = selectionEnd === undefined ? a : Math.max(0, Math.min(selectionEnd, len));
+    this.input.setSelectionRange(a, b);
+    this.applyAutoSizeByContent();
+    this.onEditTextChange?.(text);
+  }
+
+  refocusInput(): void {
+    if (!this.editing) {
+      return;
+    }
+    this.input.focus();
   }
 
   /** 布局变化（滚动、resize）时同步 input 位置。 */

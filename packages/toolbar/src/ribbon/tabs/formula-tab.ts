@@ -1,4 +1,5 @@
 import { createToolbarButton, createToolbarDropdown, type RibbonEmit } from "../../toolbar/index.js";
+import { mountAutoSumSubmenu } from "../home-autosum-menu.js";
 import { iconAudit, iconFunction } from "../../toolbar/icons.js";
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { RibbonTabId } from "../ribbon-types.js";
@@ -31,12 +32,23 @@ export function mountFormulaTab(panel: HTMLElement, emit: RibbonEmit): void {
         emit,
       ).element,
     );
-    row.appendChild(
-      createToolbarButton(
-        { id: "formula.autoSum", tab: TAB, label: "自动求和", icon: iconFunction(), variant: "large" },
+    {
+      const asBtn = createToolbarButton(
+        {
+          id: "formula.autoSum",
+          tab: TAB,
+          label: "自动求和",
+          icon: iconFunction(),
+          variant: "large",
+          splitDropdown: true,
+          title: "自动求和 / 其他函数",
+        },
         emit,
-      ).element,
-    );
+      );
+      asBtn.element.id = "fs-ribbon-formula-autosum";
+      mountAutoSumSubmenu(asBtn.element, emit, TAB);
+      row.appendChild(asBtn.element);
+    }
     content.appendChild(row);
     inner.appendChild(root);
   }

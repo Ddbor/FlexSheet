@@ -155,7 +155,6 @@ function drawPivotEmptyStateIllustration(
 
   const bx = cx - r * 0.55;
   const by = cy - r * 0.42;
-  const bw = r * 1.1;
   const bh = r * 0.88;
   const rowGap = bh / 3.2;
   for (let i = 0; i < 3; i++) {

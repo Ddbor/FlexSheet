@@ -322,6 +322,56 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.clearSelectionAll();
       return true;
     }
+    case "home.cells.autoSum":
+    case "formula.autoSum": {
+      if (fs.applyAutoSumFromRibbon === undefined) {
+        return false;
+      }
+      fs.applyAutoSumFromRibbon("SUM");
+      return true;
+    }
+    case "autoSum.sub.sum": {
+      if (fs.applyAutoSumFromRibbon === undefined) {
+        return false;
+      }
+      fs.applyAutoSumFromRibbon("SUM");
+      return true;
+    }
+    case "autoSum.sub.average": {
+      if (fs.applyAutoSumFromRibbon === undefined) {
+        return false;
+      }
+      fs.applyAutoSumFromRibbon("AVERAGE");
+      return true;
+    }
+    case "autoSum.sub.count": {
+      if (fs.applyAutoSumFromRibbon === undefined) {
+        return false;
+      }
+      fs.applyAutoSumFromRibbon("COUNT");
+      return true;
+    }
+    case "autoSum.sub.max": {
+      if (fs.applyAutoSumFromRibbon === undefined) {
+        return false;
+      }
+      fs.applyAutoSumFromRibbon("MAX");
+      return true;
+    }
+    case "autoSum.sub.min": {
+      if (fs.applyAutoSumFromRibbon === undefined) {
+        return false;
+      }
+      fs.applyAutoSumFromRibbon("MIN");
+      return true;
+    }
+    case "formula.fn.more": {
+      if (fs.openInsertFunctionDialogFromRibbon === undefined) {
+        return false;
+      }
+      fs.openInsertFunctionDialogFromRibbon();
+      return true;
+    }
     case "home.align.top":
       fs.applySelectionStylePatch({ vAlign: "top" });
       return true;
@@ -399,22 +449,49 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.applySelectionStylePatch({ textOrientation: "rotateDown90" });
       return true;
     case "data.sort.asc":
-    case "data.sort.desc": {
+    case "data.sort.desc":
+    case "home.sortFilter.asc":
+    case "home.sortFilter.desc": {
       if (fs.sortSelectionRowsByKeyColumn === undefined) {
         return false;
       }
       const ac = fs.selection.getActiveCell();
+      const direction: "asc" | "desc" =
+        ev.id === "data.sort.asc" || ev.id === "home.sortFilter.asc" ? "asc" : "desc";
       fs.sortSelectionRowsByKeyColumn(ac.col, {
         type: "value",
-        direction: ev.id === "data.sort.asc" ? "asc" : "desc",
+        direction,
       });
       return true;
     }
-    case "data.sort.custom": {
+    case "data.sort.custom":
+    case "home.sortFilter.custom": {
       if (fs.openCustomSortDialog === undefined) {
         return false;
       }
       fs.openCustomSortDialog();
+      return true;
+    }
+    case "data.filter.toggle":
+    case "home.sortFilter.filter": {
+      if (fs.enableColumnAutoFilterFromSelection === undefined) {
+        return false;
+      }
+      fs.enableColumnAutoFilterFromSelection();
+      return true;
+    }
+    case "home.sortFilter.clear": {
+      if (fs.clearAllColumnAutoFilters === undefined) {
+        return false;
+      }
+      fs.clearAllColumnAutoFilters();
+      return true;
+    }
+    case "home.sortFilter.reapply": {
+      if (fs.reapplyAutoFilterConcealment === undefined) {
+        return false;
+      }
+      fs.reapplyAutoFilterConcealment();
       return true;
     }
     case "home.style.conditional.newRule":

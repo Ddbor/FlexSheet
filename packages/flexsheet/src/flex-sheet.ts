@@ -88,6 +88,7 @@ import { showFormatAsTableDialog } from "./dialogs/format-as-table-dialog.js";
 import { ensureFsSheetPromptStyles } from "./dialogs/fs-dialog-styles.js";
 import { showFillSeriesDialog } from "./dialogs/fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./dialogs/new-table-style-dialog.js";
+import { parseFormatAsTableRangeRef } from "./dialogs/format-as-table-range.js";
 import { showPivotTableDialog } from "./pivot/pivot-table-dialog.js";
 import {
   syncPivotTableFieldsPaneWithSelection,
@@ -98,6 +99,7 @@ import { useSheetContextMenu } from "./plugins/sheet-context-menu-plugin.js";
 import { mountFormatCellsDialog } from "./format-cells/format-cells-dialog.js";
 import { useUndoRedo } from "./plugins/undo-redo-plugin.js";
 import { AutofillExtendCommand } from "./commands/autofill-extend-command.js";
+import { computeAutoSumRange } from "./util/compute-auto-sum-range.js";
 
 /** 指针命中画布表面时的区域类型（供右键菜单等扩展使用）。 */
 export type FlexSheetSurfaceHit =
@@ -199,6 +201,30 @@ export class FlexSheet {
   private readonly workbookReplacedListeners = new Set<() => void>();
   /** 复制/剪切后的走马灯虚线框范围（与当前选区独立）。 */
   private clipboardMarqueeRange: SelectionRange | null = null;
+  /** 自动求和等公式编辑中，在参照区域上绘制的虚线预览（与 `SelectionPaintSnapshot.formulaReferencePreviewRange` 一致）。 */
+  private formulaRefPreviewRange: SelectionRange | null = null;
+  /**
+   * 在仅插入 `=函数()` 时显示参数提示；插入完整区域引用后不显示。
+   * 与 `cellEditor` 的 `onEditTextChange` 联动。
+   */
+  private functionHintMode: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN" | null = null;
+  private functionHintEl: HTMLDivElement | null = null;
+  /**
+   * 内联 `=函数()` 在表体上点选/拖拽时，用锚点+对角格构成引用并写回编辑框（与 Excel 选区线一致，不结束编辑）。
+   */
+  private inlineFormulaRefDrag: {
+    readonly fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN";
+    readonly editRow: number;
+    readonly editCol: number;
+    readonly anchorR: number;
+    readonly anchorC: number;
+    focusR: number;
+    focusC: number;
+  } | null = null;
+  /**
+   * 自动求和/空参或单区引用时的「表体选区」模式：在 Enter、Esc 或结束编辑前可反复点/拖重选，不因第二次按下而退格为普通点格。
+   */
+  private formulaArgRangeSession = false;
   /** 延迟剪切：已写入剪贴板但源格尚未清空，粘贴匹配内部载荷后再清源区（与 Excel 一致）。 */
   private pendingClipboardCut: { sheet: Worksheet; range: SelectionRange } | null = null;
   /** 「自定义排序」对话框根节点（打开时独占，关闭时移除）。 */
@@ -262,9 +288,13 @@ export class FlexSheet {
               this.fillDrag.previewRow,
               this.fillDrag.previewCol,
             ),
+            formulaReferencePreviewRange: this.formulaRefPreviewRange,
           };
         }
-        return base;
+        return {
+          ...base,
+          formulaReferencePreviewRange: this.formulaRefPreviewRange,
+        };
       },
       getClipboardMarqueeRange: () => this.clipboardMarqueeRange,
     });
@@ -291,8 +321,10 @@ export class FlexSheet {
         if (this.formulaBarInputEl !== null && document.activeElement !== this.formulaBarInputEl) {
           this.formulaBarInputEl.value = text;
         }
+        this.updateAutoSumFunctionHintFromEditText(text);
       },
       onEditEnd: () => {
+        this.clearAutoSumFormulaPreviewUi();
         this.syncFormulaBar();
         queueMicrotask(() => {
           this.canvas.focus();
@@ -503,6 +535,309 @@ export class FlexSheet {
   }
 
   /**
+   * Ribbon「自动求和」主钮及下拉：在活跃单元格插入聚合公式，并尽量推测数据区域、显示参照预览与空参时的函数提示。
+   * 与 `home.cells.autoSum`、`formula.autoSum`、`autoSum.sub.*` 一致。
+   */
+  applyAutoSumFromRibbon(aggregate: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN" = "SUM"): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.clearAutoSumFunctionHint();
+    this.formulaRefPreviewRange = null;
+    this.formulaArgRangeSession = false;
+    this.functionHintMode = null;
+    this.renderer.requestRedraw();
+
+    const ac = this.selection.getActiveCell();
+    const anchor = sheet.getMergeAnchorCell(ac.row, ac.col);
+    const dataRange = computeAutoSumRange(sheet, anchor.row, anchor.col);
+
+    if (dataRange !== null) {
+      this.formulaRefPreviewRange = dataRange;
+      const refText = this.makeA1RefFromRange(dataRange, sheet);
+      const text = `=${aggregate}(${refText})`;
+      this.beginEditAt(anchor.row, anchor.col, { initialTextOverride: text, selectAll: false });
+    } else {
+      const paren = `=${aggregate}()`;
+      this.functionHintMode = aggregate;
+      this.beginEditAt(anchor.row, anchor.col, {
+        initialTextOverride: paren,
+        selectAll: false,
+        selectionStart: 1 + aggregate.length + 1,
+        selectionEnd: 1 + aggregate.length + 1,
+      });
+    }
+    this.revealActiveCellInViewport();
+    this.formulaArgRangeSession = true;
+    this.updateAutoSumFunctionHintFromEditText(this.cellEditor.getEditingText());
+    this.refresh();
+  }
+
+  private makeA1RefFromRange(range: SelectionRange, _sheet: Worksheet): string {
+    const a = normalizeSelectionRange(range);
+    const c0 = columnIndexToLabel(a.startCol);
+    const c1 = columnIndexToLabel(a.endCol);
+    const r0 = a.startRow + 1;
+    const r1 = a.endRow + 1;
+    if (a.startRow === a.endRow && a.startCol === a.endCol) {
+      return `${c0}${r0}`;
+    }
+    return `${c0}${r0}:${c1}${r1}`;
+  }
+
+  /**
+   * 解析为「仅一个 A1/区域 参数（或空）」的聚合，用于表体选区；多参、表名、复杂表达式均返回 `null`。
+   */
+  private parseSingleArgAggregateRef(
+    text: string,
+  ): {
+    fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN";
+    isEmpty: boolean;
+    range: SelectionRange | null;
+  } | null {
+    const t = text.trim();
+    const m = /^=(SUM|AVERAGE|AVG|COUNT|MAX|MIN)\(([^)]*)\)\s*$/i.exec(t);
+    if (m === null) {
+      return null;
+    }
+    const inner = (m[2] ?? "").trim();
+    if (inner.includes(",")) {
+      return null;
+    }
+    if (inner !== "" && /[!]/.test(inner)) {
+      return null;
+    }
+    let f = m[1].toUpperCase();
+    if (f === "AVG") {
+      f = "AVERAGE";
+    }
+    if (f !== "SUM" && f !== "AVERAGE" && f !== "COUNT" && f !== "MAX" && f !== "MIN") {
+      return null;
+    }
+    const fn = f as "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN";
+    if (inner === "") {
+      return { fn, isEmpty: true, range: null };
+    }
+    const r = parseFormatAsTableRangeRef(inner);
+    if (r === null) {
+      return null;
+    }
+    return { fn, isEmpty: false, range: r };
+  }
+
+  private shouldStartInlineRefDragOnBody(): boolean {
+    if (this.rangeReferencePick !== null) {
+      return false;
+    }
+    if (!this.cellEditor.isEditing()) {
+      return false;
+    }
+    const p = this.parseSingleArgAggregateRef(this.cellEditor.getEditingText());
+    if (p === null) {
+      return false;
+    }
+    if (p.isEmpty) {
+      return true;
+    }
+    return this.formulaArgRangeSession;
+  }
+
+  private beginInlineFormulaRefDrag(
+    sheet: Worksheet,
+    hit: { row: number; col: number },
+    ev: PointerEvent,
+  ): void {
+    const p = this.parseSingleArgAggregateRef(this.cellEditor.getEditingText());
+    const ed = this.cellEditor.getEditingCell();
+    if (p === null || ed === null) {
+      return;
+    }
+    if (!p.isEmpty && !this.formulaArgRangeSession) {
+      return;
+    }
+    this.formulaArgRangeSession = true;
+    const a0 = sheet.getMergeAnchorCell(hit.row, hit.col);
+    this.inlineFormulaRefDrag = {
+      fn: p.fn,
+      editRow: ed.row,
+      editCol: ed.col,
+      anchorR: a0.row,
+      anchorC: a0.col,
+      focusR: a0.row,
+      focusC: a0.col,
+    };
+    this.updateInlineFormulaRefTextAndPreview();
+    ev.preventDefault();
+    this.lastDragClientX = ev.clientX;
+    this.lastDragClientY = ev.clientY;
+    this.dragPointerId = ev.pointerId;
+    this.attachDocumentDragListeners();
+    try {
+      this.canvas.setPointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+    this.applyPointerCursor("crosshair");
+    this.renderer.requestRedraw();
+    queueMicrotask(() => {
+      this.cellEditor.refocusInput();
+    });
+  }
+
+  private updateInlineFormulaRefTextAndPreview(): void {
+    if (this.inlineFormulaRefDrag === null) {
+      return;
+    }
+    const d = this.inlineFormulaRefDrag;
+    const n = normalizeSelectionRange({
+      startRow: d.anchorR,
+      startCol: d.anchorC,
+      endRow: d.focusR,
+      endCol: d.focusC,
+    });
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const ref = this.makeA1RefFromRange(n, sheet);
+    const text = `=${d.fn}(${ref})`;
+    const tlen = text.length;
+    this.formulaRefPreviewRange = n;
+    this.functionHintMode = null;
+    this.hideAutoSumFunctionHintElementOnly();
+    this.cellEditor.setEditingText(text, tlen, tlen);
+    this.updateAutoSumFunctionHintFromEditText(this.cellEditor.getEditingText());
+    this.cellEditor.syncLayout();
+    this.renderer.requestRedraw();
+  }
+
+  private hideAutoSumFunctionHintElementOnly(): void {
+    if (this.functionHintEl !== null) {
+      this.functionHintEl.style.display = "none";
+    }
+  }
+
+  private clearAutoSumFunctionHint(): void {
+    this.functionHintMode = null;
+    this.hideAutoSumFunctionHintElementOnly();
+  }
+
+  private clearAutoSumFormulaPreviewUi(): void {
+    this.clearAutoSumFunctionHint();
+    this.formulaRefPreviewRange = null;
+    this.formulaArgRangeSession = false;
+  }
+
+  private updateAutoSumFunctionHintFromEditText(text: string): void {
+    if (this.functionHintMode === null) {
+      this.hideAutoSumFunctionHintElementOnly();
+      return;
+    }
+    const fn = this.functionHintMode;
+    const re = new RegExp(`^=${fn}\\(\\s*\\)$`, "i");
+    if (re.test(text.trimEnd())) {
+      this.ensureAndShowFunctionHintFor(fn);
+    } else {
+      this.hideAutoSumFunctionHintElementOnly();
+    }
+  }
+
+  private ensureAndShowFunctionHintFor(fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN"): void {
+    if (this.functionHintEl === null) {
+      const el = document.createElement("div");
+      el.className = "fs-autosum-fx-hint";
+      el.setAttribute("role", "tooltip");
+      el.style.cssText = [
+        "position:absolute",
+        "z-index:30",
+        "display:none",
+        "min-width:220px",
+        "max-width:min(400px,92vw)",
+        "padding:8px 10px",
+        "background:#fff",
+        "color:#201f1e",
+        "border:1px solid #c8c6c4",
+        "box-shadow:0 2px 6px rgba(0,0,0,.12)",
+        "font:12px/1.45 system-ui,-apple-system,sans-serif",
+        "pointer-events:none",
+      ].join(";");
+      this.functionHintEl = el;
+      this.host.appendChild(el);
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const { row, col } = this.selection.getActiveCell();
+    const a = sheet.getMergeAnchorCell(row, col);
+    const rect = this.renderer.getCellRectInCanvasPixels(a.row, a.col);
+    if (rect === null) {
+      return;
+    }
+    const { param, desc } = this.getLocalFunctionHelpStrings(fn);
+    this.functionHintEl.innerHTML = "";
+    const sigLine = document.createElement("div");
+    sigLine.style.cssText = "word-break:break-all;margin:0 0 6px";
+    this.appendFunctionHintSignature(sigLine, fn, param);
+    this.functionHintEl.appendChild(sigLine);
+    const sumLabel = document.createElement("div");
+    sumLabel.style.cssText = "color:#201f1e;font-weight:600;font-size:11px;margin:0 0 2px";
+    sumLabel.textContent = "概要";
+    this.functionHintEl.appendChild(sumLabel);
+    const body = document.createElement("p");
+    body.style.cssText = "margin:0;white-space:pre-wrap;word-break:break-word";
+    body.textContent = desc;
+    this.functionHintEl.appendChild(body);
+
+    this.functionHintEl.style.display = "block";
+    this.functionHintEl.style.left = `${rect.x}px`;
+    this.functionHintEl.style.top = `${rect.y + rect.height + 4}px`;
+  }
+
+  private getLocalFunctionHelpStrings(fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN"): {
+    readonly param: string;
+    readonly desc: string;
+  } {
+    if (fn === "SUM") {
+      return { param: "number1", desc: "此函数返回某一单元格区域中所有数字之和。" };
+    }
+    if (fn === "AVERAGE") {
+      return { param: "number1", desc: "此函数返回其参数的算术平均值。" };
+    }
+    if (fn === "COUNT") {
+      return { param: "value1", desc: "此函数会统计所给参数中数字的个数。" };
+    }
+    if (fn === "MAX") {
+      return { param: "number1", desc: "此函数返回一组数中的最大数值。" };
+    }
+    return { param: "number1", desc: "此函数返回一组数中的最小数值。" };
+  }
+
+  private appendFunctionHintSignature(
+    el: HTMLDivElement,
+    fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN",
+    firstParam: string,
+  ): void {
+    const head = document.createElement("span");
+    head.appendChild(document.createTextNode(`${fn}(`));
+    const hi = document.createElement("span");
+    hi.textContent = firstParam;
+    hi.style.background = "#fff4cc";
+    const mid = document.createTextNode(", number2, ...)");
+    el.appendChild(head);
+    el.appendChild(hi);
+    el.appendChild(mid);
+  }
+
+  private syncAutoSumFunctionHintLayout(): void {
+    if (this.functionHintMode === null || this.functionHintEl === null) {
+      return;
+    }
+    this.updateAutoSumFunctionHintFromEditText(this.cellEditor.getEditingText());
+  }
+
+  /**
    * 屏幕坐标命中画布：左上角全选角、列标题、行标题或单元格。
    * 坐标不在画布矩形内时返回 null。
    */
@@ -530,6 +865,7 @@ export class FlexSheet {
 
   refresh(): void {
     this.cellEditor.syncLayout();
+    this.syncAutoSumFunctionHintLayout();
     this.renderer.requestRedraw();
   }
 
@@ -1174,6 +1510,49 @@ export class FlexSheet {
     this.refresh();
   }
 
+  /**
+   * 按当前选区启用列自动筛选（与右键「筛选」、数据选项卡「筛选」一致；
+   * 活动单元格行/列 + 选区行范围，下拉绘制在表体顶行等逻辑见 `Worksheet.enableColumnAutoFilterFromSelection`）。
+   */
+  enableColumnAutoFilterFromSelection(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    const ac = this.selection.getActiveCell();
+    sheet.enableColumnAutoFilterFromSelection(ac.row, ac.col, this.selection.getNormalizedRange());
+    this.refresh();
+  }
+
+  /** 清除当前工作表上全部列自动筛选。 */
+  clearAllColumnAutoFilters(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    sheet.clearAllColumnAutoFilters();
+    this.refresh();
+  }
+
+  /** 按当前筛选条件重新计算隐藏行（「重新应用」）。 */
+  reapplyAutoFilterConcealment(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    sheet.reapplyAutoFilterConcealment();
+    this.refresh();
+  }
+
   /** 简单「自定义排序」：指定列标与升/降序，在选区行范围内按值排序。 */
   openCustomSortDialog(): void {
     if (this.isCellEditing()) {
@@ -1532,6 +1911,8 @@ export class FlexSheet {
   destroy(): void {
     this.cancelDragAutoscrollRaf();
     this.headingDrag = null;
+    this.inlineFormulaRefDrag = null;
+    this.formulaArgRangeSession = false;
     this.detachDocumentDragListeners();
     this.renderer.cancelPendingRedraw();
     this.hideResizePreviewLine();
@@ -1686,6 +2067,30 @@ export class FlexSheet {
       return;
     }
 
+    if (this.inlineFormulaRefDrag !== null) {
+      this.cancelDragAutoscrollRaf();
+      this.inlineFormulaRefDrag = null;
+      this.dragPointerId = null;
+      this.detachDocumentDragListeners();
+      if (ev !== undefined) {
+        try {
+          this.canvas.releasePointerCapture(ev.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      this.applyPointerCursor("default");
+      const t = this.cellEditor.getEditingText();
+      const tlen = t.length;
+      this.cellEditor.setEditingText(t, tlen, tlen);
+      queueMicrotask(() => {
+        this.cellEditor.refocusInput();
+      });
+      this.updateAutoSumFunctionHintFromEditText(t);
+      this.refresh();
+      return;
+    }
+
     if (!this.dragSelecting) {
       return;
     }
@@ -1760,7 +2165,8 @@ export class FlexSheet {
       (!this.dragSelecting &&
         !this.resizing &&
         this.headingDrag === null &&
-        this.fillDrag === null) ||
+        this.fillDrag === null &&
+        this.inlineFormulaRefDrag === null) ||
       ev.pointerId !== this.dragPointerId
     ) {
       return;
@@ -1773,7 +2179,8 @@ export class FlexSheet {
       this.resizing ||
       this.dragSelecting ||
       this.headingDrag !== null ||
-      this.fillDrag !== null
+      this.fillDrag !== null ||
+      this.inlineFormulaRefDrag !== null
     ) {
       return;
     }
@@ -1838,6 +2245,25 @@ export class FlexSheet {
         previewCol: hit.col,
       };
       this.renderer.requestRedraw();
+      return;
+    }
+    if (this.inlineFormulaRefDrag !== null) {
+      this.lastDragClientX = ev.clientX;
+      this.lastDragClientY = ev.clientY;
+      const sh = this.workbook.getActiveSheet();
+      if (sh !== undefined) {
+        const hit = this.hitTestClient(ev.clientX, ev.clientY, { clampToBody: true });
+        if (hit !== null) {
+          const a1 = sh.getMergeAnchorCell(hit.row, hit.col);
+          this.inlineFormulaRefDrag.focusR = a1.row;
+          this.inlineFormulaRefDrag.focusC = a1.col;
+          this.updateInlineFormulaRefTextAndPreview();
+        }
+      }
+      this.renderer.requestRedraw();
+      if (this.isDragAutoscrollActive(ev.clientX, ev.clientY)) {
+        this.ensureDragAutoscrollRaf();
+      }
       return;
     }
     if (this.headingDrag !== null) {
@@ -1911,14 +2337,24 @@ export class FlexSheet {
           ? cell.formula
           : cellScalarToEditString(cell.value);
 
-    const editorOpts: BeginEditOptions | undefined =
-      options?.cursorClientX !== undefined
-        ? { cursorClientX: options.cursorClientX }
-        : options?.initialTextOverride !== undefined
-          ? { selectAll: false }
-          : options?.selectAll !== undefined
-            ? { selectAll: options.selectAll }
-            : undefined;
+    let editorOpts: BeginEditOptions | undefined;
+    if (options?.cursorClientX !== undefined) {
+      editorOpts = { cursorClientX: options.cursorClientX };
+    } else if (options?.selectionStart !== undefined) {
+      editorOpts = {
+        selectAll: false,
+        selectionStart: options.selectionStart,
+        selectionEnd: options.selectionEnd,
+      };
+    } else if (options?.selectAll === false) {
+      editorOpts = { selectAll: false };
+    } else if (options?.initialTextOverride !== undefined) {
+      editorOpts = { selectAll: false };
+    } else if (options?.selectAll === true) {
+      editorOpts = { selectAll: true };
+    } else {
+      editorOpts = undefined;
+    }
     this.cellEditor.beginEdit(anchor.row, anchor.col, text, rect, editorOpts);
   }
 
@@ -1972,7 +2408,6 @@ export class FlexSheet {
     if (ev.button !== 0) {
       return;
     }
-    this.canvas.focus();
 
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) {
@@ -1981,6 +2416,7 @@ export class FlexSheet {
 
     const headingHit = this.hitTestHeadingFromClient(ev.clientX, ev.clientY);
     if (headingHit !== null) {
+      this.canvas.focus();
       const resizeHit = this.tryHitResizeHandle(headingHit, ev.clientX, ev.clientY);
       if (resizeHit !== null) {
         ev.preventDefault();
@@ -2051,6 +2487,7 @@ export class FlexSheet {
     const bodyFilterCol = this.tryHitBodyAutoFilterFromClient(ev.clientX, ev.clientY);
     if (bodyFilterCol !== null) {
       if (this.rangeReferencePick === null) {
+        this.canvas.focus();
         ev.preventDefault();
         if (this.cellEditor.isEditing()) {
           this.cellEditor.cancelWithoutCommit();
@@ -2061,6 +2498,7 @@ export class FlexSheet {
     }
 
     if (this.tryOpenPivotFilterFromClient(ev.clientX, ev.clientY)) {
+      this.canvas.focus();
       ev.preventDefault();
       if (this.cellEditor.isEditing()) {
         this.cellEditor.cancelWithoutCommit();
@@ -2069,6 +2507,7 @@ export class FlexSheet {
     }
 
     if (this.tryHitFillHandle(ev.clientX, ev.clientY)) {
+      this.canvas.focus();
       ev.preventDefault();
       if (this.cellEditor.isEditing()) {
         this.cellEditor.cancelWithoutCommit();
@@ -2098,8 +2537,14 @@ export class FlexSheet {
 
     const hit = this.hitTestClient(ev.clientX, ev.clientY);
     if (hit === null) {
+      this.canvas.focus();
       return;
     }
+    if (this.rangeReferencePick === null && this.shouldStartInlineRefDragOnBody()) {
+      this.beginInlineFormulaRefDrag(sheet, hit, ev);
+      return;
+    }
+    this.canvas.focus();
     if (this.cellEditor.isEditing()) {
       this.cellEditor.cancelWithoutCommit();
     }
@@ -3123,7 +3568,7 @@ export class FlexSheet {
 
   private readonly dragAutoscrollLoop = (): void => {
     this.dragAutoscrollRafId = null;
-    if (!this.dragSelecting && this.headingDrag === null) {
+    if (!this.dragSelecting && this.headingDrag === null && this.inlineFormulaRefDrag === null) {
       return;
     }
 
@@ -3140,6 +3585,19 @@ export class FlexSheet {
       this.renderer.applyScrollDelta(sx * dt, sy * dt);
       if (this.headingDrag !== null) {
         this.applyHeadingDragSelectionFromClient(this.lastDragClientX, this.lastDragClientY);
+      } else if (this.inlineFormulaRefDrag !== null) {
+        const sh = this.workbook.getActiveSheet();
+        if (sh !== undefined) {
+          const hit = this.hitTestClient(this.lastDragClientX, this.lastDragClientY, {
+            clampToBody: true,
+          });
+          if (hit !== null) {
+            const a1 = sh.getMergeAnchorCell(hit.row, hit.col);
+            this.inlineFormulaRefDrag.focusR = a1.row;
+            this.inlineFormulaRefDrag.focusC = a1.col;
+            this.updateInlineFormulaRefTextAndPreview();
+          }
+        }
       } else {
         const hit = this.hitTestClient(this.lastDragClientX, this.lastDragClientY, {
           clampToBody: true,
@@ -3153,7 +3611,7 @@ export class FlexSheet {
     }
 
     if (
-      (this.dragSelecting || this.headingDrag !== null) &&
+      (this.dragSelecting || this.headingDrag !== null || this.inlineFormulaRefDrag !== null) &&
       this.isDragAutoscrollActive(this.lastDragClientX, this.lastDragClientY)
     ) {
       this.dragAutoscrollRafId = requestAnimationFrame(() => {

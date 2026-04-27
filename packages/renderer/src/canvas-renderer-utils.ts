@@ -37,7 +37,8 @@ export function snapLine(v: number): number {
  */
 export function viewScaledSelectionOutlineWidth(viewZoom: number): number {
   const z = Math.max(VIEW_ZOOM_MIN, Math.min(VIEW_ZOOM_MAX, viewZoom));
-  return Math.max(1, 2 * SELECTION_OUTLINE_VISUAL_SCALE * z);
+  // 非整数 lineWidth 会在 stroke 上产生亚像素发糊/虚影；取整为 CSS 像素线宽。
+  return Math.max(1, Math.round(3 * SELECTION_OUTLINE_VISUAL_SCALE * z));
 }
 
 export function scaledColW(sheet: Worksheet, viewZoom: number): number {

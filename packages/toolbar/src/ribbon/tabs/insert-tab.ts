@@ -1,5 +1,5 @@
 import { createToolbarButton, type RibbonEmit } from "../../toolbar/index.js";
-import { iconInsertTable, iconPivotTableOption } from "../../toolbar/icons.js";
+import { iconInsertTable } from "../../toolbar/icons.js";
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { RibbonTabId } from "../ribbon-types.js";
 
@@ -28,12 +28,12 @@ export function mountInsertTab(panel: HTMLElement, emit: RibbonEmit): void {
           icon: iconInsertTable,
           variant: "large",
         },
-        {
-          id: "insert.pivottable.options",
-          label: "数据透视表",
-          icon: iconPivotTableOption,
-          variant: "large",
-        },
+        // {
+        //   id: "insert.pivottable.options",
+        //   label: "数据透视表",
+        //   icon: iconPivotTableOption,
+        //   variant: "large",
+        // },
       ],
     },
   ];

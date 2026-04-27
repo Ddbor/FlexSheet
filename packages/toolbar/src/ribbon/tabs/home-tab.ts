@@ -55,6 +55,8 @@ import { mountAlignMergeMenu } from "../align-merge-menu.js";
 import { mountAlignOrientationMenu } from "../align-orientation-menu.js";
 import { mountCellStyleRibbonMenu } from "../cell-styles-ribbon-menu.js";
 import { mountHomeClearMenu } from "../home-clear-menu.js";
+import { mountAutoSumSubmenu } from "../home-autosum-menu.js";
+import { mountHomeSortFilterMenu } from "../home-sort-filter-menu.js";
 import { mountHomeFillMenu } from "../home-fill-menu.js";
 import { mountConditionalFormatMenu, mountTableFormatStyleMenu } from "../home-styles-menus.js";
 import {
@@ -88,6 +90,7 @@ const NUMBER_FORMAT_DROPDOWN_ICONS: Record<
 };
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { FlexSheetLike, RibbonTabId } from "../ribbon-types.js";
+import { iconSortFilterRibbon } from "../home-sort-filter-icons.js";
 
 const TAB: RibbonTabId = "home";
 
@@ -608,7 +611,22 @@ export function mountHomeTab(
       );
       return btn.element;
     };
-    cellsOps.appendChild(makeCellOpBtn("home.cells.autoSum", "自动求和", iconFunction()));
+    {
+      const sumBtn = createToolbarButton(
+        {
+          id: "home.cells.autoSum",
+          tab: TAB,
+          label: "自动求和",
+          icon: iconFunction(),
+          splitDropdown: true,
+          title: "自动求和 / 其他函数",
+        },
+        emit,
+      );
+      sumBtn.element.id = "fs-ribbon-home-cells-autosum";
+      mountAutoSumSubmenu(sumBtn.element, emit, TAB);
+      cellsOps.appendChild(sumBtn.element);
+    }
     const fillBtn = makeCellOpBtn("home.cells.fill", "填充", iconFillColor());
     fillBtn.id = "fs-ribbon-home-cells-fill";
     mountHomeFillMenu(fillBtn, emit, TAB);
@@ -622,6 +640,28 @@ export function mountHomeTab(
     content.appendChild(cellStylesBtn.element);
     content.appendChild(sep);
     content.appendChild(cellsOps);
+    inner.appendChild(root);
+  }
+
+  // 排序和筛选（面板最右）
+  {
+    const { root, content } = createRibbonGroup("排序和筛选");
+    content.classList.add("fs-ribbon-sort-filter");
+    const sortFilterBtn = createToolbarButton(
+      {
+        id: "home.sortFilter",
+        tab: TAB,
+        label: "排序和筛选",
+        variant: "large",
+        icon: iconSortFilterRibbon(),
+        menuTrigger: true,
+        title: "排序和筛选",
+      },
+      emit,
+    );
+    sortFilterBtn.element.id = "fs-ribbon-home-sort-filter";
+    mountHomeSortFilterMenu(sortFilterBtn.element, emit, TAB);
+    content.appendChild(sortFilterBtn.element);
     inner.appendChild(root);
   }
 

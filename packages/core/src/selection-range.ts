@@ -19,6 +19,10 @@ export interface SelectionPaintSnapshot {
    * 拖拽填充柄时，当前预览的外包矩形（与 `range` 取并集后规范化；无预览为 `undefined`）。
    */
   readonly fillPreviewRange?: SelectionRange | null;
+  /**
+   * 公式编辑中，自动求和/引用所预览的数据区域（与主选区独立，虚线+浅色填充等由渲染层绘制）。
+   */
+  readonly formulaReferencePreviewRange?: SelectionRange | null;
 }
 
 export function normalizeSelectionRange(range: SelectionRange): SelectionRange {
