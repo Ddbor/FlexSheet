@@ -43,7 +43,7 @@ import {
 } from "@flexsheet/renderer";
 import { ScrollPlugin } from "@flexsheet/scroll";
 import { SelectionRegistryPlugin } from "@flexsheet/selection";
-import { columnIndexToLabel, columnLabelToIndex } from "@flexsheet/shared";
+import { columnIndexToLabel } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
 import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
@@ -85,7 +85,8 @@ import { useSheetChromeGuard } from "./plugins/sheet-chrome-guard-plugin.js";
 import { openColumnFilterPanel } from "./chrome/column-filter-panel.js";
 import { openPivotFilterPanel } from "./pivot/pivot-filter-panel.js";
 import { showFormatAsTableDialog } from "./dialogs/format-as-table-dialog.js";
-import { ensureFsSheetPromptStyles } from "./dialogs/fs-dialog-styles.js";
+import { openCustomSortDialogWithOverlay } from "./dialogs/custom-sort-dialog.js";
+import { openFindReplaceDialogWithOverlay } from "./dialogs/find-replace-dialog.js";
 import { showFillSeriesDialog } from "./dialogs/fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./dialogs/new-table-style-dialog.js";
 import { parseFormatAsTableRangeRef } from "./dialogs/format-as-table-range.js";
@@ -229,6 +230,8 @@ export class FlexSheet {
   private pendingClipboardCut: { sheet: Worksheet; range: SelectionRange } | null = null;
   /** 「自定义排序」对话框根节点（打开时独占，关闭时移除）。 */
   private customSortOverlay: HTMLDivElement | null = null;
+  /** 「查找和替换」对话框。 */
+  private findReplaceOverlay: HTMLDivElement | null = null;
   /**
    * 对话框「从工作表选定区域」：框选结束写入引用；ESC 取消并恢复进入前的选区。
    */
@@ -1553,7 +1556,9 @@ export class FlexSheet {
     this.refresh();
   }
 
-  /** 简单「自定义排序」：指定列标与升/降序，在选区行范围内按值排序。 */
+  /**
+   * 「数据 / 开始 → 自定义排序」：多关键字排序、标题行选项，与选区行范围一致。
+   */
   openCustomSortDialog(): void {
     if (this.isCellEditing()) {
       return;
@@ -1562,138 +1567,71 @@ export class FlexSheet {
     if (sheet === undefined) {
       return;
     }
-    ensureFsSheetPromptStyles();
     this.closeCustomSortDialog();
-
     const ac = this.selection.getActiveCell();
-    const defaultLabel = columnIndexToLabel(ac.col);
-
-    const overlay = document.createElement("div");
-    overlay.className = "fs-sheet-prompt-overlay";
-    overlay.setAttribute("role", "presentation");
-
-    const panel = document.createElement("div");
-    panel.className = "fs-sheet-prompt";
-    panel.style.width = "min(340px, calc(100vw - 32px))";
-    panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-modal", "true");
-    panel.setAttribute("aria-labelledby", "fs-custom-sort-title");
-
-    const header = document.createElement("div");
-    header.className = "fs-sheet-prompt__header";
-    const titleEl = document.createElement("div");
-    titleEl.id = "fs-custom-sort-title";
-    titleEl.className = "fs-sheet-prompt__title";
-    titleEl.textContent = "自定义排序";
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "fs-sheet-prompt__close";
-    closeBtn.setAttribute("aria-label", "关闭");
-    closeBtn.textContent = "×";
-    header.appendChild(titleEl);
-    header.appendChild(closeBtn);
-
-    const body = document.createElement("div");
-    body.className = "fs-sheet-prompt__body";
-
-    const rowCol = document.createElement("label");
-    rowCol.className = "fs-sheet-prompt__label";
-    const colSpan = document.createElement("span");
-    colSpan.textContent = "列标";
-    const colInput = document.createElement("input");
-    colInput.type = "text";
-    colInput.className = "fs-sheet-prompt__input";
-    colInput.value = defaultLabel;
-    colInput.setAttribute("autocomplete", "off");
-    colInput.setAttribute("spellcheck", "false");
-    rowCol.appendChild(colSpan);
-    rowCol.appendChild(colInput);
-
-    const rowOrder = document.createElement("label");
-    rowOrder.className = "fs-sheet-prompt__label";
-    const orderSpan = document.createElement("span");
-    orderSpan.textContent = "次序";
-    const orderSel = document.createElement("select");
-    orderSel.className = "fs-sheet-prompt__select";
-    const optAsc = document.createElement("option");
-    optAsc.value = "asc";
-    optAsc.textContent = "升序";
-    const optDesc = document.createElement("option");
-    optDesc.value = "desc";
-    optDesc.textContent = "降序";
-    orderSel.appendChild(optAsc);
-    orderSel.appendChild(optDesc);
-    rowOrder.appendChild(orderSpan);
-    rowOrder.appendChild(orderSel);
-
-    body.appendChild(rowCol);
-    body.appendChild(rowOrder);
-
-    const footer = document.createElement("div");
-    footer.className = "fs-sheet-prompt__footer";
-    const okBtn = document.createElement("button");
-    okBtn.type = "button";
-    okBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--primary";
-    okBtn.textContent = "确定";
-    const cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "fs-sheet-prompt__btn fs-sheet-prompt__btn--secondary";
-    cancelBtn.textContent = "取消";
-    footer.appendChild(cancelBtn);
-    footer.appendChild(okBtn);
-
-    panel.appendChild(header);
-    panel.appendChild(body);
-    panel.appendChild(footer);
-    overlay.appendChild(panel);
+    const overlay = openCustomSortDialogWithOverlay({
+      sheet,
+      selectionRange: this.selection.getNormalizedRange(),
+      defaultSortCol: ac.col,
+      onAfterApply: () => {
+        this.refresh();
+      },
+      onClose: () => {
+        this.closeCustomSortDialog();
+      },
+    });
     document.body.appendChild(overlay);
     this.customSortOverlay = overlay;
-
-    const close = (): void => {
-      this.closeCustomSortDialog();
-    };
-
-    const tryConfirm = (): void => {
-      const colIdx = columnLabelToIndex(colInput.value);
-      if (colIdx === null || colIdx < 0 || colIdx >= sheet.colCount) {
-        colInput.focus();
-        colInput.select();
-        return;
-      }
-      const direction = orderSel.value === "desc" ? "desc" : "asc";
-      const range = normalizeSelectionRange(this.selection.getNormalizedRange());
-      sheet.sortRowsInRangeByColumn(range.startRow, range.endRow, colIdx, direction);
-      recalcWorksheet(sheet);
-      this.refresh();
-      close();
-    };
-
-    const onOverlayPointerDown = (ev: PointerEvent): void => {
-      if (ev.target === overlay) {
-        close();
-      }
-    };
-    overlay.addEventListener("pointerdown", onOverlayPointerDown);
-    closeBtn.addEventListener("click", close);
-    cancelBtn.addEventListener("click", close);
-    okBtn.addEventListener("click", tryConfirm);
-    colInput.addEventListener("keydown", (kev) => {
-      if (kev.key === "Enter") {
-        kev.preventDefault();
-        tryConfirm();
-      }
-    });
-
-    requestAnimationFrame(() => {
-      colInput.focus();
-      colInput.select();
-    });
   }
 
   private closeCustomSortDialog(): void {
     if (this.customSortOverlay !== null) {
       this.customSortOverlay.remove();
       this.customSortOverlay = null;
+    }
+  }
+
+  /**
+   * Ribbon「开始 → 查找/替换」：打开与 Excel 类似的「查找和替换」对话框（无系统窗口左上三钮）。
+   */
+  openFindReplaceFromRibbon(tab: "find" | "replace"): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    if (this.workbook.getActiveSheet() === undefined) {
+      return;
+    }
+    this.closeFindReplaceDialog();
+    const overlay = openFindReplaceDialogWithOverlay({
+      workbook: this._workbook,
+      initialTab: tab,
+      onNavigateToHit: (hit) => {
+        const idx = this._workbook.getSheets().indexOf(hit.sheet);
+        if (idx < 0) {
+          return;
+        }
+        this._workbook.activeSheetIndex = idx;
+        this.selection.selectCell(hit.row, hit.col);
+        this.afterSelectionChanged();
+      },
+      setCellValueCommand: (sheet, row, col, value) => {
+        this.workspace.commands.execute(new SetCellValueCommand(sheet, row, col, value));
+      },
+      onDataChanged: () => {
+        this.refresh();
+      },
+      onClose: () => {
+        this.closeFindReplaceDialog();
+      },
+    });
+    document.body.appendChild(overlay);
+    this.findReplaceOverlay = overlay;
+  }
+
+  private closeFindReplaceDialog(): void {
+    if (this.findReplaceOverlay !== null) {
+      this.findReplaceOverlay.remove();
+      this.findReplaceOverlay = null;
     }
   }
 

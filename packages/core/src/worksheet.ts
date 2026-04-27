@@ -30,6 +30,18 @@ export type ColumnAutoFilterUiKind = "header" | "body";
 /** 该列在筛选菜单中最后一次应用的排序方向（用于表头图标）。 */
 export type ColumnAutoFilterSortHint = "asc" | "desc" | null;
 
+/** 「自定义排序」多关键字一阶描述（`Worksheet.sortRowsInRangeByCustomSortLevels`）。 */
+export type WorksheetCustomSortLevel = {
+  readonly col: number;
+  readonly sortOn: "value" | "fontColor" | "fillColor" | "cellIcon";
+  readonly direction: "asc" | "desc";
+  /**
+   * 仅当 `sortOn` 为 `fontColor` / `fillColor` 时有效：`null` 为「无前景色/无填充」优先的分组，否则指定置顶色。
+   * `value` / `cellIcon` 时忽略。
+   */
+  readonly colorTargetArgb: string | null;
+};
+
 interface ColumnAutoFilterMutable {
   checkedKeys: Set<string>;
   includeBlank: boolean;
@@ -741,6 +753,60 @@ export class Worksheet {
     return out.sort();
   }
 
+  /** 在闭区间 `[rowStart, rowEnd]` 内扫描该列出现过的字体前景色 ARGB（去重、排序），用于自定义排序选色。 */
+  collectUniqueFontColorArgbsInRowRange(col: number, rowStart: number, rowEnd: number): string[] {
+    if (!Number.isInteger(col) || col < 0 || col >= this.colCount) {
+      return [];
+    }
+    const lo = clampIndex(rowStart, 0, this.rowCount - 1);
+    const hi = clampIndex(rowEnd, lo, this.rowCount - 1);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (let r = lo; r <= hi; r++) {
+      const anchor = this.getMergeAnchorCell(r, col);
+      if (anchor.row !== r || anchor.col !== col) {
+        continue;
+      }
+      const fg = this.getCell(r, col).style?.fgArgb;
+      if (fg === undefined || fg === "") {
+        continue;
+      }
+      const u = fg.toUpperCase();
+      if (!seen.has(u)) {
+        seen.add(u);
+        out.push(u);
+      }
+    }
+    return out.sort();
+  }
+
+  /** 在闭区间 `[rowStart, rowEnd]` 内扫描该列出现过的单元格填充色 ARGB（去重、排序）。 */
+  collectUniqueFillColorArgbsInRowRange(col: number, rowStart: number, rowEnd: number): string[] {
+    if (!Number.isInteger(col) || col < 0 || col >= this.colCount) {
+      return [];
+    }
+    const lo = clampIndex(rowStart, 0, this.rowCount - 1);
+    const hi = clampIndex(rowEnd, lo, this.rowCount - 1);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (let r = lo; r <= hi; r++) {
+      const anchor = this.getMergeAnchorCell(r, col);
+      if (anchor.row !== r || anchor.col !== col) {
+        continue;
+      }
+      const f = this.getCell(r, col).style?.fillArgb;
+      if (f === undefined || f === "") {
+        continue;
+      }
+      const u = f.toUpperCase();
+      if (!seen.has(u)) {
+        seen.add(u);
+        out.push(u);
+      }
+    }
+    return out.sort();
+  }
+
   /**
    * 在闭区间行范围内按指定列排序（仅重排区间内行，区间外不动）。
    */
@@ -859,6 +925,62 @@ export class Worksheet {
     const stCol = this.autoFilterByCol.get(sortCol);
     if (stCol !== undefined) {
       stCol.lastSortDirection = direction;
+    }
+    this.applyRowPermutation(inv);
+  }
+
+  /**
+   * 在闭区间行范围内按多关键字排序（稳定：同序时保持原行相对顺序；各阶内与单关键字颜色排序规则一致）。
+   */
+  sortRowsInRangeByCustomSortLevels(
+    rowStart: number,
+    rowEnd: number,
+    levels: readonly WorksheetCustomSortLevel[],
+  ): void {
+    if (levels.length === 0) {
+      return;
+    }
+    for (const lv of levels) {
+      if (!Number.isInteger(lv.col) || lv.col < 0 || lv.col >= this.colCount) {
+        return;
+      }
+    }
+    const lo = clampIndex(rowStart, 0, this.rowCount - 1);
+    const hi = clampIndex(rowEnd, lo, this.rowCount - 1);
+    const len = hi - lo + 1;
+    if (len <= 1) {
+      return;
+    }
+    const sortedOld = Array.from({ length: len }, (_, i) => lo + i);
+    sortedOld.sort((a, b) => {
+      for (const lv of levels) {
+        const dir: 1 | -1 = lv.direction === "asc" ? 1 : -1;
+        let c = 0;
+        if (lv.sortOn === "value" || lv.sortOn === "cellIcon") {
+          c = this.compareRowsByValueOnly(a, b, lv.col, dir);
+        } else if (lv.sortOn === "fontColor") {
+          const want = lv.colorTargetArgb === null ? null : lv.colorTargetArgb.toUpperCase();
+          c = this.compareRowsForFontColorGroup(a, b, lv.col, want, dir);
+        } else if (lv.sortOn === "fillColor") {
+          const want = lv.colorTargetArgb === null ? null : lv.colorTargetArgb.toUpperCase();
+          c = this.compareRowsForFillColorGroup(a, b, lv.col, want, dir);
+        }
+        if (c !== 0) {
+          return c;
+        }
+      }
+      return a - b;
+    });
+    const inv = this.buildIdentityRowMap();
+    for (let i = 0; i < len; i++) {
+      inv[sortedOld[i]!] = lo + i;
+    }
+    const primary = levels[0]!;
+    if (primary.sortOn === "value" || primary.sortOn === "cellIcon") {
+      const stCol = this.autoFilterByCol.get(primary.col);
+      if (stCol !== undefined) {
+        stCol.lastSortDirection = primary.direction;
+      }
     }
     this.applyRowPermutation(inv);
   }
@@ -1380,6 +1502,74 @@ export class Worksheet {
       }
     }
     return rowA - rowB;
+  }
+
+  /** 多关键字排序用：值相同返回 0，避免阻断后续关键字。 */
+  private compareRowsByValueOnly(
+    rowA: number,
+    rowB: number,
+    sortCol: number,
+    dir: 1 | -1,
+  ): number {
+    const ca = this.getCell(rowA, sortCol);
+    const cb = this.getCell(rowB, sortCol);
+    const va = ca.value;
+    const vb = cb.value;
+    if (
+      typeof va === "number" &&
+      typeof vb === "number" &&
+      !Number.isNaN(va) &&
+      !Number.isNaN(vb)
+    ) {
+      if (va !== vb) {
+        return dir * (va < vb ? -1 : 1);
+      }
+      return 0;
+    }
+    const sa = formatCellDisplayWithStyle(va, ca.style);
+    const sb = formatCellDisplayWithStyle(vb, cb.style);
+    if (sa !== sb) {
+      return dir * sa.localeCompare(sb, undefined, { numeric: true, sensitivity: "base" });
+    }
+    return 0;
+  }
+
+  private compareRowsForFontColorGroup(
+    rowA: number,
+    rowB: number,
+    sortCol: number,
+    want: string | null,
+    dir: 1 | -1,
+  ): number {
+    const ma = this.getMergeAnchorCell(rowA, sortCol);
+    const mb = this.getMergeAnchorCell(rowB, sortCol);
+    const fa = (this.getCell(ma.row, ma.col).style?.fgArgb ?? "").toUpperCase();
+    const fb = (this.getCell(mb.row, mb.col).style?.fgArgb ?? "").toUpperCase();
+    const groupA = want === null ? (fa === "" ? 0 : 1) : fa === want ? 0 : 1;
+    const groupB = want === null ? (fb === "" ? 0 : 1) : fb === want ? 0 : 1;
+    if (groupA !== groupB) {
+      return dir * (groupA - groupB);
+    }
+    return 0;
+  }
+
+  private compareRowsForFillColorGroup(
+    rowA: number,
+    rowB: number,
+    sortCol: number,
+    want: string | null,
+    dir: 1 | -1,
+  ): number {
+    const ma = this.getMergeAnchorCell(rowA, sortCol);
+    const mb = this.getMergeAnchorCell(rowB, sortCol);
+    const fa = (this.getCell(ma.row, ma.col).style?.fillArgb ?? "").toUpperCase();
+    const fb = (this.getCell(mb.row, mb.col).style?.fillArgb ?? "").toUpperCase();
+    const groupA = want === null ? (fa === "" ? 0 : 1) : fa === want ? 0 : 1;
+    const groupB = want === null ? (fb === "" ? 0 : 1) : fb === want ? 0 : 1;
+    if (groupA !== groupB) {
+      return dir * (groupA - groupB);
+    }
+    return 0;
   }
 
   private buildIdentityRowMap(): number[] {

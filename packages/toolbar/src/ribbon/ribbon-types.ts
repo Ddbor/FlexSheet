@@ -87,6 +87,8 @@ export interface FlexSheetLike {
   getActiveCellStyle(): CellStyle | null;
   /** 打开「设置单元格格式」对话框（单元格样式库「新建单元格样式」等）。 */
   openFormatCellsDialog?: () => void;
+  /** Ribbon「开始 → 查找… / 替换…」：打开查找和替换。 */
+  openFindReplaceFromRibbon?(tab: "find" | "replace"): void;
   /** 存在时 Backstage 可提供 JSON 保存/导入。 */
   readonly workbook?: Workbook;
   loadWorkbook?(wb: Workbook): void;
@@ -106,7 +108,7 @@ export interface FlexSheetLike {
           readonly styleAnchorCol: number;
         },
   ): void;
-  /** 打开简单自定义排序对话框（列标 + 升/降序）。 */
+  /** 打开自定义排序对话框（多关键字、标题行等）。 */
   openCustomSortDialog?(): void;
   /** 按选区与活动单元格启用列自动筛选（与右键「筛选」一致）。 */
   enableColumnAutoFilterFromSelection?(): void;

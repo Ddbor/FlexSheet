@@ -494,6 +494,20 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.reapplyAutoFilterConcealment();
       return true;
     }
+    case "home.find.open": {
+      if (fs.openFindReplaceFromRibbon === undefined) {
+        return false;
+      }
+      fs.openFindReplaceFromRibbon("find");
+      return true;
+    }
+    case "home.find.replace": {
+      if (fs.openFindReplaceFromRibbon === undefined) {
+        return false;
+      }
+      fs.openFindReplaceFromRibbon("replace");
+      return true;
+    }
     case "home.style.conditional.newRule":
     case "home.style.conditional.highlightCells.moreRules":
     case "home.style.conditional.topBottom.moreRules":

@@ -35,6 +35,7 @@ export {
   type ColumnAutoFilterUiKind,
   type ColumnAutoFilterUndoSnapshot,
   type WorksheetChangeListener,
+  type WorksheetCustomSortLevel,
 } from "./worksheet.js";
 export {
   normalizeSelectionRange,

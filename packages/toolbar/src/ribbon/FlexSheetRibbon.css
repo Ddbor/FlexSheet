@@ -172,6 +172,17 @@
   border-right: none;
 }
 
+/* 「排序和筛选」与「查找」紧邻：无竖线，并收紧两钮之间的水平留白 */
+.fs-ribbon-group:has(> .fs-ribbon-group__content.fs-ribbon-sort-filter) {
+  border-right: none;
+  padding-right: 0;
+}
+
+.fs-ribbon-group:has(> .fs-ribbon-group__content.fs-ribbon-find) {
+  min-width: 0;
+  padding-left: 0;
+}
+
 /* 「开始 → 排序和筛选」：大号菜单式按钮，与「样式」侧大钮图标尺寸对齐；
  * 覆盖 .fs-ribbon-group__content 的 flex-start，在带区内与左侧大钮同列垂直居中 */
 .fs-ribbon-group__content.fs-ribbon-sort-filter {
@@ -200,6 +211,40 @@
 }
 
 .fs-ribbon-sort-filter .fs-tb-btn--large .fs-tb-btn__label {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  max-width: 80px;
+  font-size: 11px;
+}
+
+/* 「开始 → 查找」：与「排序和筛选」大钮同规范 */
+.fs-ribbon-group__content.fs-ribbon-find {
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
+}
+
+.fs-ribbon-find .fs-tb-btn--ribbon-menu.fs-tb-btn--large {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 92px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.fs-ribbon-find .fs-tb-btn--large .fs-tb-btn__icon {
+  width: 24px;
+  height: 24px;
+}
+
+.fs-ribbon-find .fs-tb-btn--large .fs-tb-btn__icon svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.fs-ribbon-find .fs-tb-btn--large .fs-tb-btn__label {
   white-space: normal;
   text-align: center;
   line-height: 1.15;
@@ -1256,6 +1301,18 @@
 
 .fs-bd-menu--sort-filter .fs-bd-menu__item {
   padding: 7px 14px 8px;
+  min-height: 30px;
+  line-height: 1.35;
+}
+
+/* 「开始 → 查找」：纯文字，与「排序和筛选」下拉行高接近 */
+.fs-bd-menu--find {
+  padding: 5px 0;
+  box-shadow: 0 2px 8px var(--fs-ribbon-btn-shadow, rgba(0, 0, 0, 0.1));
+}
+
+.fs-bd-menu--find .fs-bd-menu__item {
+  padding: 7px 16px 8px;
   min-height: 30px;
   line-height: 1.35;
 }

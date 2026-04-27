@@ -309,7 +309,7 @@
         display: flex;
         flex-direction: row;
         flex-wrap: nowrap;
-        align-items: flex-end;
+        align-items: stretch;
         gap: 0;
         width: max-content;
         height: 100%;
@@ -320,7 +320,8 @@
       .fs-excel-sheet-tab {
         flex-shrink: 0;
         max-width: 180px;
-        padding: 4px 12px 5px;
+        min-height: 28px;
+        padding: 0 12px;
         margin: 0 1px;
         border: 1px solid #c8c6c4;
         border-bottom: none;
@@ -328,7 +329,12 @@
         background: #e3e2e1;
         color: #323130;
         font: inherit;
+        line-height: 1.2;
         cursor: pointer;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -337,12 +343,12 @@
         background: #edebe9;
       }
       .fs-excel-sheet-tab--active {
+        position: relative;
+        z-index: 1;
         background: #fff;
         border-color: #c8c6c4;
         color: #217346;
         font-weight: 600;
-        margin-bottom: -1px;
-        padding-bottom: 6px;
         box-shadow: 0 2px 4px rgba(0, 0, 0, 0.06);
       }
       .fs-excel-sheet-bar__add {
@@ -351,10 +357,9 @@
         right: 0;
         z-index: 2;
         width: 26px;
-        height: auto;
-        min-height: 22px;
+        min-height: 28px;
         margin: 0 0 0 1px;
-        padding: 3px 0 5px;
+        padding: 0;
         border: none;
         background: #ecebea;
         color: #323130;
@@ -362,6 +367,11 @@
         line-height: 1;
         cursor: pointer;
         box-shadow: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        align-self: stretch;
       }
       .fs-excel-sheet-bar__add:hover {
         background: #d2d0ce;

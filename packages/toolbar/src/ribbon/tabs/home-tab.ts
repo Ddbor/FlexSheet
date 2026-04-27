@@ -56,6 +56,7 @@ import { mountAlignOrientationMenu } from "../align-orientation-menu.js";
 import { mountCellStyleRibbonMenu } from "../cell-styles-ribbon-menu.js";
 import { mountHomeClearMenu } from "../home-clear-menu.js";
 import { mountAutoSumSubmenu } from "../home-autosum-menu.js";
+import { mountHomeFindMenu } from "../home-find-menu.js";
 import { mountHomeSortFilterMenu } from "../home-sort-filter-menu.js";
 import { mountHomeFillMenu } from "../home-fill-menu.js";
 import { mountConditionalFormatMenu, mountTableFormatStyleMenu } from "../home-styles-menus.js";
@@ -90,6 +91,7 @@ const NUMBER_FORMAT_DROPDOWN_ICONS: Record<
 };
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { FlexSheetLike, RibbonTabId } from "../ribbon-types.js";
+import { iconFindRibbon } from "../home-find-icons.js";
 import { iconSortFilterRibbon } from "../home-sort-filter-icons.js";
 
 const TAB: RibbonTabId = "home";
@@ -662,6 +664,27 @@ export function mountHomeTab(
     sortFilterBtn.element.id = "fs-ribbon-home-sort-filter";
     mountHomeSortFilterMenu(sortFilterBtn.element, emit, TAB);
     content.appendChild(sortFilterBtn.element);
+    inner.appendChild(root);
+  }
+
+  {
+    const { root, content } = createRibbonGroup("查找");
+    content.classList.add("fs-ribbon-find");
+    const findBtn = createToolbarButton(
+      {
+        id: "home.find",
+        tab: TAB,
+        label: "查找",
+        variant: "large",
+        icon: iconFindRibbon(),
+        menuTrigger: true,
+        title: "查找",
+      },
+      emit,
+    );
+    findBtn.element.id = "fs-ribbon-home-find";
+    mountHomeFindMenu(findBtn.element, emit, TAB);
+    content.appendChild(findBtn.element);
     inner.appendChild(root);
   }
 
