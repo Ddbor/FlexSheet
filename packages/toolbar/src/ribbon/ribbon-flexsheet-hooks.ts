@@ -573,6 +573,13 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.openFormatAsTableFromRibbon("home.style.table.medium.r0c0");
       return true;
     }
+    case "insert.picture": {
+      if (fs.openInsertPictureFromRibbon === undefined) {
+        return false;
+      }
+      fs.openInsertPictureFromRibbon();
+      return true;
+    }
     case "insert.pivottable.options": {
       if (fs.openPivotTableDialog === undefined) {
         return false;

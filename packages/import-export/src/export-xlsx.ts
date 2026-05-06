@@ -15,6 +15,12 @@ import {
   expandBoundsWithConditionalFormatRanges,
 } from "./export-xlsx-cf.js";
 import {
+  buildSheetDrawingPackage,
+  groupFloatingPicturesBySheetIndex,
+  mergeWorksheetRelsXml,
+  type XlsxFloatingPictureExport,
+} from "./export-xlsx-drawing.js";
+import {
   buildPivotSheetPlans,
   collectPivotExportPieces,
   pivotOutputExtents,
@@ -520,6 +526,13 @@ export interface XlsxExportOptions {
   readonly includeFormulas: boolean;
   /** 导出仅有样式、无公式且无值的单元格。 */
   readonly includeSparseStyledEmpty: boolean;
+  /**
+   * 与 FlexSheet 画布 `CanvasRenderer.getViewZoom()` 一致，用于将浮动图片的 CSS 像素换算为工作表逻辑像素。
+   * 默认 1。
+   */
+  readonly viewZoom?: number;
+  /** 浮动图片（Ribbon「插入 → 图片」）；按 `sheetName` 归属工作表。 */
+  readonly floatingPictures?: readonly XlsxFloatingPictureExport[];
 }
 
 export const DEFAULT_XLSX_EXPORT_OPTIONS: XlsxExportOptions = {
@@ -527,6 +540,8 @@ export const DEFAULT_XLSX_EXPORT_OPTIONS: XlsxExportOptions = {
   includeFormulas: true,
   includeSparseStyledEmpty: true,
 };
+
+export type { XlsxFloatingPictureExport } from "./export-xlsx-drawing.js";
 
 /** 从样式中去掉四边边框，供合并格按边拆分后与主格非边框属性合并。 */
 function stripBorderSides(st: CellStyle | null | undefined): CellStyle {
@@ -880,6 +895,7 @@ function buildSheetXml(
   opts: XlsxExportOptions,
   cfDxfIndex: ReturnType<typeof buildWorkbookConditionalFormatDxfIndex>,
   pivotTablesFragment = "",
+  drawingRelationshipId?: string,
 ): string {
   const b = usedBoundsForSheet(sheet, opts);
   const dim =
@@ -956,6 +972,11 @@ function buildSheetXml(
     cfDxfIndex,
   );
 
+  const drawingEl =
+    drawingRelationshipId !== undefined && drawingRelationshipId !== ""
+      ? `<drawing r:id="${drawingRelationshipId}"/>`
+      : "";
+
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<worksheet xmlns="${SS_MAIN}" xmlns:r="${REL_NS}">` +
@@ -968,6 +989,7 @@ function buildSheetXml(
     mergeXml +
     cfXml +
     pivotTablesFragment +
+    drawingEl +
     `</worksheet>`
   );
 }
@@ -1019,6 +1041,48 @@ export function exportWorkbookToXlsxBytes(
     pivotRelsBySheet.set(pl.sheetIndex, pl.relsXml);
   }
 
+  const viewZ = options.viewZoom ?? 1;
+  const picturesBySheet = groupFloatingPicturesBySheetIndex(
+    workbook,
+    options.floatingPictures ?? [],
+  );
+  const drawingRidBySheet = new Map<number, string>();
+  let mediaFileCounter = 1;
+  const drawingZipPieces: {
+    readonly sheetIndex: number;
+    readonly drawingXml: string;
+    readonly drawingRelsXml: string;
+    readonly mediaEntries: readonly { path: string; data: Uint8Array }[];
+  }[] = [];
+  for (let i = 0; i < n; i++) {
+    const pics = picturesBySheet.get(i);
+    if (pics === undefined || pics.length === 0) {
+      continue;
+    }
+    const sh0 = workbook.getSheet(i);
+    if (sh0 === undefined) {
+      continue;
+    }
+    const pkg = buildSheetDrawingPackage(sh0, pics, viewZ, mediaFileCounter);
+    if (pkg === null) {
+      continue;
+    }
+    mediaFileCounter = pkg.nextMediaFileIndex;
+    const mergedForRid = mergeWorksheetRelsXml(
+      pivotRelsBySheet.get(i),
+      `../drawings/drawing${i + 1}.xml`,
+    );
+    if (mergedForRid?.drawingRid !== undefined) {
+      drawingRidBySheet.set(i, mergedForRid.drawingRid);
+    }
+    drawingZipPieces.push({
+      sheetIndex: i,
+      drawingXml: pkg.drawingXml,
+      drawingRelsXml: pkg.drawingRelsXml,
+      mediaEntries: pkg.mediaEntries,
+    });
+  }
+
   const sheetParts: string[] = [];
   for (let i = 0; i < n; i++) {
     const sh = workbook.getSheet(i);
@@ -1026,8 +1090,18 @@ export function exportWorkbookToXlsxBytes(
       continue;
     }
     const pivotFrag = pivotFragmentBySheet.get(i) ?? "";
+    const drawingRid = drawingRidBySheet.get(i);
     sheetParts.push(
-      buildSheetXml(sh, i, sstMap, styleTable.xfBySig, options, cfDxfIndex, pivotFrag),
+      buildSheetXml(
+        sh,
+        i,
+        sstMap,
+        styleTable.xfBySig,
+        options,
+        cfDxfIndex,
+        pivotFrag,
+        drawingRid,
+      ),
     );
   }
 
@@ -1095,6 +1169,8 @@ export function exportWorkbookToXlsxBytes(
     `</Relationships>`;
 
   const ctOverrides: string[] = [
+    `<Default Extension="png" ContentType="image/png"/>`,
+    `<Default Extension="jpeg" ContentType="image/jpeg"/>`,
     `<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>`,
     `<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>`,
     `<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>`,
@@ -1104,6 +1180,12 @@ export function exportWorkbookToXlsxBytes(
   for (let i = 0; i < n; i++) {
     ctOverrides.push(
       `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`,
+    );
+  }
+  for (const piece of drawingZipPieces) {
+    const d = piece.sheetIndex + 1;
+    ctOverrides.push(
+      `<Override PartName="/xl/drawings/drawing${d}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.drawing+xml"/>`,
     );
   }
   for (const p of pivotPieces) {
@@ -1184,11 +1266,27 @@ export function exportWorkbookToXlsxBytes(
       data: enc.encode(p.pivotTableRelsXml),
     });
   }
-  for (const [si, relsXml] of pivotRelsBySheet) {
+  for (const piece of drawingZipPieces) {
+    const d = piece.sheetIndex + 1;
+    files.push({ path: `xl/drawings/drawing${d}.xml`, data: enc.encode(piece.drawingXml) });
     files.push({
-      path: `xl/worksheets/_rels/sheet${si + 1}.xml.rels`,
-      data: enc.encode(relsXml),
+      path: `xl/drawings/_rels/drawing${d}.xml.rels`,
+      data: enc.encode(piece.drawingRelsXml),
     });
+    for (const me of piece.mediaEntries) {
+      files.push({ path: me.path.replace(/^\/+/, ""), data: me.data });
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const hasDrawing = drawingRidBySheet.has(i);
+    const drawTarget = hasDrawing ? `../drawings/drawing${i + 1}.xml` : undefined;
+    const merged = mergeWorksheetRelsXml(pivotRelsBySheet.get(i), drawTarget);
+    if (merged !== undefined) {
+      files.push({
+        path: `xl/worksheets/_rels/sheet${i + 1}.xml.rels`,
+        data: enc.encode(merged.relsXml),
+      });
+    }
   }
 
   return buildZipArchive(files);

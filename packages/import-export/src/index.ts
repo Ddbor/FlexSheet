@@ -3,6 +3,7 @@ export {
   exportWorkbookToXlsxBlob,
   exportWorkbookToXlsxBytes,
   type XlsxExportOptions,
+  type XlsxFloatingPictureExport,
 } from "./export-xlsx.js";
 export { decodeTextFileBytes } from "./text-file-decode.js";
 export { importXlsxToWorkbook } from "./import-xlsx.js";

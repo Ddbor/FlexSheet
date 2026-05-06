@@ -44,6 +44,7 @@ import {
 } from "@flexsheet/renderer";
 import { ScrollPlugin } from "@flexsheet/scroll";
 import { SelectionRegistryPlugin } from "@flexsheet/selection";
+import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
 import { columnIndexToLabel } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
@@ -101,6 +102,7 @@ import {
 } from "./pivot/pivot-table-fields-pane.js";
 import { refreshPivotTableDefinition } from "./pivot/pivot-table-command.js";
 import { useSheetContextMenu } from "./plugins/sheet-context-menu-plugin.js";
+import { FloatingPictureLayer } from "./chrome/floating-picture-layer.js";
 import { mountFormatCellsDialog } from "./format-cells/format-cells-dialog.js";
 import { useUndoRedo } from "./plugins/undo-redo-plugin.js";
 import { AutofillExtendCommand } from "./commands/autofill-extend-command.js";
@@ -241,6 +243,9 @@ export class FlexSheet {
   /** 横向布局：左侧 Canvas 挂载区 + 右侧「公式生成器」面板。 */
   private readonly sheetViewLayout: HTMLDivElement;
   private readonly canvasMountEl: HTMLDivElement;
+  private readonly floatingPictureLayer: FloatingPictureLayer;
+  private pictureFileInput: HTMLInputElement | null = null;
+  private lastFloatingPictureViewZoom = 1;
   private readonly formulaBuilderPanel: FormulaBuilderPanelController;
   /**
    * 公式生成器：点击「插入函数」时锁定的写入目标（表 + 合并锚点格），
@@ -350,6 +355,24 @@ export class FlexSheet {
     this.workspace.use(rendererPlugin);
     this.renderer = rendererPlugin.getRenderer();
     this.canvas = rendererPlugin.getCanvas();
+
+    this.floatingPictureLayer = new FloatingPictureLayer({
+      mount: this.canvasMountEl,
+      getCanvas: () => this.canvas,
+      getRenderer: () => this.renderer,
+      getWorkbook: () => this.workbook,
+      getAnchorCell: () => this.selection.getActiveCell(),
+    });
+    this.lastFloatingPictureViewZoom = this.renderer.getViewZoom();
+    this.renderer.subscribeScroll(() => {
+      this.floatingPictureLayer.layout();
+    });
+    this.renderer.subscribeViewZoom(() => {
+      const z = this.renderer.getViewZoom();
+      this.floatingPictureLayer.scaleForZoomChange(this.lastFloatingPictureViewZoom, z);
+      this.lastFloatingPictureViewZoom = z;
+      this.floatingPictureLayer.layout();
+    });
 
     const editorPlugin = new EditorPlugin({
       host: this.host,
@@ -462,7 +485,9 @@ export class FlexSheet {
         this.cellEditor.syncLayout();
         this.rebindActiveSheetFormattingListener();
         this.syncPivotTableFieldsPaneToSelection();
+        this.floatingPictureLayer.deselect();
       }
+      this.floatingPictureLayer.layout();
       this.renderer.requestRedraw();
     });
   }
@@ -501,6 +526,7 @@ export class FlexSheet {
     this.rebindActiveSheetFormattingListener();
     this.renderer.requestRedraw();
     this.syncPivotTableFieldsPaneToSelection();
+    this.floatingPictureLayer.clearAll();
     this.emitWorkbookReplaced();
   }
 
@@ -1917,6 +1943,49 @@ export class FlexSheet {
     showNewTableStyleDialog(this);
   }
 
+  /** XLSX 导出：浮动插入图片的描述列表（与 `exportWorkbookToXlsxBlob` 的 `floatingPictures` / `viewZoom` 配合）。 */
+  getFloatingPicturesForXlsxExport(): readonly XlsxFloatingPictureExport[] {
+    return this.floatingPictureLayer.getPicturesForXlsxExport();
+  }
+
+  /** Ribbon「插入 -> 图片」：从本机选择图片，浮于当前工作表之上（随滚动/缩放联动；未写入单元格或工作簿持久化）。 */
+  openInsertPictureFromRibbon(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const inp = this.ensurePictureFileInput();
+    inp.value = "";
+    inp.click();
+  }
+
+  private ensurePictureFileInput(): HTMLInputElement {
+    if (this.pictureFileInput !== null) {
+      return this.pictureFileInput;
+    }
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "image/*";
+    inp.style.display = "none";
+    inp.setAttribute("aria-hidden", "true");
+    document.body.appendChild(inp);
+    inp.addEventListener("change", () => {
+      const f = inp.files?.[0];
+      if (f === undefined) {
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (): void => {
+        const url = reader.result;
+        if (typeof url === "string") {
+          this.floatingPictureLayer.addPictureFromDataUrl(url);
+        }
+      };
+      reader.readAsDataURL(f);
+    });
+    this.pictureFileInput = inp;
+    return inp;
+  }
+
   /** Ribbon「填充 -> 系列」：打开系列填充对话框。 */
   openFillSeriesDialog(): void {
     if (this.isCellEditing()) {
@@ -2709,6 +2778,10 @@ export class FlexSheet {
         this.cellEditor.cancelWithoutCommit();
       }
       return;
+    }
+
+    if (ev.target === this.canvas) {
+      this.floatingPictureLayer.deselect();
     }
 
     if (this.tryHitFillHandle(ev.clientX, ev.clientY)) {
@@ -3833,6 +3906,7 @@ export class FlexSheet {
     this.cellEditor.syncLayout();
     this.renderer.cancelPendingRedraw();
     this.renderer.draw();
+    this.floatingPictureLayer.layout();
   }
 
   /**

@@ -184,6 +184,7 @@ export {
   FLEXSHEET_JSON_GENERATOR_APP,
   importXlsxToWorkbook,
   type XlsxExportOptions,
+  type XlsxFloatingPictureExport,
   parseFlexSheetJson,
   serializeWorkbookToJsonDocument,
   workbookFromFlexSheetJsonDocument,

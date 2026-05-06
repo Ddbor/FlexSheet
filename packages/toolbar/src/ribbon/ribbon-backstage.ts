@@ -642,7 +642,8 @@ function mountExportPanel(container: HTMLElement, flexSheet: FlexSheetLike | und
   msg.setAttribute("role", "status");
   msg.hidden = true;
 
-  if (flexSheet === undefined || flexSheet.workbook === undefined) {
+  const workbookMaybe = flexSheet?.workbook;
+  if (flexSheet === undefined || workbookMaybe === undefined) {
     const title = document.createElement("h1");
     title.className = "fs-backstage__page-title";
     title.textContent = "导出";
@@ -654,7 +655,8 @@ function mountExportPanel(container: HTMLElement, flexSheet: FlexSheetLike | und
     return;
   }
 
-  const workbook = flexSheet.workbook;
+  const host = flexSheet;
+  const workbook = workbookMaybe;
 
   const shell = document.createElement("div");
   shell.className = "fs-backstage__import-shell";
@@ -735,6 +737,8 @@ function mountExportPanel(container: HTMLElement, flexSheet: FlexSheetLike | und
           includeStyles: cStyles.input.checked,
           includeFormulas: cFormulas.input.checked,
           includeSparseStyledEmpty: cSparse.input.checked,
+          viewZoom: host.getRenderer().getViewZoom(),
+          floatingPictures: host.getFloatingPicturesForXlsxExport?.(),
         };
         const blob = exportWorkbookToXlsxBlob(workbook, xlsxOpts);
         const active = workbook.getActiveSheet();

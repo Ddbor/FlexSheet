@@ -9,6 +9,7 @@ import type {
   SelectionRange,
   Workbook,
 } from "@flexsheet/core";
+import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
 import type { CanvasRenderer } from "@flexsheet/renderer";
 import type { SheetTheme } from "@flexsheet/theme";
 export type RibbonTabId = "home" | "insert" | "pageLayout" | "formula" | "data" | "view";
@@ -132,6 +133,10 @@ export interface FlexSheetLike {
   openNewTableStyleDialog?(): void;
   /** Ribbon「填充 -> 系列」：打开系列填充对话框。 */
   openFillSeriesDialog?(): void;
+  /** Ribbon「插入 -> 图片」：打开本地文件选择并插入浮动图片。 */
+  openInsertPictureFromRibbon?(): void;
+  /** 导出 Excel 时附带浮动图片（与 `viewZoom` 配合写入 DrawingML）。 */
+  getFloatingPicturesForXlsxExport?(): readonly XlsxFloatingPictureExport[];
   /** Ribbon「插入 -> 数据透视表」：打开数据透视表创建对话框。 */
   openPivotTableDialog?(): void;
   /** Ribbon「数据 -> 字段列表」：在透视区域内打开字段窗格。 */
