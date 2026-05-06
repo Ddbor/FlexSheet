@@ -165,11 +165,11 @@ function buildSharedItemsXmlForField(
   // 含非整数小数的纯数值字段：与 Excel 规范一致，只保留属性不列条目
   const hasNonIntegerDecimals = hasNumbers && !hasStrings && !hasBooleans && !allIntegers;
 
+  // containsMixedTypes: 字段中存在多种数据类型（数字+字符串、数字+布尔、字符串+布尔）
   const mixed =
     (hasNumbers && hasStrings) ||
     (hasNumbers && hasBooleans) ||
-    (hasStrings && hasBooleans) ||
-    (hasFalse && hasTrue);
+    (hasStrings && hasBooleans);
 
   if (hasNonIntegerDecimals) {
     // 只输出属性，不列条目，records 继续用直接 <n v="..."/>
@@ -225,7 +225,9 @@ function buildSharedItemsXmlForField(
   }
 
   const attrs: string[] = [];
-  attrs.push(mixed ? 'containsSemiMixedTypes="1"' : 'containsSemiMixedTypes="0"');
+  // containsSemiMixedTypes: 只要字段含有字符串值（即使是纯字符串字段）即为 true；
+  // 默认值为 true，纯数字/布尔字段需显式设为 false。
+  attrs.push(hasStrings ? 'containsSemiMixedTypes="1"' : 'containsSemiMixedTypes="0"');
   if (!hasStrings) attrs.push('containsString="0"');
   if (hasNumbers) {
     attrs.push('containsNumber="1"');
@@ -545,20 +547,48 @@ function buildPivotTableDefinitionXml(
     }
   } else if (colOffs.length === 1) {
     const itemCount = sharedItemsResults[colOffs[0]!]?.keys.length ?? 0;
-    colFieldsXml = `<colFields count="1"><field x="${colOffs[0]}"/></colFields>`;
-    if (itemCount === 0) {
-      colItemsXml = `<colItems count="1"><i/></colItems>`;
+    if (valueSpecs.length <= 1) {
+      // 单值字段：colFields 只有列维度字段，无需 -2
+      colFieldsXml = `<colFields count="1"><field x="${colOffs[0]}"/></colFields>`;
+      if (itemCount === 0) {
+        colItemsXml = `<colItems count="1"><i/></colItems>`;
+      } else {
+        const items = Array.from({ length: itemCount }, (_, i) => `<i><x v="${i}"/></i>`).join("");
+        colItemsXml = `<colItems count="${itemCount + 1}">${items}<i t="grand"><x/></i></colItems>`;
+      }
     } else {
-      const items = Array.from({ length: itemCount }, (_, i) => `<i><x v="${i}"/></i>`).join("");
-      colItemsXml = `<colItems count="${itemCount + 1}">${items}<i t="grand"><x/></i></colItems>`;
+      // 多值字段在列轴 + 1 个列维度：colFields 必须追加 -2 占位，colItems 枚举各列值×各值字段组合
+      colFieldsXml = `<colFields count="2"><field x="${colOffs[0]}"/><field x="-2"/></colFields>`;
+      if (itemCount === 0) {
+        colItemsXml = `<colItems count="1"><i/></colItems>`;
+      } else {
+        const items: string[] = [];
+        for (let ci = 0; ci < itemCount; ci++) {
+          for (let vi = 0; vi < valueSpecs.length; vi++) {
+            items.push(`<i><x v="${ci}"/><x v="${vi}"/></i>`);
+          }
+        }
+        items.push(`<i t="grand"><x/><x/></i>`);
+        colItemsXml = `<colItems count="${items.length}">${items.join("")}</colItems>`;
+      }
     }
   } else {
     // 多列字段：简化占位
-    colFieldsXml =
-      `<colFields count="${colOffs.length}">` +
-      colOffs.map((o) => `<field x="${o}"/>`).join("") +
-      `</colFields>`;
-    colItemsXml = `<colItems count="1"><i>${colOffs.map(() => `<x v="0"/>`).join("")}</i></colItems>`;
+    if (valueSpecs.length <= 1) {
+      colFieldsXml =
+        `<colFields count="${colOffs.length}">` +
+        colOffs.map((o) => `<field x="${o}"/>`).join("") +
+        `</colFields>`;
+      colItemsXml = `<colItems count="1"><i>${colOffs.map(() => `<x v="0"/>`).join("")}</i></colItems>`;
+    } else {
+      // 多值字段在列轴 + 多个列维度：追加 -2 占位，简化 colItems（Excel 刷新后重算）
+      colFieldsXml =
+        `<colFields count="${colOffs.length + 1}">` +
+        colOffs.map((o) => `<field x="${o}"/>`).join("") +
+        `<field x="-2"/>` +
+        `</colFields>`;
+      colItemsXml = `<colItems count="1"><i>${[...colOffs.map(() => `<x v="0"/>`), `<x v="0"/>`].join("")}</i></colItems>`;
+    }
   }
 
   // colGrandTotals: 仅当有列维度字段时才有合计列；多值无列维度时每个值字段各占一列，无合计。

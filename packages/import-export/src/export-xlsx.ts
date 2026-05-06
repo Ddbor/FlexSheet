@@ -1152,8 +1152,8 @@ export function exportWorkbookToXlsxBytes(
     `<workbookPr date1904="false"/>` +
     `<bookViews><workbookView xWindow="0" yWindow="0"/></bookViews>` +
     `<sheets>${sheetsXml}</sheets>` +
-    pivotCachesXml +
     `<calcPr calcId="191029"/>` +
+    pivotCachesXml +
     `</workbook>`;
 
   const workbookRelsXml =
