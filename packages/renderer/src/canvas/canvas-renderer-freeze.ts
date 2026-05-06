@@ -1,6 +1,6 @@
 import type { SheetTheme } from "@flexsheet/theme";
 import { snapLine } from "./canvas-renderer-utils.js";
-import type { FrozenLayout } from "./viewport.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 
 /**
  * 冻结分隔线：只画在表体区域 [headerW,canvasW)×[headerH,canvasH)，不贯穿行列标题。

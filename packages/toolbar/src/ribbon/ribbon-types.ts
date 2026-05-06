@@ -89,6 +89,8 @@ export interface FlexSheetLike {
   openFormatCellsDialog?: () => void;
   /** Ribbon「开始 → 查找… / 替换…」：打开查找和替换。 */
   openFindReplaceFromRibbon?(tab: "find" | "replace"): void;
+  /** Ribbon「开始 → 查找 → 定位条件…」：打开定位条件对话框。 */
+  openGotoSpecialDialogFromRibbon?(): void;
   /** 存在时 Backstage 可提供 JSON 保存/导入。 */
   readonly workbook?: Workbook;
   loadWorkbook?(wb: Workbook): void;
@@ -146,7 +148,7 @@ export interface FlexSheetLike {
   applyAutoSumFromRibbon?(
     aggregate: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN",
   ): void;
-  /** Ribbon「其他函数…」（`formula.fn.more`、自动求和下拉）打开插入函数相关 UI。 */
+  /** Ribbon「插入函数」（`formula.insertFunction`）、「其他函数…」（`formula.fn.more`、自动求和下拉）打开插入函数相关 UI。 */
   openInsertFunctionDialogFromRibbon?(): void;
   /** Ribbon「套用表格格式」：读取“自定义”分组样式项。 */
   getCustomTableStyleEntries?(): readonly RibbonCustomTableStyleEntry[];

@@ -1,5 +1,5 @@
 import type { Worksheet } from "@flexsheet/core";
-import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
+import { scaledColWidthAt, scaledRowHeightAt } from "../canvas/canvas-renderer-utils.js";
 
 /** 视口与虚拟滚动：scroll 仅作用于「非冻结」行列区域（像素）。 */
 export interface ViewportScrollLimits {

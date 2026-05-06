@@ -87,6 +87,7 @@ import { openPivotFilterPanel } from "./pivot/pivot-filter-panel.js";
 import { showFormatAsTableDialog } from "./dialogs/format-as-table-dialog.js";
 import { openCustomSortDialogWithOverlay } from "./dialogs/custom-sort-dialog.js";
 import { openFindReplaceDialogWithOverlay } from "./dialogs/find-replace-dialog.js";
+import { openGotoSpecialDialogWithOverlay } from "./dialogs/goto-special-dialog.js";
 import { showFillSeriesDialog } from "./dialogs/fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./dialogs/new-table-style-dialog.js";
 import { parseFormatAsTableRangeRef } from "./dialogs/format-as-table-range.js";
@@ -232,6 +233,8 @@ export class FlexSheet {
   private customSortOverlay: HTMLDivElement | null = null;
   /** 「查找和替换」对话框。 */
   private findReplaceOverlay: HTMLDivElement | null = null;
+  /** 「定位条件」对话框。 */
+  private gotoSpecialOverlay: HTMLDivElement | null = null;
   /**
    * 对话框「从工作表选定区域」：框选结束写入引用；ESC 取消并恢复进入前的选区。
    */
@@ -1632,6 +1635,43 @@ export class FlexSheet {
     if (this.findReplaceOverlay !== null) {
       this.findReplaceOverlay.remove();
       this.findReplaceOverlay = null;
+    }
+  }
+
+  /**
+   * Ribbon「开始 → 查找 → 定位条件…」：打开「定位条件」对话框并按结果更新选区。
+   */
+  openGotoSpecialDialogFromRibbon(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return;
+    }
+    this.closeGotoSpecialDialog();
+    const ac = this.selection.getActiveCell();
+    const overlay = openGotoSpecialDialogWithOverlay({
+      sheet,
+      selectionRange: this.selection.getNormalizedRange(),
+      activeRow: ac.row,
+      activeCol: ac.col,
+      onApplyRange: (range) => {
+        this.selection.setNormalizedRange(range);
+        this.afterSelectionChanged();
+      },
+      onClose: () => {
+        this.closeGotoSpecialDialog();
+      },
+    });
+    document.body.appendChild(overlay);
+    this.gotoSpecialOverlay = overlay;
+  }
+
+  private closeGotoSpecialDialog(): void {
+    if (this.gotoSpecialOverlay !== null) {
+      this.gotoSpecialOverlay.remove();
+      this.gotoSpecialOverlay = null;
     }
   }
 

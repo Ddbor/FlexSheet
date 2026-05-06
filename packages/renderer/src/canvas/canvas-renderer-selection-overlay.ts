@@ -38,8 +38,8 @@ function strokeSnappedSelectionRect(
     Math.max(0, rh - lineW),
   );
 }
-import { collectFrozenBodyQuadrantPasses } from "./frozen-body-quadrants.js";
-import type { FrozenLayout } from "./viewport.js";
+import { collectFrozenBodyQuadrantPasses } from "../layout/frozen-body-quadrants.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 
 export interface SelectionOverlayEnv {
   readonly ctx: CanvasRenderingContext2D;

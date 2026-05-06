@@ -24,12 +24,12 @@ import {
 import { paintBodyCellBorders } from "./canvas-renderer-body-borders.js";
 import { paintPivotUnconfiguredPlaceholderArt } from "./canvas-pivot-unconfigured-art.js";
 import { getConditionalFormattingCellOverlayCached } from "./canvas-renderer-cf-overlay.js";
-import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "./frozen-body-quadrants.js";
+import { collectFrozenBodyQuadrantPasses, type BodyQuadrantPass } from "../layout/frozen-body-quadrants.js";
 import {
   COLUMN_HEADER_FILTER_BUTTON_CSS_PX,
   bodyColumnAutoFilterTextReservePx,
-} from "./grid-hit-test.js";
-import type { FrozenLayout } from "./viewport.js";
+} from "../hit-test/grid-hit-test.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 
 export interface BodyPaintEnv {
   readonly ctx: CanvasRenderingContext2D;

@@ -842,9 +842,162 @@ const FS_FIND_REPLACE_STYLE_TEXT = `
 .fs-fr[hidden] { display: none !important; }
 `;
 
+const FS_GOTO_SPECIAL_STYLE_TEXT = `
+.fs-goto-special-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  box-sizing: border-box;
+}
+.fs-goto-special-overlay * {
+  box-sizing: border-box;
+}
+.fs-goto-special {
+  width: min(440px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  background: #ececec;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  color: #323130;
+}
+.fs-goto-special__titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 10px 16px 6px 16px;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+.fs-goto-special__title {
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1b1a19;
+}
+.fs-goto-special__body {
+  padding: 4px 18px 10px 18px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.fs-goto-special__section-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #605e5c;
+  margin-bottom: 6px;
+}
+.fs-goto-special__kind-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 20px;
+  margin-bottom: 8px;
+}
+.fs-goto-special__kind-placeholder {
+  min-height: 1px;
+}
+.fs-goto-special__radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.fs-goto-special__radio input {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+  accent-color: #217346;
+  cursor: pointer;
+}
+.fs-goto-special__hr {
+  height: 1px;
+  background: #d2d0ce;
+  margin: 6px 0 10px 0;
+}
+.fs-goto-special__options {
+  min-height: 72px;
+  font-size: 13px;
+  color: #605e5c;
+}
+.fs-goto-special__noop {
+  padding: 8px 0 4px 0;
+  line-height: 1.45;
+}
+.fs-goto-special__subtype-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+  padding: 4px 0 2px 0;
+}
+.fs-goto-special__check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #323130;
+}
+.fs-goto-special__check input {
+  width: 15px;
+  height: 15px;
+  accent-color: #217346;
+  cursor: pointer;
+}
+.fs-goto-special__link-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0 2px 0;
+}
+.fs-goto-special__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px 14px 16px;
+  border-top: 1px solid #d2d0ce;
+  background: #ececec;
+}
+.fs-goto-special__btn {
+  min-width: 72px;
+  padding: 5px 12px 6px 12px;
+  font-size: 13px;
+  border-radius: 4px;
+  border: 1px solid #8a8886;
+  background: #fff;
+  color: #1b1a19;
+  cursor: pointer;
+  font-family: inherit;
+}
+.fs-goto-special__btn:hover {
+  background: #f3f2f1;
+}
+.fs-goto-special__btn--primary {
+  border-color: #107c41;
+  background: #107c41;
+  color: #fff;
+  font-weight: 500;
+}
+.fs-goto-special__btn--primary:hover {
+  background: #0c5c2f;
+  border-color: #0c5c2f;
+}
+`;
+
 let fsSheetPromptBaseInjected = false;
 let fsCustomSortStylesInjected = false;
 let fsFindReplaceStylesInjected = false;
+let fsGotoSpecialStylesInjected = false;
 
 export function ensureFsSheetPromptStyles(): void {
   if (fsSheetPromptBaseInjected) {
@@ -878,5 +1031,17 @@ export function ensureFindReplaceDialogStyles(): void {
   const style = document.createElement("style");
   style.setAttribute("data-fs-find-replace", "1");
   style.textContent = FS_FIND_REPLACE_STYLE_TEXT;
+  document.head.appendChild(style);
+}
+
+export function ensureGotoSpecialDialogStyles(): void {
+  ensureFsSheetPromptStyles();
+  if (fsGotoSpecialStylesInjected) {
+    return;
+  }
+  fsGotoSpecialStylesInjected = true;
+  const style = document.createElement("style");
+  style.setAttribute("data-fs-goto-special", "1");
+  style.textContent = FS_GOTO_SPECIAL_STYLE_TEXT;
   document.head.appendChild(style);
 }

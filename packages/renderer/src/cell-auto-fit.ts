@@ -4,8 +4,8 @@ import {
   cellStyleLogicalFontSizeBasePx,
   scaledFontSizePx,
   wrapCellLines,
-} from "./canvas-renderer-utils.js";
-import { bodyColumnAutoFilterTextReservePx } from "./grid-hit-test.js";
+} from "./canvas/canvas-renderer-utils.js";
+import { bodyColumnAutoFilterTextReservePx } from "./hit-test/grid-hit-test.js";
 
 const PAD = 4;
 /** 与拖拽调整行列尺寸下限（flex-sheet）一致。 */

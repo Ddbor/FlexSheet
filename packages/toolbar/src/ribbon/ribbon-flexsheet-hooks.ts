@@ -365,6 +365,7 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.applyAutoSumFromRibbon("MIN");
       return true;
     }
+    case "formula.insertFunction":
     case "formula.fn.more": {
       if (fs.openInsertFunctionDialogFromRibbon === undefined) {
         return false;
@@ -506,6 +507,13 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
         return false;
       }
       fs.openFindReplaceFromRibbon("replace");
+      return true;
+    }
+    case "home.find.gotoSpecial": {
+      if (fs.openGotoSpecialDialogFromRibbon === undefined) {
+        return false;
+      }
+      fs.openGotoSpecialDialogFromRibbon();
       return true;
     }
     case "home.style.conditional.newRule":

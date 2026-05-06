@@ -7,7 +7,7 @@ import {
   type Workbook,
 } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
-import { CanvasRenderer } from "./canvas-renderer.js";
+import { CanvasRenderer } from "./canvas/canvas-renderer.js";
 
 export interface RendererPluginOptions {
   readonly container: HTMLElement;

@@ -1,7 +1,7 @@
 import { isUnconfiguredPivotDefinition, pivotLayoutStartRow, type Worksheet } from "@flexsheet/core";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
-import type { FrozenLayout } from "./viewport.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 
 /**
  * 在未配置透视表输出区第 3 行起的区域绘制与 Excel 类似的示意图案（Canvas 矢量，非单元格图案填充）。

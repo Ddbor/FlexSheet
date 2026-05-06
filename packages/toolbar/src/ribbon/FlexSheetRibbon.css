@@ -252,6 +252,13 @@
   font-size: 11px;
 }
 
+/* 「公式 → 函数库」：单个大钮在条带内垂直居中 */
+.fs-ribbon-group__content.fs-ribbon-formula-function-lib {
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
+}
+
 /* 「撤销」仅两枚小图标，不必占满通用分组 80px 最小幅宽 */
 .fs-ribbon-group:has(> .fs-ribbon-undo) {
   min-width: 0;
@@ -497,24 +504,6 @@
 .fs-ribbon-styles__cells-ops .fs-tb-btn--split .fs-tb-btn__icon {
   width: 14px;
   height: 14px;
-}
-
-/* 公式 -> 函数库：大号「自动求和」分割钮主区为横排（覆盖 .fs-tb-btn--split 默认纵向 .fs-tb-btn__row） */
-#fs-ribbon-formula-autosum.fs-tb-btn--split > .fs-tb-btn__row {
-  flex-direction: row;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  min-width: 0;
-  padding: 0 2px;
-  box-sizing: border-box;
-}
-
-#fs-ribbon-formula-autosum.fs-tb-btn--split .fs-tb-btn__label {
-  text-align: center;
-  line-height: 1.12;
-  max-width: 80px;
-  white-space: normal;
 }
 
 /* 开始 -> 字体分组布局（底行图标区与「对齐方式」同款：固定行高、grid、border-box、均分填充） */

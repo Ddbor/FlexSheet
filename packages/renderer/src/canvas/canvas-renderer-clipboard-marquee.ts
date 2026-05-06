@@ -3,8 +3,8 @@ import { normalizeSelectionRange } from "@flexsheet/core";
 import type { Worksheet } from "@flexsheet/core";
 import { cellIntersectsCanvas, cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
-import { collectFrozenBodyQuadrantPasses } from "./frozen-body-quadrants.js";
-import type { FrozenLayout } from "./viewport.js";
+import { collectFrozenBodyQuadrantPasses } from "../layout/frozen-body-quadrants.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 import type { SelectionOverlayEnv } from "./canvas-renderer-selection-overlay.js";
 
 /**

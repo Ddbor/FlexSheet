@@ -5,7 +5,7 @@ import {
   type Workbook,
 } from "@flexsheet/core";
 import type { SheetTheme } from "@flexsheet/theme";
-import { scrollToRevealCell } from "./grid-hit-test.js";
+import { scrollToRevealCell } from "../hit-test/grid-hit-test.js";
 import { tryActiveFrozenContext } from "./canvas-renderer-active-layout.js";
 import { drawBody, type BodyPaintEnv } from "./canvas-renderer-body.js";
 import {
@@ -45,7 +45,7 @@ import {
   scaledColWidthAt,
   scaledRowHeightAt,
 } from "./canvas-renderer-utils.js";
-import { buildFrozenLayout, clampScroll, computeScrollLimits } from "./viewport.js";
+import { buildFrozenLayout, clampScroll, computeScrollLimits } from "../layout/viewport.js";
 
 /**
  * Canvas 2D 主渲染器：行列标题、网格线、冻结窗格与视口虚拟滚动（只读数据）。

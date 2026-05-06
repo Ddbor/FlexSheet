@@ -13,7 +13,7 @@ import {
   scaledRowHeightAt,
   snapLine,
 } from "./canvas-renderer-utils.js";
-import type { FrozenLayout } from "./viewport.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 
 /** 与 `BodyPaintEnv` 中画布边框绘制所需字段一致（避免与 body 模块循环引用）。 */
 export interface CellBorderPaintEnv {

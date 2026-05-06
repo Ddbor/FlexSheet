@@ -1,6 +1,6 @@
 import type { Workbook } from "@flexsheet/core";
 import type { Worksheet } from "@flexsheet/core";
-import { buildFrozenLayout, computeScrollLimits, type FrozenLayout, type ViewportScrollLimits } from "./viewport.js";
+import { buildFrozenLayout, computeScrollLimits, type FrozenLayout, type ViewportScrollLimits } from "../layout/viewport.js";
 import { HEADER_STRIP_BASE_HEIGHT, HEADER_STRIP_BASE_WIDTH } from "./canvas-renderer-constants.js";
 
 export interface ActiveFrozenContext {

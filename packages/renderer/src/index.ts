@@ -3,7 +3,7 @@ export {
   type CanvasRendererOptions,
   type HorizontalScrollMetrics,
   type VerticalScrollMetrics,
-} from "./canvas-renderer.js";
+} from "./canvas/canvas-renderer.js";
 export { RendererPlugin, type RendererPluginOptions } from "./renderer-plugin.js";
 export {
   bodyColumnAutoFilterTextReservePx,
@@ -14,7 +14,7 @@ export {
   hitTestHeadingPointer,
   scrollToRevealCell,
   type HeadingHit,
-} from "./grid-hit-test.js";
+} from "./hit-test/grid-hit-test.js";
 export {
   bodyPaintExtents,
   buildFrozenLayout,
@@ -24,8 +24,8 @@ export {
   type FrozenLayout,
   type ViewportScrollLimits,
   type VisibleScrollRange,
-} from "./viewport.js";
+} from "./layout/viewport.js";
 export { computeColumnAutoWidth, computeRowAutoHeight } from "./cell-auto-fit.js";
-export { expandSelectionRangeForMergePaint, getClampedSelectionSpan } from "./canvas-renderer-selection-span.js";
-export { paintCellFillPatternOverlay } from "./canvas-cell-fill-pattern.js";
-export { SELECTION_OUTLINE_VISUAL_SCALE } from "./canvas-renderer-constants.js";
+export { expandSelectionRangeForMergePaint, getClampedSelectionSpan } from "./canvas/canvas-renderer-selection-span.js";
+export { paintCellFillPatternOverlay } from "./canvas/canvas-cell-fill-pattern.js";
+export { SELECTION_OUTLINE_VISUAL_SCALE } from "./canvas/canvas-renderer-constants.js";

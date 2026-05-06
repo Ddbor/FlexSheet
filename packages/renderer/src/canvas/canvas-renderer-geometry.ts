@@ -1,5 +1,5 @@
 import type { Worksheet } from "@flexsheet/core";
-import type { FrozenLayout } from "./viewport.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
 
 /** 合并后的单元格矩形（文档坐标，与 `cellLeftX`/`cellTopY` 一致）。 */

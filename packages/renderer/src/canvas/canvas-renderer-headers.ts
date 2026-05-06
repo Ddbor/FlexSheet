@@ -4,7 +4,7 @@ import { columnIndexToLabel } from "@flexsheet/shared";
 import type { SheetTheme } from "@flexsheet/theme";
 import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
 import { getClampedSelectionSpan } from "./canvas-renderer-selection-span.js";
-import { COLUMN_HEADER_FILTER_BUTTON_CSS_PX } from "./grid-hit-test.js";
+import { COLUMN_HEADER_FILTER_BUTTON_CSS_PX } from "../hit-test/grid-hit-test.js";
 import {
   paintAutoFilterDropdownGlyph,
   scaledColW,
@@ -15,7 +15,7 @@ import {
   snapLine,
   viewScaledSelectionOutlineWidth,
 } from "./canvas-renderer-utils.js";
-import type { FrozenLayout } from "./viewport.js";
+import type { FrozenLayout } from "../layout/viewport.js";
 
 export interface HeaderPaintEnv {
   readonly ctx: CanvasRenderingContext2D;

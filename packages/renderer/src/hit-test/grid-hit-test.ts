@@ -1,8 +1,8 @@
 import type { Worksheet } from "@flexsheet/core";
-import { cellLeftX, cellTopY } from "./canvas-renderer-geometry.js";
-import { scaledColWidthAt, scaledRowHeightAt } from "./canvas-renderer-utils.js";
-import type { FrozenLayout } from "./viewport.js";
-import { clampScroll, type ViewportScrollLimits } from "./viewport.js";
+import { cellLeftX, cellTopY } from "../canvas/canvas-renderer-geometry.js";
+import { scaledColWidthAt, scaledRowHeightAt } from "../canvas/canvas-renderer-utils.js";
+import type { FrozenLayout } from "../layout/viewport.js";
+import { clampScroll, type ViewportScrollLimits } from "../layout/viewport.js";
 
 /** 列标题右侧筛选按钮占用宽度（与 `paintColumnHeaderCell` 一致，画布 CSS 像素）。 */
 export const COLUMN_HEADER_FILTER_BUTTON_CSS_PX = 20;
