@@ -49,7 +49,10 @@ import { columnIndexToLabel } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
 import { writeClipboardImageFromDataUrl } from "./clipboard/clipboard-io.js";
-import { getFloatingPictureClipboard, setFloatingPictureClipboard } from "./clipboard/internal-buffer.js";
+import {
+  getFloatingPictureClipboard,
+  setFloatingPictureClipboard,
+} from "./clipboard/internal-buffer.js";
 import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
 import { useClipboard } from "./plugins/clipboard-plugin.js";
 import {
@@ -97,7 +100,14 @@ import { openCustomSortDialogWithOverlay } from "./dialogs/custom-sort-dialog.js
 import { openFindReplaceDialogWithOverlay } from "./dialogs/find-replace-dialog.js";
 import { openGotoSpecialDialogWithOverlay } from "./dialogs/goto-special-dialog.js";
 import { buildFormulaBuilderFunctionEntries } from "./chrome/formula-builder-entries.js";
-import { createFormulaBuilderPanel, type FormulaBuilderPanelController } from "./chrome/formula-builder-panel.js";
+import {
+  createFormatPicturePane,
+  type FormatPicturePaneController,
+} from "./chrome/format-picture-pane.js";
+import {
+  createFormulaBuilderPanel,
+  type FormulaBuilderPanelController,
+} from "./chrome/formula-builder-panel.js";
 import { showFillSeriesDialog } from "./dialogs/fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./dialogs/new-table-style-dialog.js";
 import { parseFormatAsTableRangeRef } from "./dialogs/format-as-table-range.js";
@@ -110,6 +120,7 @@ import { refreshPivotTableDefinition } from "./pivot/pivot-table-command.js";
 import { useSheetContextMenu } from "./plugins/sheet-context-menu-plugin.js";
 import {
   FloatingPictureLayer,
+  type FloatingPictureAdjustments,
   type FloatingPicturePastePrepared,
   type FloatingPictureSnapshot,
 } from "./chrome/floating-picture-layer.js";
@@ -257,24 +268,26 @@ export class FlexSheet {
   private pictureFileInput: HTMLInputElement | null = null;
   private lastFloatingPictureViewZoom = 1;
   private readonly formulaBuilderPanel: FormulaBuilderPanelController;
+  private readonly formatPicturePane: FormatPicturePaneController;
   /**
    * 公式生成器：点击「插入函数」时锁定的写入目标（表 + 合并锚点格），
    * 「完成」时写入此格，避免在表上改选区后写到错误单元格。
    */
-  private formulaBuilderInsertCell: { readonly sheet: Worksheet; readonly row: number; readonly col: number } | null =
-    null;
+  private formulaBuilderInsertCell: {
+    readonly sheet: Worksheet;
+    readonly row: number;
+    readonly col: number;
+  } | null = null;
   /**
    * 对话框「从工作表选定区域」：框选结束写入引用；ESC 取消并恢复进入前的选区。
    */
-  private rangeReferencePick:
-    | {
-        readonly resolve: (value: string | null) => void;
-        readonly mode: "range" | "singleCell";
-        readonly savedSelection: SelectionRange;
-        readonly escHandler: (ev: KeyboardEvent) => void;
-        readonly onRangePreview?: (displayRef: string) => void;
-      }
-    | null = null;
+  private rangeReferencePick: {
+    readonly resolve: (value: string | null) => void;
+    readonly mode: "range" | "singleCell";
+    readonly savedSelection: SelectionRange;
+    readonly escHandler: (ev: KeyboardEvent) => void;
+    readonly onRangePreview?: (displayRef: string) => void;
+  } | null = null;
   /** 卸载 `chromeRoot` 上 ⇧⌘R 捕获监听。 */
   private chromeRootSortShortcutCleanup: (() => void) | null = null;
   /** Ribbon「套用表格格式 -> 自定义」样式条目（当前以内置样式命令作为应用后端）。 */
@@ -382,6 +395,40 @@ export class FlexSheet {
       this.floatingPictureLayer.scaleForZoomChange(this.lastFloatingPictureViewZoom, z);
       this.lastFloatingPictureViewZoom = z;
       this.floatingPictureLayer.layout();
+    });
+
+    this.formatPicturePane = createFormatPicturePane({
+      parent: this.sheetViewLayout,
+      getAdjustments: () => {
+        const pid = this.floatingPictureLayer.getSelectedPictureId();
+        if (pid === null) {
+          return null;
+        }
+        return this.floatingPictureLayer.getFloatingPictureAdjustments(pid);
+      },
+      getLayout: () => {
+        const pid = this.floatingPictureLayer.getSelectedPictureId();
+        if (pid === null) {
+          return null;
+        }
+        return this.floatingPictureLayer.getFloatingPictureLayoutPx(pid);
+      },
+      setAdjustments: (patch) => {
+        const pid = this.floatingPictureLayer.getSelectedPictureId();
+        if (pid === null) {
+          return;
+        }
+        this.floatingPictureLayer.setFloatingPictureAdjustments(pid, patch);
+        this.formatPicturePane.syncFromModel();
+      },
+      onClose: () => {},
+    });
+    this.floatingPictureLayer.subscribeFloatingPictureFocus((active) => {
+      if (!active) {
+        this.formatPicturePane.hide();
+      } else {
+        this.formatPicturePane.syncFromModel();
+      }
     });
 
     const editorPlugin = new EditorPlugin({
@@ -675,9 +722,7 @@ export class FlexSheet {
   /**
    * 解析为「仅一个 A1/区域 参数（或空）」的聚合，用于表体选区；多参、表名、复杂表达式均返回 `null`。
    */
-  private parseSingleArgAggregateRef(
-    text: string,
-  ): {
+  private parseSingleArgAggregateRef(text: string): {
     fn: "SUM" | "AVERAGE" | "COUNT" | "MAX" | "MIN";
     isEmpty: boolean;
     range: SelectionRange | null;
@@ -1564,8 +1609,58 @@ export class FlexSheet {
     this.floatingPictureLayer.removePictureById(pictureId);
   }
 
-  insertFloatingPictureFromPrepared(prepared: FloatingPicturePastePrepared): FloatingPictureSnapshot {
+  insertFloatingPictureFromPrepared(
+    prepared: FloatingPicturePastePrepared,
+  ): FloatingPictureSnapshot {
     return this.floatingPictureLayer.insertFloatingPictureFromPrepared(prepared);
+  }
+
+  /** Ribbon「更正」缩略图预览：当前选中浮动图 dataUrl。 */
+  getSelectedFloatingPictureDataUrl(): string | null {
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return null;
+    }
+    return this.floatingPictureLayer.getDataUrlForPicture(id);
+  }
+
+  getFloatingPictureAdjustmentsState(): FloatingPictureAdjustments | null {
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return null;
+    }
+    return this.floatingPictureLayer.getFloatingPictureAdjustments(id);
+  }
+
+  setFloatingPictureAdjustmentsState(patch: Partial<FloatingPictureAdjustments>): void {
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return;
+    }
+    this.floatingPictureLayer.setFloatingPictureAdjustments(id, patch);
+    if (this.formatPicturePane.isOpen()) {
+      this.formatPicturePane.syncFromModel();
+    }
+  }
+
+  /** 重置当前浮动图的全部显示调整（与「重置图片」等效于样式还原）。 */
+  resetFloatingPictureFormatting(): void {
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return;
+    }
+    this.floatingPictureLayer.resetFloatingPictureAdjustments(id);
+    if (this.formatPicturePane.isOpen()) {
+      this.formatPicturePane.syncFromModel();
+    }
+  }
+
+  openFloatingPictureFormatPane(): void {
+    if (this.floatingPictureLayer.getSelectedPictureId() === null) {
+      return;
+    }
+    this.formulaBuilderPanel.hide();
+    this.formatPicturePane.show();
   }
 
   /**
@@ -1839,7 +1934,10 @@ export class FlexSheet {
   /**
    * Ribbon 公式库分类：按文档类列出函数名（供下拉菜单）；`categories` 为 `["__other__"]` 时表示非主分类分组。
    */
-  listFormulaNamesForRibbonCategories(categories: readonly string[], maxNames = 48): readonly string[] {
+  listFormulaNamesForRibbonCategories(
+    categories: readonly string[],
+    maxNames = 48,
+  ): readonly string[] {
     const all = buildFormulaBuilderFunctionEntries();
     const PRIMARY = new Set([
       "财务",
@@ -1989,7 +2087,10 @@ export class FlexSheet {
    * 参数编辑模式下，用户在工作表上结束一次选区操作后，将绝对引用写入当前活动参数框。
    */
   private tryApplyFormulaBuilderArgRefFromSelection(): void {
-    if (!this.formulaBuilderPanel.isOpen() || !this.formulaBuilderPanel.isPickingArgRefFromSheet()) {
+    if (
+      !this.formulaBuilderPanel.isOpen() ||
+      !this.formulaBuilderPanel.isPickingArgRefFromSheet()
+    ) {
       return;
     }
     if (this.workbook.getActiveSheet() === undefined) {
@@ -2255,10 +2356,7 @@ export class FlexSheet {
       const filterBase = def.pageFilterStartRow ?? def.destinationRow;
       const c0 = def.destinationCol;
       for (let i = 0; i < fCount; i++) {
-        if (
-          hit.row === filterBase + i &&
-          (hit.col === c0 || hit.col === c0 + 1)
-        ) {
+        if (hit.row === filterBase + i && (hit.col === c0 || hit.col === c0 + 1)) {
           this.openPivotFilterUi(sheet, def.id, i, clientX, clientY);
           return true;
         }
@@ -2298,6 +2396,7 @@ export class FlexSheet {
       window.removeEventListener("resize", this.onWindowResize);
     }
     this.closeCustomSortDialog();
+    this.formatPicturePane.destroy();
     this.formulaBuilderPanel.destroy();
     this.workspace.destroy();
     this.sheetViewLayout.remove();

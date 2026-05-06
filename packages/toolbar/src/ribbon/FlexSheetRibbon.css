@@ -252,6 +252,56 @@
   font-size: 11px;
 }
 
+.fs-ribbon-group:has(> .fs-ribbon-group__content.fs-ribbon-picture-format) {
+  min-width: 0;
+  padding-left: 0;
+}
+
+/* 「图片格式 → 调整」：横排五个大钮（前三带菜单箭头），与「查找」大钮尺寸对齐 */
+.fs-ribbon-group__content.fs-ribbon-picture-format {
+  justify-content: center;
+  align-items: center;
+  min-height: 0;
+}
+
+.fs-ribbon-picture-format__row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+}
+
+.fs-ribbon-picture-format__row .fs-tb-btn--ribbon-menu.fs-tb-btn--large,
+.fs-ribbon-picture-format__row .fs-tb-btn--large:not(.fs-tb-btn--split) {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 92px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.fs-ribbon-picture-format__row .fs-tb-btn--large .fs-tb-btn__icon {
+  width: 24px;
+  height: 24px;
+}
+
+.fs-ribbon-picture-format__row .fs-tb-btn--large .fs-tb-btn__icon svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.fs-ribbon-picture-format__row .fs-tb-btn--large .fs-tb-btn__label {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.15;
+  max-width: 88px;
+  font-size: 11px;
+}
+
 /* 「公式 → 函数库」：横排顶部对齐；图标与标签留小间隙；底缘随内容高低 */
 .fs-ribbon-group__content.fs-ribbon-formula-function-lib {
   justify-content: flex-start;
@@ -1407,6 +1457,139 @@
   padding: 7px 16px 8px;
   min-height: 30px;
   line-height: 1.35;
+}
+
+/* 「图片格式」占位下拉：纯文字，行高与「查找」一致 */
+.fs-bd-menu--picture-format {
+  padding: 5px 0;
+  box-shadow: 0 2px 8px var(--fs-ribbon-btn-shadow, rgba(0, 0, 0, 0.1));
+}
+
+.fs-bd-menu--picture-format .fs-bd-menu__item {
+  padding: 7px 16px 8px;
+  min-height: 30px;
+  line-height: 1.35;
+}
+
+/* 「图片格式 → 更正」：缩略图行 + 5×5 矩阵 + 底部「图片更正选项」 */
+.fs-pic-corr-menu {
+  padding: 6px 8px 5px;
+  max-width: min(360px, calc(100vw - 12px));
+  max-height: min(85vh, 640px);
+  overflow-y: auto;
+}
+
+.fs-pic-corr-menu__section-head {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fs-ribbon-chrome-text, #323130);
+  opacity: 0.85;
+  margin: 4px 0 6px;
+}
+
+.fs-pic-corr-menu__sh-row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 4px;
+  justify-content: stretch;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.fs-pic-corr-menu__grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+  margin-bottom: 5px;
+}
+
+.fs-pic-corr-menu__thumb {
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--fs-ribbon-border, #c8c6c4);
+  border-radius: 2px;
+  background: var(--fs-sheet-surface, #fff);
+  cursor: pointer;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.fs-pic-corr-menu__thumb--cell {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  aspect-ratio: 1;
+  height: auto;
+}
+
+.fs-pic-corr-menu__thumb:hover {
+  border-color: var(--fs-ribbon-chrome-text, #605e5c);
+}
+
+.fs-pic-corr-menu__thumb--selected {
+  border: 2px solid #217346;
+  box-shadow: 0 0 0 1px rgba(33, 115, 70, 0.25);
+}
+
+.fs-pic-corr-menu__thumb-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.fs-pic-corr-menu__sh-row .fs-pic-corr-menu__thumb {
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0;
+  aspect-ratio: 1;
+  height: auto;
+}
+
+.fs-pic-corr-menu__sep {
+  height: 1px;
+  margin: 6px 0 4px;
+  background: var(--fs-ribbon-border, #e1dfdd);
+}
+
+.fs-pic-corr-menu__footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 8px 6px;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: var(--fs-ribbon-chrome-text, #323130);
+}
+
+.fs-pic-corr-menu__footer:hover {
+  background: var(--fs-ribbon-hover, #edebe9);
+}
+
+.fs-pic-corr-menu__footer-icon {
+  display: flex;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  color: var(--fs-ribbon-chrome-text, #323130);
+}
+
+.fs-pic-corr-menu__footer-icon svg {
+  width: 16px;
+  height: 16px;
+  display: block;
 }
 
 /* 「单元格样式」：分段标题 + 预览行 + 主题色网格 */

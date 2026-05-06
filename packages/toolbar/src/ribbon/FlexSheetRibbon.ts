@@ -291,7 +291,7 @@ export class FlexSheetRibbon {
     panel.setAttribute("aria-labelledby", `fs-ribbon-tab-${id}`);
     panel.hidden = true;
     panel.dataset.tabId = id;
-    mountPictureFormatTab(panel, this.ribbonEmit);
+    mountPictureFormatTab(panel, this.ribbonEmit, () => this.flexSheet);
     this.panels.set(id, panel);
     this.ribbonBodyEl.appendChild(panel);
   }

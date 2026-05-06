@@ -781,6 +781,81 @@ export function iconInsertPicture(): SVGSVGElement {
   );
 }
 
+/** 图片格式 — 更正（32×32，原稿黄/橙改为 currentColor 层次） */
+export function iconPictureCorrect(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<g transform="translate(2.948 2.754)">' +
+      '<circle cx="13.052" cy="13.246" r="7" fill="currentColor" fill-opacity="0.2"/>' +
+      '<path fill="currentColor" fill-rule="nonzero" d="M13.052 6.246a7 7 0 1 1 0 14 7 7 0 0 1 0-14m0 1a6 6 0 1 0 0 12 6 6 0 0 0 0-12M10.252 21.802l-1.916 4.664-.925-.38 1.91-4.648q.3.138.615.254zm6.879-.531 1.996 4.782-.923.386-1.99-4.765a9 9 0 0 0 .917-.403M4.976 17.223.413 19.127l-.385-.923 4.556-1.903q.171.474.392.922m16.606-1.1 4.884 2.008-.38.925-4.876-2.004q.14-.3.26-.613zm4.471-8.784.386.923-4.88 2.037a9 9 0 0 0-.38-.926zM.38 7.41l4.583 1.884a9 9 0 0 0-.388.92L0 8.336zM18.13 0l.926.38-1.979 4.814a9 9 0 0 0-.918-.397zM8.263.028l1.951 4.675a9 9 0 0 0-.93.368L7.338.413z"/>' +
+      "</g>" +
+      "</g>",
+  );
+}
+
+/** 图片格式 — 颜色（32×32，画框 + 图像；原蓝/白改为单色层次） */
+export function iconPictureColor(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="nonzero">' +
+      '<path fill="currentColor" d="M30 4v24H2V4zm-1 1H3v22h26z"/>' +
+      '<path fill="currentColor" fill-opacity="0.1" d="M3 5h26v22H3z"/>' +
+      '<path fill="currentColor" fill-opacity="0.34" d="M3 27v-7.638l7.092-7.375 9.297 10.26V22l4.58-5L29 21.378V27h-9.61z"/>' +
+      '<path fill="currentColor" fill-opacity="0.72" d="m10.12 11.283 9.218 10.039 4.874-5.216L29 21.026v1.315l-4.822-4.733-4.161 4.452L24.554 27h-1.271L10.137 12.717 3 20.2v-1.449z"/>' +
+      '<circle cx="23" cy="10" r="2" fill="currentColor" fill-opacity="0.5"/>' +
+      '<path fill="currentColor" fill-opacity="0.14" d="M2 4h28v24H2z"/>' +
+      "</g>",
+  );
+}
+
+/** 图片格式 — 透明度（32×32，左右对比 + 竖分割线；原多色改为单色层次） */
+export function iconPictureTransparency(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<path fill="currentColor" fill-rule="nonzero" d="M14 4v1H3v22h11v1H2V4zm16 0v24H17v-1h12V5H17V4z"/>' +
+      '<path fill="currentColor" fill-opacity="0.12" fill-rule="nonzero" d="M14 5v22H3V5zm15 0v22H17V5z"/>' +
+      '<path fill="currentColor" fill-opacity="0.38" fill-rule="nonzero" d="m16.983 19.592 2.406 2.655V22l4.58-5L29 21.378V27H17.025z"/>' +
+      '<path fill="currentColor" fill-opacity="0.28" fill-rule="nonzero" d="M3 27v-7.638l7.092-7.375 3.927 4.334L13.997 27z"/>' +
+      '<path fill="currentColor" fill-opacity="0.62" fill-rule="nonzero" d="M10.12 11.283 14 15.508v1.406l-3.863-4.197L3 20.2v-1.449z"/>' +
+      '<circle cx="23" cy="10" r="2" fill="currentColor" fill-opacity="0.45" fill-rule="nonzero"/>' +
+      '<path fill="currentColor" d="M15 2h1v28h-1z"/>' +
+      '<path fill="currentColor" fill-opacity="0.55" fill-rule="nonzero" d="m24 16.59 5 4.788v1.315l-5.033-4.601-4.037 4.661L23.725 27h-1.222L17 20.783v-1.397l2.277 2.63z"/>' +
+      "</g>",
+  );
+}
+
+/** 图片格式 — 更改图片（32×32，画框 + 裁切角标；单色层次） */
+export function iconPictureChange(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="nonzero">' +
+      '<path fill="currentColor" d="M1.999 25.742c.307.254.643.475 1 .658L3 27h3.859l-.99 1H2ZM30 4v24H10.092l.99-1H29V5H3v11.6a5.5 5.5 0 0 0-1.001.658L2 4z"/>' +
+      '<path fill="currentColor" fill-opacity="0.12" d="M3 26.4c.61.312 1.285.513 2 .578V27h1.86H3ZM29 5v22H11.083l1.558-1.573-5.555-5.608-2.122 2.121L7.004 24H5v-.05a2.5 2.5 0 0 1 0-4.9v-3.028a5.5 5.5 0 0 0-2 .578V5z"/>' +
+      '<path fill="currentColor" fill-opacity="0.36" d="M3 26.4c.61.312 1.285.513 2 .578V27H3Zm7.092-14.413 9.297 10.26V22l4.58-5L29 21.378V27H11.084l1.557-1.573-5.555-5.608-2.122 2.121L7.004 24H5v-.05a2.5 2.5 0 0 1 0-4.9V17.28z"/>' +
+      '<path fill="currentColor" fill-opacity="0.68" d="m10.12 11.283 9.218 10.039 4.874-5.216L29 21.026v1.315l-4.822-4.733-4.161 4.452L24.554 27h-1.271L10.137 12.717 5 18.103v-1.45z"/>' +
+      '<circle cx="23" cy="10" r="2" fill="currentColor" fill-opacity="0.48"/>' +
+      '<path fill="currentColor" fill-opacity="0.72" d="m11 25.508-3.842 4-.658-.68 2.72-2.826c-.523-.005-2.954-.008-3.292-.008h-.382q-.553.001-.553.014c-4.316 0-5.82-7.41-.967-8.904v1.03C.504 19.721 2 25.008 5.01 25.008h4.204L6.5 22.188l.658-.68z"/>' +
+      "</g>",
+  );
+}
+
+/** 图片格式 — 重置图片（32×32，画框 + 复位箭头；单色层次） */
+export function iconPictureReset(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="nonzero">' +
+      '<path fill="currentColor" d="M30 4v24H2V8.234l1 1.01V27h26V5H9.67a5.47 5.47 0 0 0-2.674-.985V4z"/>' +
+      '<path fill="currentColor" fill-opacity="0.12" d="M29 5v22H3V9.244l1.91 1.93 2.122-2.122-2.04-2.06h2.004v.05a2.5 2.5 0 0 1 0 4.9v3.028a5.5 5.5 0 0 0 2.673-9.971z"/>' +
+      '<path fill="currentColor" fill-opacity="0.36" d="m10.862 12.838 8.527 9.41V22l4.58-5L29 21.378V27H3v-7.638l4.253-4.421a5.5 5.5 0 0 0 3.61-2.103"/>' +
+      '<path fill="currentColor" fill-opacity="0.68" d="m11.158 12.413 8.18 8.909 4.874-5.216L29 21.026v1.315l-4.822-4.733-4.161 4.452L24.554 27h-1.271L10.57 13.187q.326-.36.587-.774M6.996 14.56v.41q.646-.06 1.24-.259L3 20.2v-1.449z"/>' +
+      '<circle cx="23" cy="10" r="2" fill="currentColor" fill-opacity="0.48"/>' +
+      '<path fill="currentColor" fill-opacity="0.72" d="m1.01 5.494 3.842-4 .658.679L2.79 5c.523.004 2.954.007 3.292.008h.382q.553-.002.553-.014c4.316 0 5.82 7.41.967 8.904v-1.03C11.505 11.28 10.01 5.993 7 5.993H2.796l2.714 2.82-.658.68z"/>' +
+      "</g>",
+  );
+}
+
 export function iconOrientation(): SVGSVGElement {
   return svgEl(
     "0 0 24 24",

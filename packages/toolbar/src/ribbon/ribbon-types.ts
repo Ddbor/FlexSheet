@@ -22,6 +22,16 @@ export type RibbonTabId =
   /** 浮动图片选中时动态插入的上下文选项卡 */
   | "pictureFormat";
 
+/** 与 flexsheet 浮动图 `FloatingPictureAdjustments` 字段一致（工具栏侧不依赖 flexsheet 包）。 */
+export interface FloatingPictureAdjustmentsState {
+  brightnessPct: number;
+  contrastPct: number;
+  sharpnessPct: number;
+  saturationPct: number;
+  colorTemperatureK: number;
+  transparencyPct: number;
+}
+
 export interface RibbonCommandEvent {
   /** 点状命令 id，如 `home.font.bold`、`view.zoom.100` */
   readonly id: string;
@@ -150,6 +160,14 @@ export interface FlexSheetLike {
    * 订阅时应立即用当前状态调用一次 listener。
    */
   subscribeFloatingPictureFocus?(listener: (active: boolean) => void): () => void;
+  /** 当前选中浮动图 dataUrl（用于「更正」缩略预览）；无选中时为 null。 */
+  getSelectedFloatingPictureDataUrl?(): string | null;
+  getFloatingPictureAdjustmentsState?(): FloatingPictureAdjustmentsState | null;
+  setFloatingPictureAdjustmentsState?(patch: Partial<FloatingPictureAdjustmentsState>): void;
+  /** 打开 Canvas 右侧「设置图片格式」面板（需已选中浮动图）。 */
+  openFloatingPictureFormatPane?(): void;
+  /** 将当前浮动图显示调整恢复为默认（亮度、对比度、透明度等）。 */
+  resetFloatingPictureFormatting?(): void;
   /** Ribbon「插入 -> 数据透视表」：打开数据透视表创建对话框。 */
   openPivotTableDialog?(): void;
   /** Ribbon「数据 -> 字段列表」：在透视区域内打开字段窗格。 */

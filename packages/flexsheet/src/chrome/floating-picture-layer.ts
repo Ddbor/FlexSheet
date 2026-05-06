@@ -60,6 +60,71 @@ export interface FloatingPictureLayerOptions {
   readonly getAnchorCell: () => { readonly row: number; readonly col: number };
 }
 
+/** 浮动图显示调整（CSS filter，与「设置图片格式」面板一致）。 */
+export interface FloatingPictureAdjustments {
+  /** 亮度偏移 %，约 -100～100，0 为原始 */
+  brightnessPct: number;
+  /** 对比度偏移 % */
+  contrastPct: number;
+  /** 锐化/柔化：负值柔化（blur），正值增强边缘（对比度近似），约 -100～100 */
+  sharpnessPct: number;
+  /** 饱和度 %，100 为原始 */
+  saturationPct: number;
+  /** 色温 K，约 2000～11000，6500 中性 */
+  colorTemperatureK: number;
+  /** 不透明度损失 %，0 完全不透明 */
+  transparencyPct: number;
+}
+
+export const DEFAULT_FLOATING_PICTURE_ADJUSTMENTS: FloatingPictureAdjustments = {
+  brightnessPct: 0,
+  contrastPct: 0,
+  sharpnessPct: 0,
+  saturationPct: 100,
+  colorTemperatureK: 6500,
+  transparencyPct: 0,
+};
+
+function clampN(n: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function cloneAdjustments(a: FloatingPictureAdjustments): FloatingPictureAdjustments {
+  return { ...a };
+}
+
+/** 将调整合成为 `img` 的 `filter` 字符串（Canvas 上 DOM 叠加层使用）。 */
+export function buildFloatingPictureCssFilter(a: FloatingPictureAdjustments): string {
+  const b = clampN(1 + a.brightnessPct / 100, 0.05, 3);
+  const c0 = clampN(1 + a.contrastPct / 100, 0.05, 3);
+  const sat = clampN(a.saturationPct / 100, 0, 4);
+  const op = clampN(1 - a.transparencyPct / 100, 0, 1);
+  let blurPx = 0;
+  let sharpenBoost = 1;
+  if (a.sharpnessPct < 0) {
+    blurPx = clampN((-a.sharpnessPct / 100) * 3, 0, 3.5);
+  } else if (a.sharpnessPct > 0) {
+    sharpenBoost = 1 + (a.sharpnessPct / 100) * 0.55;
+  }
+  const c = c0 * sharpenBoost;
+  const parts: string[] = [];
+  if (blurPx > 0.05) {
+    parts.push(`blur(${blurPx}px)`);
+  }
+  parts.push(`brightness(${b})`);
+  parts.push(`contrast(${c})`);
+  parts.push(`saturate(${sat})`);
+  const tk = a.colorTemperatureK;
+  if (Number.isFinite(tk) && tk !== 6500) {
+    const deg = clampN(((tk - 6500) / 4500) * 28, -32, 32);
+    if (Math.abs(deg) > 0.3) {
+      parts.push(`hue-rotate(${deg}deg)`);
+    }
+  }
+  parts.push(`opacity(${op})`);
+  return parts.join(" ");
+}
+
 /** 浮动图完整状态快照（剪切/粘贴撤销用）。 */
 export interface FloatingPictureSnapshot {
   readonly id: string;
@@ -74,6 +139,7 @@ export interface FloatingPictureSnapshot {
   readonly rotationRad: number;
   readonly dataUrl: string;
   readonly z: number;
+  readonly adjustments: FloatingPictureAdjustments;
 }
 
 /** 粘贴前异步算好的几何与像素（不含 id/z，避免未执行命令就占用序号）。 */
@@ -105,6 +171,7 @@ interface PictureModel {
   rotationRad: number;
   dataUrl: string;
   z: number;
+  adjustments: FloatingPictureAdjustments;
 }
 
 type ResizeHandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -275,6 +342,7 @@ export class FloatingPictureLayer {
       rotationRad: m.rotationRad,
       dataUrl: m.dataUrl,
       z: m.z,
+      adjustments: cloneAdjustments(m.adjustments),
     };
   }
 
@@ -296,6 +364,7 @@ export class FloatingPictureLayer {
       rotationRad: snapshot.rotationRad,
       dataUrl: snapshot.dataUrl,
       z: snapshot.z,
+      adjustments: cloneAdjustments(snapshot.adjustments),
     };
     this.zCounter = Math.max(this.zCounter, snapshot.z);
     const seqNum = Number.parseInt(snapshot.id.replace(/^fp-/, ""), 10);
@@ -382,6 +451,7 @@ export class FloatingPictureLayer {
       rotationRad: p.rotationRad,
       dataUrl: p.dataUrl,
       z,
+      adjustments: cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS),
     };
     const el = this.createItemElement(model);
     this.byId.set(id, { model, el });
@@ -401,6 +471,7 @@ export class FloatingPictureLayer {
       rotationRad: model.rotationRad,
       dataUrl: model.dataUrl,
       z: model.z,
+      adjustments: cloneAdjustments(model.adjustments),
     };
   }
 
@@ -562,6 +633,7 @@ export class FloatingPictureLayer {
         rotationRad: 0,
         dataUrl: exportableUrl,
         z: ++this.zCounter,
+        adjustments: cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS),
       };
       const el = this.createItemElement(model);
       this.byId.set(id, { model, el });
@@ -607,7 +679,59 @@ export class FloatingPictureLayer {
     wrap.appendChild(im);
     wrap.appendChild(focus);
     wrap.addEventListener("pointerdown", (ev) => this.onItemPointerDown(ev, model.id));
+    this.applyImageFilterToElement(wrap, model);
     return wrap;
+  }
+
+  private applyImageFilterToElement(el: HTMLDivElement, model: PictureModel): void {
+    const img = el.querySelector(".fs-fp-item__img");
+    if (img instanceof HTMLImageElement) {
+      img.style.filter = buildFloatingPictureCssFilter(model.adjustments);
+    }
+  }
+
+  getFloatingPictureAdjustments(pictureId: string): FloatingPictureAdjustments | null {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return null;
+    }
+    return cloneAdjustments(rec.model.adjustments);
+  }
+
+  setFloatingPictureAdjustments(
+    pictureId: string,
+    patch: Partial<FloatingPictureAdjustments>,
+  ): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    rec.model.adjustments = { ...rec.model.adjustments, ...patch };
+    this.applyImageFilterToElement(rec.el, rec.model);
+  }
+
+  resetFloatingPictureAdjustments(pictureId: string): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    rec.model.adjustments = cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS);
+    this.applyImageFilterToElement(rec.el, rec.model);
+  }
+
+  /** 画布像素下的尺寸与偏移（格式窗格「裁剪」区只读展示）。 */
+  getFloatingPictureLayoutPx(pictureId: string): {
+    readonly widthPx: number;
+    readonly heightPx: number;
+    readonly offsetXPx: number;
+    readonly offsetYPx: number;
+  } | null {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return null;
+    }
+    const m = rec.model;
+    return { widthPx: m.width, heightPx: m.height, offsetXPx: m.relCX, offsetYPx: m.relCY };
   }
 
   private getCenterCanvas(model: PictureModel): { cx: number; cy: number } | null {
