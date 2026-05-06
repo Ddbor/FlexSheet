@@ -1185,7 +1185,7 @@ export function exportWorkbookToXlsxBytes(
   for (const piece of drawingZipPieces) {
     const d = piece.sheetIndex + 1;
     ctOverrides.push(
-      `<Override PartName="/xl/drawings/drawing${d}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.drawing+xml"/>`,
+      `<Override PartName="/xl/drawings/drawing${d}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`,
     );
   }
   for (const p of pivotPieces) {

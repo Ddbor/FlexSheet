@@ -266,6 +266,8 @@ export class FloatingPictureLayer {
       if (cr === null) {
         return;
       }
+      // Excel only supports PNG/JPEG in drawings; convert other formats (WebP, GIF, etc.) to PNG
+      const exportableUrl = normalizeToExportableDataUrl(img, dataUrl);
       const id = `fp-${++this.idSeq}`;
       const model: PictureModel = {
         id,
@@ -278,7 +280,7 @@ export class FloatingPictureLayer {
         width: w,
         height: h,
         rotationRad: 0,
-        dataUrl,
+        dataUrl: exportableUrl,
         z: ++this.zCounter,
       };
       const el = this.createItemElement(model);
@@ -692,4 +694,21 @@ export class FloatingPictureLayer {
       this.applyGeometry(rec.model, rec.el, { snapPixels: true });
     }
   }
+}
+
+function normalizeToExportableDataUrl(img: HTMLImageElement, dataUrl: string): string {
+  const m = /^data:([^;,]+)/i.exec(dataUrl);
+  const mime = m?.[1]?.toLowerCase() ?? "";
+  if (mime === "image/png" || mime === "image/jpeg" || mime === "image/jpg") {
+    return dataUrl;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth || 1;
+  canvas.height = img.naturalHeight || 1;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) {
+    return dataUrl;
+  }
+  ctx.drawImage(img, 0, 0);
+  return canvas.toDataURL("image/png");
 }
