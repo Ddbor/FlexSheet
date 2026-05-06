@@ -132,3 +132,32 @@ function evaluateFormulaCell(
     visiting.delete(key);
   }
 }
+
+/**
+ * 不向单元格写回求值结果，仅在当前表数据快照上计算 `=` 开头公式（公式生成器「结果」预览等）。
+ */
+export function evaluateFormulaExpressionOnSheet(sheet: Worksheet, formula: string): CellScalar {
+  const visiting = new Set<string>();
+  let ast;
+  try {
+    ast = parseFormula(formula);
+  } catch (e) {
+    if (e instanceof ParseError) {
+      return null;
+    }
+    throw e;
+  }
+  const ctx: EvalContext = {
+    getScalar: (r, c) => {
+      if (r < 0 || c < 0 || r >= sheet.rowCount || c >= sheet.colCount) {
+        return null;
+      }
+      const dep = sheet.getCell(r, c);
+      if (dep.formula !== null) {
+        return evaluateFormulaCell(sheet, r, c, visiting);
+      }
+      return dep.value;
+    },
+  };
+  return evaluateAst(ast, ctx);
+}

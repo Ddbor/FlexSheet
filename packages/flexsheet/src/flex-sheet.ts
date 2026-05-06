@@ -14,6 +14,7 @@ import {
 } from "@flexsheet/core";
 import {
   ClearRegionContentsCommand,
+  evaluateFormulaExpressionOnSheet,
   recalcWorksheet,
   SetCellValueCommand,
 } from "@flexsheet/formula";
@@ -88,6 +89,7 @@ import { showFormatAsTableDialog } from "./dialogs/format-as-table-dialog.js";
 import { openCustomSortDialogWithOverlay } from "./dialogs/custom-sort-dialog.js";
 import { openFindReplaceDialogWithOverlay } from "./dialogs/find-replace-dialog.js";
 import { openGotoSpecialDialogWithOverlay } from "./dialogs/goto-special-dialog.js";
+import { buildFormulaBuilderFunctionEntries } from "./chrome/formula-builder-entries.js";
 import { createFormulaBuilderPanel, type FormulaBuilderPanelController } from "./chrome/formula-builder-panel.js";
 import { showFillSeriesDialog } from "./dialogs/fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./dialogs/new-table-style-dialog.js";
@@ -241,6 +243,12 @@ export class FlexSheet {
   private readonly canvasMountEl: HTMLDivElement;
   private readonly formulaBuilderPanel: FormulaBuilderPanelController;
   /**
+   * 公式生成器：点击「插入函数」时锁定的写入目标（表 + 合并锚点格），
+   * 「完成」时写入此格，避免在表上改选区后写到错误单元格。
+   */
+  private formulaBuilderInsertCell: { readonly sheet: Worksheet; readonly row: number; readonly col: number } | null =
+    null;
+  /**
    * 对话框「从工作表选定区域」：框选结束写入引用；ESC 取消并恢复进入前的选区。
    */
   private rangeReferencePick:
@@ -292,7 +300,13 @@ export class FlexSheet {
       onClose: () => {
         this.closeFormulaBuilderPanel();
       },
+      onBeginParamEdit: () => {
+        this.lockFormulaBuilderInsertCell();
+      },
+      onPreviewFormula: (formula) => this.previewFormulaBuilderExpression(formula),
+      onApplyFormula: (formula) => this.applyFormulaFromBuilder(formula),
     });
+    this.formulaBuilderPanel.setEntries(buildFormulaBuilderFunctionEntries());
 
     this.selection = new SelectionModel(() => this.workbook.getActiveSheet());
     this.workspace = new Workspace(this._workbook);
@@ -1705,12 +1719,13 @@ export class FlexSheet {
   }
 
   /**
-   * Ribbon「插入函数」「其他函数…」：在表格右侧打开「公式生成器」面板（函数列表由后续数据源填充）。
+   * Ribbon「插入函数」「其他函数…」：在表格右侧打开「公式生成器」面板（函数列表来自 Microsoft 支持文档生成的目录）。
    */
   openInsertFunctionDialogFromRibbon(): void {
     if (this.isCellEditing()) {
       return;
     }
+    this.formulaBuilderInsertCell = null;
     this.formulaBuilderPanel.show();
     this.syncSizeAndDraw();
   }
@@ -1719,11 +1734,101 @@ export class FlexSheet {
     if (!this.formulaBuilderPanel.isOpen()) {
       return;
     }
+    this.formulaBuilderInsertCell = null;
     this.formulaBuilderPanel.hide();
     this.syncSizeAndDraw();
     queueMicrotask(() => {
       this.canvas.focus();
     });
+  }
+
+  private lockFormulaBuilderInsertCell(): void {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      this.formulaBuilderInsertCell = null;
+      return;
+    }
+    const ac = this.selection.getActiveCell();
+    const anchor = sheet.getMergeAnchorCell(ac.row, ac.col);
+    this.formulaBuilderInsertCell = { sheet, row: anchor.row, col: anchor.col };
+  }
+
+  /** 公式生成器「结果」预览：在当前活动表上临时求值（不写回预览目标格）。 */
+  private previewFormulaBuilderExpression(formula: string): string | null {
+    const sheet = this.workbook.getActiveSheet();
+    if (sheet === undefined) {
+      return null;
+    }
+    try {
+      const v = evaluateFormulaExpressionOnSheet(sheet, formula);
+      if (v === null) {
+        return "（空）";
+      }
+      if (typeof v === "number") {
+        return Number.isFinite(v) ? String(v) : "…";
+      }
+      return String(v);
+    } catch {
+      return "…";
+    }
+  }
+
+  /** 公式生成器「完成」：写入「插入函数」时锁定的单元格（若已丢失则回退到当前活动格）。 */
+  private applyFormulaFromBuilder(formula: string): void {
+    const locked = this.formulaBuilderInsertCell;
+    this.formulaBuilderInsertCell = null;
+
+    let sheet: Worksheet | undefined;
+    let row: number;
+    let col: number;
+
+    if (
+      locked !== null &&
+      this.workbook.getSheets().includes(locked.sheet) &&
+      locked.row >= 0 &&
+      locked.col >= 0
+    ) {
+      sheet = locked.sheet;
+      row = locked.row;
+      col = locked.col;
+    } else {
+      sheet = this.workbook.getActiveSheet();
+      if (sheet === undefined) {
+        return;
+      }
+      const ac = this.selection.getActiveCell();
+      const anchor = sheet.getMergeAnchorCell(ac.row, ac.col);
+      row = anchor.row;
+      col = anchor.col;
+    }
+
+    const activeIdx = this.workbook.getSheets().indexOf(sheet);
+    if (activeIdx >= 0) {
+      this.workbook.activeSheetIndex = activeIdx;
+    }
+
+    this.workspace.commands.execute(new SetCellValueCommand(sheet, row, col, formula));
+    this.selection.selectCell(row, col);
+    this.afterSelectionChanged();
+    this.refresh();
+  }
+
+  /**
+   * 参数编辑模式下，用户在工作表上结束一次选区操作后，将绝对引用写入当前活动参数框。
+   */
+  private tryApplyFormulaBuilderArgRefFromSelection(): void {
+    if (!this.formulaBuilderPanel.isOpen() || !this.formulaBuilderPanel.isPickingArgRefFromSheet()) {
+      return;
+    }
+    if (this.workbook.getActiveSheet() === undefined) {
+      return;
+    }
+    const n = normalizeSelectionRange(this.selection.getNormalizedRange());
+    const ref =
+      n.startRow === n.endRow && n.startCol === n.endCol
+        ? this.formatAbsoluteCellRefString(n.startRow, n.startCol).slice(1)
+        : this.formatAbsoluteRangeRefString(n).slice(1);
+    this.formulaBuilderPanel.applyArgRefFromSheet(ref);
   }
 
   /**
@@ -2066,6 +2171,7 @@ export class FlexSheet {
       }
       this.afterSelectionChanged();
       this.tryCommitRangeReferencePick();
+      this.tryApplyFormulaBuilderArgRefFromSelection();
       return;
     }
 
@@ -2138,6 +2244,7 @@ export class FlexSheet {
     }
     this.afterSelectionChanged();
     this.tryCommitRangeReferencePick();
+    this.tryApplyFormulaBuilderArgRefFromSelection();
   }
 
   private formatAbsoluteRangeRefString(range: SelectionRange): string {

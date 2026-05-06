@@ -32,6 +32,29 @@ describe("parseFormula", () => {
     const ast = parseFormula("=a1+b2");
     expect(ast.type).toBe("binary");
   });
+
+  it("parses absolute refs $K$9 and mixed A$1", () => {
+    const ast = parseFormula("=$K$9+A$1");
+    expect(ast.type).toBe("binary");
+    if (ast.type === "binary") {
+      expect(ast.left.type).toBe("ref");
+      expect(ast.right.type).toBe("ref");
+      if (ast.left.type === "ref") {
+        expect(ast.left.row).toBe(8);
+        expect(ast.left.col).toBe(10);
+      }
+    }
+  });
+
+  it("parses AVERAGE with dollar refs", () => {
+    const ast = parseFormula("=AVERAGE($K$9,$K$10)");
+    expect(ast.type).toBe("call");
+    if (ast.type === "call") {
+      expect(ast.args.length).toBe(2);
+      expect(ast.args[0]?.type).toBe("ref");
+      expect(ast.args[1]?.type).toBe("ref");
+    }
+  });
 });
 
 describe("evaluateAst + recalc", () => {
@@ -52,6 +75,15 @@ describe("evaluateAst + recalc", () => {
     sheet.setCellFormula(0, 2, "=A1+B1");
     recalcWorksheet(sheet);
     expect(sheet.getCell(0, 2).value).toBe(10);
+  });
+
+  it("evaluates AVERAGE($K$9,$K$10)", () => {
+    const sheet = new Worksheet("S", 20, 20);
+    sheet.setCellLiteral(8, 10, 4);
+    sheet.setCellLiteral(9, 10, 8);
+    sheet.setCellFormula(0, 0, "=AVERAGE($K$9,$K$10)");
+    recalcWorksheet(sheet);
+    expect(sheet.getCell(0, 0).value).toBe(6);
   });
 
   it("recalculates when dependency literal changes via setCellValueAndRecalc", () => {

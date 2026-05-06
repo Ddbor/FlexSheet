@@ -107,12 +107,23 @@ function tokenize(s: string): Token[] {
       continue;
     }
 
-    if ((ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z")) {
+    /** A1 / $A$1 / A$1 / $A1 等 Excel 引用（`$` 仅表示绝对，解析为相同行列下标）。 */
+    if (ch === "$" || (ch >= "A" && ch <= "Z") || (ch >= "a" && ch <= "z")) {
       const start = i;
+      if (s[i] === "$") {
+        i++;
+        if (i >= n || !((s[i] >= "A" && s[i] <= "Z") || (s[i] >= "a" && s[i] <= "z"))) {
+          throw new ParseError(`「$」后应为列字母`, pos);
+        }
+      }
+      const colStart = i;
       while (i < n && ((s[i] >= "A" && s[i] <= "Z") || (s[i] >= "a" && s[i] <= "z"))) {
         i++;
       }
-      const letters = s.slice(start, i);
+      const letters = s.slice(colStart, i);
+      if (i < n && s[i] === "$") {
+        i++;
+      }
       if (i < n && s[i] >= "0" && s[i] <= "9") {
         const d0 = i;
         while (i < n && s[i] >= "0" && s[i] <= "9") {
@@ -122,7 +133,7 @@ function tokenize(s: string): Token[] {
         if (!Number.isInteger(row1) || row1 < 1) {
           throw new ParseError(`无效行号「${s.slice(d0, i)}」`, d0);
         }
-        const col = colLettersToIndex(letters, start);
+        const col = colLettersToIndex(letters, colStart);
         const row = row1 - 1;
         out.push({ kind: "ref", row, col, pos: start });
         continue;

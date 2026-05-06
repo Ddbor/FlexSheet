@@ -6,6 +6,7 @@ export { ParseError, parseFormula, stripFormulaEquals } from "./parser.js";
 
 export {
   applyCellSnapshotAndRecalc,
+  evaluateFormulaExpressionOnSheet,
   recalcWorksheet,
   setCellLiteralAndRecalc,
   setCellValueAndRecalc,
