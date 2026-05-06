@@ -2,11 +2,7 @@ import { PluginBase, PLUGIN_SERVICE_KEYS, type PluginContext } from "@flexsheet/
 import type { CellEditor } from "@flexsheet/editor";
 
 import type { FlexSheet } from "../flex-sheet.js";
-import {
-  runClipboardCopy,
-  runClipboardCut,
-  runClipboardPaste,
-} from "../clipboard/clipboard-run.js";
+import { runClipboardCopy, runClipboardCut } from "../clipboard/clipboard-run.js";
 import { isEditableKeydownTarget } from "../chrome/keyboard-editable-target.js";
 
 export interface ClipboardPluginOptions {
@@ -82,6 +78,17 @@ export class ClipboardPlugin extends PluginBase {
     if (key !== "c" && key !== "x" && key !== "v") {
       return;
     }
+    const fpId = flex.getSelectedFloatingPictureId();
+    if (fpId !== null && (key === "c" || key === "x")) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (key === "c") {
+        void flex.clipboardCopyFloatingPicture(fpId);
+      } else {
+        void flex.clipboardCutFloatingPicture(fpId);
+      }
+      return;
+    }
     const sheet = flex.workbook.getActiveSheet();
     if (sheet === undefined) {
       return;
@@ -96,6 +103,6 @@ export class ClipboardPlugin extends PluginBase {
       void runClipboardCut(flex, sheet);
       return;
     }
-    void runClipboardPaste(flex, sheet);
+    void flex.clipboardPaste();
   };
 }

@@ -32,3 +32,17 @@ export async function readClipboardText(): Promise<string | null> {
   }
   return null;
 }
+
+/**
+ * 将 data URL 图像写入系统剪贴板（需安全上下文且浏览器支持 ClipboardItem）。
+ */
+export async function writeClipboardImageFromDataUrl(dataUrl: string): Promise<void> {
+  if (typeof ClipboardItem === "undefined" || navigator.clipboard?.write === undefined) {
+    throw new Error("当前环境不支持将图片写入剪贴板");
+  }
+  const res = await fetch(dataUrl);
+  const blob = await res.blob();
+  const type =
+    blob.type !== "" && blob.type.startsWith("image/") ? blob.type : "image/png";
+  await navigator.clipboard.write([new ClipboardItem({ [type]: blob })]);
+}

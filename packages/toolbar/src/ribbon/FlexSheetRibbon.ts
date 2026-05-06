@@ -5,6 +5,7 @@ import {
   mountHomeTab,
   mountInsertTab,
   mountPageLayoutTab,
+  mountPictureFormatTab,
   mountViewTab,
 } from "./tabs/index.js";
 import type {
@@ -28,6 +29,7 @@ const TAB_LABEL: Record<RibbonTabId, string> = {
   formula: "公式",
   data: "数据",
   view: "视图",
+  pictureFormat: "图片格式",
 };
 
 export class FlexSheetRibbon {
@@ -40,6 +42,12 @@ export class FlexSheetRibbon {
   private readonly panels = new Map<RibbonTabId, HTMLElement>();
   private readonly onDocPointerDown: (e: PointerEvent) => void;
   private backstage: RibbonBackstageHandles | null = null;
+  private tablistEl!: HTMLElement;
+  private ribbonBodyEl!: HTMLElement;
+  private ribbonEmit!: RibbonEmit;
+  private pictureFocusUnsub: (() => void) | null = null;
+  /** 进入「图片格式」前的选项卡，取消选中图片后若当前仍在该选项卡则切回 */
+  private tabBeforeFloatingPicture: RibbonTabId = "home";
 
   constructor(options: FlexSheetRibbonOptions) {
     this.onCommand = options.onCommand;
@@ -67,6 +75,7 @@ export class FlexSheetRibbon {
     tablist.setAttribute("role", "tablist");
     tablist.setAttribute("aria-label", "主选项卡");
     tablist.appendChild(fileTab);
+    this.tablistEl = tablist;
 
     for (const id of TAB_ORDER) {
       const btn = document.createElement("button");
@@ -92,11 +101,13 @@ export class FlexSheetRibbon {
 
     const body = document.createElement("div");
     body.className = "fs-ribbon__body";
+    this.ribbonBodyEl = body;
 
-    const emit: RibbonEmit = (id, tab, payload) => {
+    this.ribbonEmit = (id, tab, payload) => {
       const ev: RibbonCommandEvent = { id, tab, payload };
       this.onCommand?.(ev);
     };
+    const emit = this.ribbonEmit;
 
     for (const id of TAB_ORDER) {
       const panel = document.createElement("div");
@@ -160,6 +171,7 @@ export class FlexSheetRibbon {
       this.applyThemeMode("light");
     }
     this.syncTabSelectionUi();
+    this.bindFloatingPictureTabSubscription();
   }
 
   getElement(): HTMLElement {
@@ -167,9 +179,14 @@ export class FlexSheetRibbon {
   }
 
   setFlexSheet(flexSheet: FlexSheetLike | undefined): void {
+    this.pictureFocusUnsub?.();
+    this.pictureFocusUnsub = null;
     this.flexSheet = flexSheet;
     if (flexSheet !== undefined) {
       this.applyThemeFromSheet(flexSheet.getTheme());
+      this.bindFloatingPictureTabSubscription();
+    } else {
+      this.removePictureFormatTab();
     }
   }
 
@@ -226,6 +243,76 @@ export class FlexSheetRibbon {
     this.backstage = null;
   }
 
+  private bindFloatingPictureTabSubscription(): void {
+    const fs = this.flexSheet;
+    if (fs?.subscribeFloatingPictureFocus === undefined) {
+      return;
+    }
+    this.pictureFocusUnsub = fs.subscribeFloatingPictureFocus((active) => {
+      if (active) {
+        if (this.activeTab !== "pictureFormat") {
+          this.tabBeforeFloatingPicture = this.activeTab;
+        }
+        this.ensurePictureFormatTab();
+        this.selectTab("pictureFormat");
+      } else {
+        this.removePictureFormatTab();
+      }
+    });
+  }
+
+  private ensurePictureFormatTab(): void {
+    const id: RibbonTabId = "pictureFormat";
+    if (this.tabButtons.has(id)) {
+      return;
+    }
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "fs-ribbon__tab";
+    btn.setAttribute("role", "tab");
+    btn.id = `fs-ribbon-tab-${id}`;
+    btn.setAttribute("aria-controls", `fs-ribbon-panel-${id}`);
+    btn.dataset.tabId = id;
+    btn.textContent = TAB_LABEL[id];
+    btn.setAttribute("tabindex", "-1");
+    btn.addEventListener("click", () => {
+      this.selectTab(id);
+    });
+    btn.addEventListener("keydown", (ev) => {
+      this.onTabKeydown(ev, id);
+    });
+    this.tabButtons.set(id, btn);
+    this.tablistEl.appendChild(btn);
+
+    const panel = document.createElement("div");
+    panel.className = "fs-ribbon__panel";
+    panel.id = `fs-ribbon-panel-${id}`;
+    panel.setAttribute("role", "tabpanel");
+    panel.setAttribute("aria-labelledby", `fs-ribbon-tab-${id}`);
+    panel.hidden = true;
+    panel.dataset.tabId = id;
+    mountPictureFormatTab(panel, this.ribbonEmit);
+    this.panels.set(id, panel);
+    this.ribbonBodyEl.appendChild(panel);
+  }
+
+  private removePictureFormatTab(): void {
+    const id: RibbonTabId = "pictureFormat";
+    const btn = this.tabButtons.get(id);
+    const panel = this.panels.get(id);
+    if (btn === undefined || panel === undefined) {
+      return;
+    }
+    if (this.activeTab === "pictureFormat") {
+      this.activeTab = this.tabBeforeFloatingPicture;
+    }
+    btn.remove();
+    panel.remove();
+    this.tabButtons.delete(id);
+    this.panels.delete(id);
+    this.syncTabSelectionUi();
+  }
+
   private selectTab(id: RibbonTabId): void {
     this.activeTab = id;
     this.syncTabSelectionUi();
@@ -244,28 +331,35 @@ export class FlexSheetRibbon {
     }
   }
 
+  private visibleMainTabSequence(): readonly RibbonTabId[] {
+    return this.tabButtons.has("pictureFormat")
+      ? [...TAB_ORDER, "pictureFormat"]
+      : TAB_ORDER;
+  }
+
   private onTabKeydown(ev: KeyboardEvent, id: RibbonTabId): void {
-    const idx = TAB_ORDER.indexOf(id);
+    const seq = this.visibleMainTabSequence();
+    const idx = seq.indexOf(id);
     if (idx < 0) {
       return;
     }
     let nextIdx = idx;
     if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {
-      nextIdx = (idx + 1) % TAB_ORDER.length;
+      nextIdx = (idx + 1) % seq.length;
       ev.preventDefault();
     } else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {
-      nextIdx = (idx - 1 + TAB_ORDER.length) % TAB_ORDER.length;
+      nextIdx = (idx - 1 + seq.length) % seq.length;
       ev.preventDefault();
     } else if (ev.key === "Home") {
       nextIdx = 0;
       ev.preventDefault();
     } else if (ev.key === "End") {
-      nextIdx = TAB_ORDER.length - 1;
+      nextIdx = seq.length - 1;
       ev.preventDefault();
     } else {
       return;
     }
-    const nextId = TAB_ORDER[nextIdx];
+    const nextId = seq[nextIdx];
     if (nextId !== undefined) {
       this.selectTab(nextId);
       this.tabButtons.get(nextId)?.focus();
@@ -273,6 +367,8 @@ export class FlexSheetRibbon {
   }
 
   destroy(): void {
+    this.pictureFocusUnsub?.();
+    this.pictureFocusUnsub = null;
     document.removeEventListener("pointerdown", this.onDocPointerDown, true);
     this.closeBackstage();
     this.root.remove();

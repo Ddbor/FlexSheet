@@ -48,6 +48,8 @@ import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
 import { columnIndexToLabel } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
+import { writeClipboardImageFromDataUrl } from "./clipboard/clipboard-io.js";
+import { getFloatingPictureClipboard, setFloatingPictureClipboard } from "./clipboard/internal-buffer.js";
 import { runClipboardCopy, runClipboardCut, runClipboardPaste } from "./clipboard/clipboard-run.js";
 import { useClipboard } from "./plugins/clipboard-plugin.js";
 import {
@@ -75,6 +77,10 @@ import {
   ClearSelectionFormatsCommand,
   isRibbonBorderCommandId,
 } from "./commands/cell-style-commands.js";
+import {
+  CutFloatingPictureCommand,
+  PasteFloatingPictureCommand,
+} from "./commands/floating-picture-clipboard-commands.js";
 import type { FormatCellsBorderState } from "./format-cells/format-cells-border.js";
 import {
   AddConditionalFormatRuleCommand,
@@ -102,7 +108,11 @@ import {
 } from "./pivot/pivot-table-fields-pane.js";
 import { refreshPivotTableDefinition } from "./pivot/pivot-table-command.js";
 import { useSheetContextMenu } from "./plugins/sheet-context-menu-plugin.js";
-import { FloatingPictureLayer } from "./chrome/floating-picture-layer.js";
+import {
+  FloatingPictureLayer,
+  type FloatingPicturePastePrepared,
+  type FloatingPictureSnapshot,
+} from "./chrome/floating-picture-layer.js";
 import { mountFormatCellsDialog } from "./format-cells/format-cells-dialog.js";
 import { useUndoRedo } from "./plugins/undo-redo-plugin.js";
 import { AutofillExtendCommand } from "./commands/autofill-extend-command.js";
@@ -424,6 +434,7 @@ export class FlexSheet {
       useSheetContextMenu({
         canvas: this.canvas,
         getFlexSheet: () => this,
+        getFloatingPictureLayerRoot: () => this.floatingPictureLayer.getRootElement(),
       }),
     );
 
@@ -941,6 +952,7 @@ export class FlexSheet {
   refresh(): void {
     this.cellEditor.syncLayout();
     this.syncAutoSumFunctionHintLayout();
+    this.floatingPictureLayer.syncClipToTableBody();
     this.renderer.requestRedraw();
   }
 
@@ -1455,6 +1467,11 @@ export class FlexSheet {
     if (this.isCellEditing()) {
       return;
     }
+    const fpId = this.getSelectedFloatingPictureId();
+    if (fpId !== null) {
+      await this.clipboardCopyFloatingPicture(fpId);
+      return;
+    }
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) {
       return;
@@ -1470,6 +1487,11 @@ export class FlexSheet {
     if (this.isCellEditing()) {
       return;
     }
+    const fpId = this.getSelectedFloatingPictureId();
+    if (fpId !== null) {
+      this.clipboardCutFloatingPicture(fpId);
+      return;
+    }
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) {
       return;
@@ -1482,11 +1504,68 @@ export class FlexSheet {
     if (this.isCellEditing()) {
       return;
     }
+    const fp = getFloatingPictureClipboard();
+    if (fp !== null) {
+      const prepared = await this.floatingPictureLayer.buildPasteFloatingPicturePrepared(fp);
+      if (prepared !== null) {
+        this.workspace.commands.execute(new PasteFloatingPictureCommand(this, prepared));
+      }
+      return;
+    }
     const sheet = this.workbook.getActiveSheet();
     if (sheet === undefined) {
       return;
     }
     await runClipboardPaste(this, sheet);
+  }
+
+  /** 当前选中的浮动图片 id；无选中时为 null（供快捷键剪贴板）。 */
+  getSelectedFloatingPictureId(): string | null {
+    return this.floatingPictureLayer.getSelectedPictureId();
+  }
+
+  /** 复制浮动图：写入应用内剪贴板，并尽力写入系统图像剪贴板。 */
+  async clipboardCopyFloatingPicture(pictureId: string): Promise<void> {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const dataUrl = this.floatingPictureLayer.getDataUrlForPicture(pictureId);
+    if (dataUrl === null) {
+      return;
+    }
+    this.clearClipboardMarquee();
+    this.clearPendingClipboardCut();
+    setFloatingPictureClipboard(dataUrl);
+    void writeClipboardImageFromDataUrl(dataUrl).catch(() => {
+      /* 系统剪贴板不可用时仍可用应用内粘贴 */
+    });
+  }
+
+  /** 剪切：立即移除图片，并写入应用内剪贴板；系统剪贴板尽力而为；支持撤销恢复。 */
+  clipboardCutFloatingPicture(pictureId: string): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const snapshot = this.floatingPictureLayer.takeFloatingPictureSnapshot(pictureId);
+    if (snapshot === null) {
+      return;
+    }
+    this.clearClipboardMarquee();
+    this.clearPendingClipboardCut();
+    this.workspace.commands.execute(new CutFloatingPictureCommand(this, snapshot));
+  }
+
+  /** 供浮动图剪贴命令：按快照恢复（撤销剪切 / 重做粘贴）。 */
+  restoreFloatingPictureFromSnapshot(snapshot: FloatingPictureSnapshot): void {
+    this.floatingPictureLayer.restoreFloatingPicture(snapshot);
+  }
+
+  removeFloatingPictureById(pictureId: string): void {
+    this.floatingPictureLayer.removePictureById(pictureId);
+  }
+
+  insertFloatingPictureFromPrepared(prepared: FloatingPicturePastePrepared): FloatingPictureSnapshot {
+    return this.floatingPictureLayer.insertFloatingPictureFromPrepared(prepared);
   }
 
   /**
@@ -1946,6 +2025,16 @@ export class FlexSheet {
   /** XLSX 导出：浮动插入图片的描述列表（与 `exportWorkbookToXlsxBlob` 的 `floatingPictures` / `viewZoom` 配合）。 */
   getFloatingPicturesForXlsxExport(): readonly XlsxFloatingPictureExport[] {
     return this.floatingPictureLayer.getPicturesForXlsxExport();
+  }
+
+  /** Ribbon「图片格式」：浮动图选中状态变化（订阅后立即回调当前状态）。 */
+  subscribeFloatingPictureFocus(listener: (active: boolean) => void): () => void {
+    return this.floatingPictureLayer.subscribeFloatingPictureFocus(listener);
+  }
+
+  /** 右键菜单打开前选中对应浮动图。 */
+  focusFloatingPictureById(pictureId: string): void {
+    this.floatingPictureLayer.focusPictureById(pictureId);
   }
 
   /** Ribbon「插入 -> 图片」：从本机选择图片，浮于当前工作表之上（随滚动/缩放联动；未写入单元格或工作簿持久化）。 */

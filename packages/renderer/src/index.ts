@@ -28,4 +28,8 @@ export {
 export { computeColumnAutoWidth, computeRowAutoHeight } from "./cell-auto-fit.js";
 export { expandSelectionRangeForMergePaint, getClampedSelectionSpan } from "./canvas/canvas-renderer-selection-span.js";
 export { paintCellFillPatternOverlay } from "./canvas/canvas-cell-fill-pattern.js";
-export { SELECTION_OUTLINE_VISUAL_SCALE } from "./canvas/canvas-renderer-constants.js";
+export {
+  HEADER_STRIP_BASE_HEIGHT,
+  HEADER_STRIP_BASE_WIDTH,
+  SELECTION_OUTLINE_VISUAL_SCALE,
+} from "./canvas/canvas-renderer-constants.js";

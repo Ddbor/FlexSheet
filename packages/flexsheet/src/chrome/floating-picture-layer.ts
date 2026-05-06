@@ -5,7 +5,11 @@
 
 import type { Workbook } from "@flexsheet/core";
 import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
-import type { CanvasRenderer } from "@flexsheet/renderer";
+import {
+  HEADER_STRIP_BASE_HEIGHT,
+  HEADER_STRIP_BASE_WIDTH,
+  type CanvasRenderer,
+} from "@flexsheet/renderer";
 
 const STYLE_ID = "fs-floating-picture-styles";
 
@@ -54,6 +58,36 @@ export interface FloatingPictureLayerOptions {
   readonly getWorkbook: () => Workbook;
   /** 插入图片时锚定的单元格（通常为当前活动单元格）。 */
   readonly getAnchorCell: () => { readonly row: number; readonly col: number };
+}
+
+/** 浮动图完整状态快照（剪切/粘贴撤销用）。 */
+export interface FloatingPictureSnapshot {
+  readonly id: string;
+  readonly sheetName: string;
+  readonly sheetIndex: number;
+  readonly anchorRow: number;
+  readonly anchorCol: number;
+  readonly relCX: number;
+  readonly relCY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly rotationRad: number;
+  readonly dataUrl: string;
+  readonly z: number;
+}
+
+/** 粘贴前异步算好的几何与像素（不含 id/z，避免未执行命令就占用序号）。 */
+export interface FloatingPicturePastePrepared {
+  readonly sheetName: string;
+  readonly sheetIndex: number;
+  readonly anchorRow: number;
+  readonly anchorCol: number;
+  readonly relCX: number;
+  readonly relCY: number;
+  readonly width: number;
+  readonly height: number;
+  readonly rotationRad: number;
+  readonly dataUrl: string;
 }
 
 interface PictureModel {
@@ -106,6 +140,7 @@ export class FloatingPictureLayer {
   private readonly getAnchorCell: () => { readonly row: number; readonly col: number };
   private readonly root: HTMLDivElement;
   private readonly byId = new Map<string, { model: PictureModel; el: HTMLDivElement }>();
+  private readonly floatingPictureFocusListeners = new Set<(active: boolean) => void>();
   private zCounter = 10;
   private selectedId: string | null = null;
   private drag: (DragMode & { id: string }) | null = null;
@@ -121,21 +156,252 @@ export class FloatingPictureLayer {
     this.root = document.createElement("div");
     this.root.className = "fs-fp-root";
     this.mount.appendChild(this.root);
+    this.syncClipToTableBody();
+  }
+
+  /**
+   * 裁剪到表体区域（与 Canvas 行列标题带一致），避免拖动时图片盖住行号/列标。
+   */
+  syncClipToTableBody(): void {
+    const renderer = this.getRenderer();
+    if (!renderer.showHeadings) {
+      this.root.style.clipPath = "none";
+      this.root.style.removeProperty("-webkit-clip-path");
+      return;
+    }
+    const z = renderer.getViewZoom();
+    const top = HEADER_STRIP_BASE_HEIGHT * z;
+    const left = HEADER_STRIP_BASE_WIDTH * z;
+    const clip = `inset(${top}px 0 0 ${left}px)`;
+    this.root.style.clipPath = clip;
+    this.root.style.setProperty("-webkit-clip-path", clip);
   }
 
   destroy(): void {
     this.endDrag();
+    const hadFocus = this.selectedId !== null;
+    this.selectedId = null;
     this.root.remove();
     this.byId.clear();
+    if (hadFocus) {
+      this.emitFloatingPictureFocus(false);
+    }
+    this.floatingPictureFocusListeners.clear();
+  }
+
+  /** Ribbon「图片格式」等：浮动图选中/取消时订阅；订阅后会立即用当前状态回调一次。 */
+  subscribeFloatingPictureFocus(listener: (active: boolean) => void): () => void {
+    this.floatingPictureFocusListeners.add(listener);
+    listener(this.selectedId !== null);
+    return () => this.floatingPictureFocusListeners.delete(listener);
+  }
+
+  private emitFloatingPictureFocus(active: boolean): void {
+    for (const fn of this.floatingPictureFocusListeners) {
+      try {
+        fn(active);
+      } catch {
+        /* 宿主回调错误不影响编辑 */
+      }
+    }
   }
 
   clearAll(): void {
     this.endDrag();
+    const hadFocus = this.selectedId !== null;
     this.selectedId = null;
     for (const { el } of this.byId.values()) {
       el.remove();
     }
     this.byId.clear();
+    if (hadFocus) {
+      this.emitFloatingPictureFocus(false);
+    }
+  }
+
+  getDataUrlForPicture(id: string): string | null {
+    return this.byId.get(id)?.model.dataUrl ?? null;
+  }
+
+  /** 移除指定浮动图（右键剪切等）。 */
+  removePictureById(id: string): void {
+    const rec = this.byId.get(id);
+    if (rec === undefined) {
+      return;
+    }
+    if (this.drag?.id === id) {
+      this.endDrag();
+    }
+    if (this.selectedId === id) {
+      this.deselect();
+    }
+    rec.el.remove();
+    this.byId.delete(id);
+  }
+
+  /** 浮动层根节点（供右键菜单等挂载监听）。 */
+  getRootElement(): HTMLElement {
+    return this.root;
+  }
+
+  /** 右键菜单等：选中指定浮动图（若存在）。 */
+  focusPictureById(id: string): void {
+    if (!this.byId.has(id)) {
+      return;
+    }
+    this.selectById(id);
+  }
+
+  getSelectedPictureId(): string | null {
+    return this.selectedId;
+  }
+
+  takeFloatingPictureSnapshot(pictureId: string): FloatingPictureSnapshot | null {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return null;
+    }
+    const m = rec.model;
+    return {
+      id: m.id,
+      sheetName: m.sheetName,
+      sheetIndex: m.sheetIndex,
+      anchorRow: m.anchorRow,
+      anchorCol: m.anchorCol,
+      relCX: m.relCX,
+      relCY: m.relCY,
+      width: m.width,
+      height: m.height,
+      rotationRad: m.rotationRad,
+      dataUrl: m.dataUrl,
+      z: m.z,
+    };
+  }
+
+  /** 按快照恢复浮动图（剪切撤销 / 粘贴重做）；若 id 已存在则忽略。 */
+  restoreFloatingPicture(snapshot: FloatingPictureSnapshot): void {
+    if (this.byId.has(snapshot.id)) {
+      return;
+    }
+    const model: PictureModel = {
+      id: snapshot.id,
+      sheetName: snapshot.sheetName,
+      sheetIndex: snapshot.sheetIndex,
+      anchorRow: snapshot.anchorRow,
+      anchorCol: snapshot.anchorCol,
+      relCX: snapshot.relCX,
+      relCY: snapshot.relCY,
+      width: snapshot.width,
+      height: snapshot.height,
+      rotationRad: snapshot.rotationRad,
+      dataUrl: snapshot.dataUrl,
+      z: snapshot.z,
+    };
+    this.zCounter = Math.max(this.zCounter, snapshot.z);
+    const seqNum = Number.parseInt(snapshot.id.replace(/^fp-/, ""), 10);
+    if (Number.isFinite(seqNum)) {
+      this.idSeq = Math.max(this.idSeq, seqNum);
+    }
+    const el = this.createItemElement(model);
+    this.byId.set(snapshot.id, { model, el });
+    this.root.appendChild(el);
+    this.selectById(snapshot.id);
+    this.layout();
+  }
+
+  /**
+   * 为「粘贴」异步解码尺寸并得到可导出 dataUrl；不修改文档、不占用 id/z 序号。
+   * 几何与 `addPictureFromDataUrl` 一致。
+   */
+  buildPasteFloatingPicturePrepared(dataUrl: string): Promise<FloatingPicturePastePrepared | null> {
+    const renderer = this.getRenderer();
+    const wb = this.getWorkbook();
+    const sheet = wb.getActiveSheet();
+    if (sheet === undefined) {
+      return Promise.resolve(null);
+    }
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = (): void => {
+        let w = img.naturalWidth || 1;
+        let h = img.naturalHeight || 1;
+        const scale = Math.min(1, INSERT_MAX_DIM / Math.max(w, h));
+        w = Math.max(MIN_W, w * scale);
+        h = Math.max(MIN_H, h * scale);
+
+        const ac = this.getAnchorCell();
+        const sheet0 = wb.getActiveSheet();
+        if (sheet0 === undefined) {
+          resolve(null);
+          return;
+        }
+        const cell = {
+          row: Math.max(0, Math.min(sheet0.rowCount - 1, ac.row)),
+          col: Math.max(0, Math.min(sheet0.colCount - 1, ac.col)),
+        };
+        const cr = renderer.getCellRectInCanvasPixels(cell.row, cell.col);
+        if (cr === null) {
+          resolve(null);
+          return;
+        }
+        const exportableUrl = normalizeToExportableDataUrl(img, dataUrl);
+        resolve({
+          sheetName: sheet0.name,
+          sheetIndex: wb.activeSheetIndex,
+          anchorRow: cell.row,
+          anchorCol: cell.col,
+          relCX: 0,
+          relCY: 0,
+          width: w,
+          height: h,
+          rotationRad: 0,
+          dataUrl: exportableUrl,
+        });
+      };
+      img.onerror = (): void => {
+        resolve(null);
+      };
+      img.src = dataUrl;
+    });
+  }
+
+  /** 将 prepared 插入为新的浮动图并返回完整快照（粘贴命令首次 execute）。 */
+  insertFloatingPictureFromPrepared(p: FloatingPicturePastePrepared): FloatingPictureSnapshot {
+    const id = `fp-${++this.idSeq}`;
+    const z = ++this.zCounter;
+    const model: PictureModel = {
+      id,
+      sheetName: p.sheetName,
+      sheetIndex: p.sheetIndex,
+      anchorRow: p.anchorRow,
+      anchorCol: p.anchorCol,
+      relCX: p.relCX,
+      relCY: p.relCY,
+      width: p.width,
+      height: p.height,
+      rotationRad: p.rotationRad,
+      dataUrl: p.dataUrl,
+      z,
+    };
+    const el = this.createItemElement(model);
+    this.byId.set(id, { model, el });
+    this.root.appendChild(el);
+    this.selectById(id);
+    this.layout();
+    return {
+      id: model.id,
+      sheetName: model.sheetName,
+      sheetIndex: model.sheetIndex,
+      anchorRow: model.anchorRow,
+      anchorCol: model.anchorCol,
+      relCX: model.relCX,
+      relCY: model.relCY,
+      width: model.width,
+      height: model.height,
+      rotationRad: model.rotationRad,
+      dataUrl: model.dataUrl,
+      z: model.z,
+    };
   }
 
   /** 供 XLSX 导出：当前浮动图片快照（画布像素 + `viewZoom` 在导出侧换算）。 */
@@ -158,6 +424,19 @@ export class FloatingPictureLayer {
   }
 
   deselect(): void {
+    if (this.selectedId === null) {
+      return;
+    }
+    const rec = this.byId.get(this.selectedId);
+    if (rec !== undefined) {
+      rec.el.classList.remove("fs-fp-item--selected");
+    }
+    this.selectedId = null;
+    this.emitFloatingPictureFocus(false);
+  }
+
+  /** 取消选中且不通知（用于选中另一张图时避免 ribbon 先拆后装）。 */
+  private clearSelectionWithoutNotify(): void {
     if (this.selectedId === null) {
       return;
     }
@@ -202,6 +481,7 @@ export class FloatingPictureLayer {
   }
 
   layout(): void {
+    this.syncClipToTableBody();
     const orphanIds: string[] = [];
     for (const [id, rec] of this.byId) {
       const idx = this.resolvePictureSheetIndex(rec.model);
@@ -379,16 +659,18 @@ export class FloatingPictureLayer {
   }
 
   private selectById(id: string): void {
-    this.deselect();
+    this.clearSelectionWithoutNotify();
     this.selectedId = id;
     const rec = this.byId.get(id);
     if (rec === undefined) {
+      this.emitFloatingPictureFocus(false);
       return;
     }
     rec.el.classList.add("fs-fp-item--selected");
     this.zCounter += 1;
     rec.model.z = this.zCounter;
     rec.el.style.zIndex = String(rec.model.z);
+    this.emitFloatingPictureFocus(true);
   }
 
   private onItemPointerDown(ev: PointerEvent, id: string): void {

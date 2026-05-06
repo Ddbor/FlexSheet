@@ -12,7 +12,15 @@ import type {
 import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
 import type { CanvasRenderer } from "@flexsheet/renderer";
 import type { SheetTheme } from "@flexsheet/theme";
-export type RibbonTabId = "home" | "insert" | "pageLayout" | "formula" | "data" | "view";
+export type RibbonTabId =
+  | "home"
+  | "insert"
+  | "pageLayout"
+  | "formula"
+  | "data"
+  | "view"
+  /** 浮动图片选中时动态插入的上下文选项卡 */
+  | "pictureFormat";
 
 export interface RibbonCommandEvent {
   /** 点状命令 id，如 `home.font.bold`、`view.zoom.100` */
@@ -137,6 +145,11 @@ export interface FlexSheetLike {
   openInsertPictureFromRibbon?(): void;
   /** 导出 Excel 时附带浮动图片（与 `viewZoom` 配合写入 DrawingML）。 */
   getFloatingPicturesForXlsxExport?(): readonly XlsxFloatingPictureExport[];
+  /**
+   * 浮动插入图片获得/失去选中时通知（用于 Ribbon 动态「图片格式」选项卡）。
+   * 订阅时应立即用当前状态调用一次 listener。
+   */
+  subscribeFloatingPictureFocus?(listener: (active: boolean) => void): () => void;
   /** Ribbon「插入 -> 数据透视表」：打开数据透视表创建对话框。 */
   openPivotTableDialog?(): void;
   /** Ribbon「数据 -> 字段列表」：在透视区域内打开字段窗格。 */

@@ -324,6 +324,8 @@ function mergeContextMenuItems(
 export interface SheetContextMenuPluginOptions {
   readonly canvas: HTMLCanvasElement;
   readonly getFlexSheet: () => FlexSheet;
+  /** 浮动图片层根节点；提供则在图片上显示独立右键菜单（剪切/复制等）。 */
+  readonly getFloatingPictureLayerRoot?: () => HTMLElement | null;
 }
 
 export function useSheetContextMenu(options: SheetContextMenuPluginOptions): SheetContextMenuPlugin {
@@ -340,6 +342,8 @@ export class SheetContextMenuPlugin extends PluginBase {
   private ctx: PluginContext | null = null;
   private readonly canvas: HTMLCanvasElement;
   private readonly getFlexSheet: () => FlexSheet;
+  private readonly getFloatingPictureLayerRoot?: () => HTMLElement | null;
+  private floatingPictureLayerRootEl: HTMLElement | null = null;
   private menuEl: HTMLDivElement | null = null;
   private contextSubmenuFlyoutEl: HTMLDivElement | null = null;
   private contextSubmenuHideTimer: number | undefined;
@@ -372,6 +376,7 @@ export class SheetContextMenuPlugin extends PluginBase {
     super();
     this.canvas = options.canvas;
     this.getFlexSheet = options.getFlexSheet;
+    this.getFloatingPictureLayerRoot = options.getFloatingPictureLayerRoot;
   }
 
   override install(ctx: PluginContext): void {
@@ -381,12 +386,25 @@ export class SheetContextMenuPlugin extends PluginBase {
   override activate(): void {
     this.ensureMenuStyles();
     this.canvas.addEventListener("contextmenu", this.onCanvasContextMenu, true);
+    const fpRoot = this.getFloatingPictureLayerRoot?.() ?? null;
+    if (fpRoot !== null) {
+      fpRoot.addEventListener("contextmenu", this.onFloatingPictureContextMenu, true);
+      this.floatingPictureLayerRootEl = fpRoot;
+    }
     document.addEventListener("pointerdown", this.onDocPointerDown, true);
     document.addEventListener("keydown", this.onDocKeyDown, true);
   }
 
   override deactivate(): void {
     this.canvas.removeEventListener("contextmenu", this.onCanvasContextMenu, true);
+    if (this.floatingPictureLayerRootEl !== null) {
+      this.floatingPictureLayerRootEl.removeEventListener(
+        "contextmenu",
+        this.onFloatingPictureContextMenu,
+        true,
+      );
+      this.floatingPictureLayerRootEl = null;
+    }
     document.removeEventListener("pointerdown", this.onDocPointerDown, true);
     document.removeEventListener("keydown", this.onDocKeyDown, true);
     this.hideMenu();
@@ -397,6 +415,53 @@ export class SheetContextMenuPlugin extends PluginBase {
     this.closePrompt();
     this.hideMenu();
   }
+
+  private readonly onFloatingPictureContextMenu = (ev: MouseEvent): void => {
+    const raw = ev.target;
+    if (!(raw instanceof Node)) {
+      return;
+    }
+    const el = raw.nodeType === Node.TEXT_NODE ? raw.parentElement : (raw as HTMLElement);
+    if (el === null) {
+      return;
+    }
+    const item = el.closest(".fs-fp-item");
+    if (item === null || !(item instanceof HTMLElement)) {
+      return;
+    }
+    const pictureId = item.dataset.fpId;
+    if (pictureId === undefined || pictureId === "") {
+      return;
+    }
+    const flex = this.getFlexSheet();
+    if (flex.isCellEditing()) {
+      return;
+    }
+    ev.preventDefault();
+    ev.stopPropagation();
+    flex.focusFloatingPictureById(pictureId);
+    const items: ContextMenuEntry[] = [
+      {
+        id: "floatingPicture.cut",
+        label: "剪切",
+        icon: "cut",
+        order: 0,
+        onSelect: () => {
+          void flex.clipboardCutFloatingPicture(pictureId);
+        },
+      },
+      {
+        id: "floatingPicture.copy",
+        label: "复制",
+        icon: "copy",
+        order: 1,
+        onSelect: () => {
+          void flex.clipboardCopyFloatingPicture(pictureId);
+        },
+      },
+    ];
+    this.showMenu(ev.clientX, ev.clientY, items);
+  };
 
   private readonly onCanvasContextMenu = (ev: MouseEvent): void => {
     const flex = this.getFlexSheet();
