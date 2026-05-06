@@ -88,6 +88,7 @@ import { showFormatAsTableDialog } from "./dialogs/format-as-table-dialog.js";
 import { openCustomSortDialogWithOverlay } from "./dialogs/custom-sort-dialog.js";
 import { openFindReplaceDialogWithOverlay } from "./dialogs/find-replace-dialog.js";
 import { openGotoSpecialDialogWithOverlay } from "./dialogs/goto-special-dialog.js";
+import { createFormulaBuilderPanel, type FormulaBuilderPanelController } from "./chrome/formula-builder-panel.js";
 import { showFillSeriesDialog } from "./dialogs/fill-series-dialog.js";
 import { showNewTableStyleDialog } from "./dialogs/new-table-style-dialog.js";
 import { parseFormatAsTableRangeRef } from "./dialogs/format-as-table-range.js";
@@ -235,6 +236,10 @@ export class FlexSheet {
   private findReplaceOverlay: HTMLDivElement | null = null;
   /** 「定位条件」对话框。 */
   private gotoSpecialOverlay: HTMLDivElement | null = null;
+  /** 横向布局：左侧 Canvas 挂载区 + 右侧「公式生成器」面板。 */
+  private readonly sheetViewLayout: HTMLDivElement;
+  private readonly canvasMountEl: HTMLDivElement;
+  private readonly formulaBuilderPanel: FormulaBuilderPanelController;
   /**
    * 对话框「从工作表选定区域」：框选结束写入引用；ESC 取消并恢复进入前的选区。
    */
@@ -265,12 +270,36 @@ export class FlexSheet {
     this._workbook = options.workbook ?? createDefaultWorkbook();
     this.theme = options.theme ?? createDefaultLightTheme();
 
+    this.sheetViewLayout = document.createElement("div");
+    this.sheetViewLayout.className = "fs-sheet-view-layout";
+    this.sheetViewLayout.style.display = "flex";
+    this.sheetViewLayout.style.flexDirection = "row";
+    this.sheetViewLayout.style.width = "100%";
+    this.sheetViewLayout.style.height = "100%";
+    this.sheetViewLayout.style.minHeight = "0";
+    this.sheetViewLayout.style.minWidth = "0";
+    this.canvasMountEl = document.createElement("div");
+    this.canvasMountEl.className = "fs-sheet-view-layout__canvas";
+    this.canvasMountEl.style.flex = "1";
+    this.canvasMountEl.style.minWidth = "0";
+    this.canvasMountEl.style.minHeight = "0";
+    this.canvasMountEl.style.position = "relative";
+    this.canvasMountEl.style.overflow = "hidden";
+    this.sheetViewLayout.appendChild(this.canvasMountEl);
+    this.host.appendChild(this.sheetViewLayout);
+    this.formulaBuilderPanel = createFormulaBuilderPanel({
+      parent: this.sheetViewLayout,
+      onClose: () => {
+        this.closeFormulaBuilderPanel();
+      },
+    });
+
     this.selection = new SelectionModel(() => this.workbook.getActiveSheet());
     this.workspace = new Workspace(this._workbook);
     this.workspace.use(new SelectionRegistryPlugin(this.selection));
 
     const rendererPlugin = new RendererPlugin({
-      container: this.host,
+      container: this.canvasMountEl,
       workbook: this._workbook,
       theme: this.theme,
       frozenRows: options.frozenRows ?? 0,
@@ -1676,6 +1705,28 @@ export class FlexSheet {
   }
 
   /**
+   * Ribbon「插入函数」「其他函数…」：在表格右侧打开「公式生成器」面板（函数列表由后续数据源填充）。
+   */
+  openInsertFunctionDialogFromRibbon(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    this.formulaBuilderPanel.show();
+    this.syncSizeAndDraw();
+  }
+
+  private closeFormulaBuilderPanel(): void {
+    if (!this.formulaBuilderPanel.isOpen()) {
+      return;
+    }
+    this.formulaBuilderPanel.hide();
+    this.syncSizeAndDraw();
+    queueMicrotask(() => {
+      this.canvas.focus();
+    });
+  }
+
+  /**
    * Ribbon「套用表格格式」：在样式库中选定预设计后弹出「表数据来源」对话框；
    * 确定后对目标区域应用表样式，若勾选「表包含标题」则为各列启用自动筛选。
    */
@@ -1917,7 +1968,9 @@ export class FlexSheet {
       window.removeEventListener("resize", this.onWindowResize);
     }
     this.closeCustomSortDialog();
+    this.formulaBuilderPanel.destroy();
     this.workspace.destroy();
+    this.sheetViewLayout.remove();
   }
 
   private bindResize(): void {
