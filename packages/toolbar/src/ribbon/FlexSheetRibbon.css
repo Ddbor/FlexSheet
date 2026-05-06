@@ -252,11 +252,94 @@
   font-size: 11px;
 }
 
-/* 「公式 → 函数库」：单个大钮在条带内垂直居中 */
+/* 「公式 → 函数库」：横排顶部对齐；图标与标签留小间隙；底缘随内容高低 */
 .fs-ribbon-group__content.fs-ribbon-formula-function-lib {
-  justify-content: center;
-  align-items: center;
+  justify-content: flex-start;
+  align-items: flex-start;
   min-height: 0;
+}
+
+.fs-ribbon-formula-function-lib__row {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 100%;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--large {
+  box-sizing: border-box;
+  min-width: 56px;
+  max-width: 92px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--large > .fs-tb-btn__row {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--large .fs-tb-btn__icon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--large .fs-tb-btn__label {
+  white-space: normal;
+  text-align: center;
+  line-height: 1.12;
+  font-size: 11px;
+  max-width: 88px;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--large .fs-tb-btn__icon svg {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--ribbon-menu .fs-tb-btn__menu-chev-wrap {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 2px;
+}
+
+/* 自动求和：纵向分割，分割条紧跟主区下方 */
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--split.fs-tb-btn--large {
+  flex-direction: column;
+  align-items: stretch;
+  padding: 5px 6px;
+  max-width: 92px;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--split.fs-tb-btn--large > .fs-tb-btn__row {
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.fs-ribbon-formula-function-lib__row .fs-tb-btn--split.fs-tb-btn--large .fs-tb-btn__split {
+  flex-shrink: 0;
+  margin-top: 2px;
+  border-left: none;
+  border-top: 1px solid var(--fs-ribbon-border);
+  justify-content: center;
+  width: 100%;
+  padding: 2px 0 1px;
+  box-sizing: border-box;
 }
 
 /* 「撤销」仅两枚小图标，不必占满通用分组 80px 最小幅宽 */
@@ -343,10 +426,30 @@
   display: none;
 }
 
-/* 插入 -> 表格（表格 + 数据透视表）：分组在带区内垂直/水平居中 */
+/* 插入 -> 表格：行占满分组内容高度，便于组内竖线与带区同高 */
 .fs-ribbon-group__content.fs-ribbon-insert-pivot {
-  justify-content: center;
-  align-items: center;
+  justify-content: flex-start;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.fs-ribbon-group__content.fs-ribbon-insert-pivot .fs-ribbon-stack__row {
+  flex: 1;
+  align-items: stretch;
+  min-height: 0;
+}
+
+/* 插入 -> 表格组内：「表格」与「图片」之间的竖线（与行/分组可用高度同高） */
+.fs-ribbon-insert__sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 6px;
+  background: rgba(0, 0, 0, 0.12);
+  flex-shrink: 0;
+}
+
+.fs-ribbon[data-theme="dark"] .fs-ribbon-insert__sep {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 /* 开始 -> 剪贴板分组布局（匹配 Excel 样式：左大右小） */

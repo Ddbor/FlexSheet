@@ -22,6 +22,15 @@ export interface FormulaBuilderFunctionEntry {
   readonly supportPath?: string;
 }
 
+export interface FormulaBuilderBrowseContext {
+  /** 仅列出这些文档分类下的函数（不含「常用」）；`null` 表示不限制 */
+  readonly categories?: readonly string[] | null;
+  /** 单组列表时的分组标题（如「数学和三角函数」合并多类时） */
+  readonly sectionLabel?: string | null;
+  /** 打开后选中的函数名（与 `name` 大小写无关） */
+  readonly selectFunctionName?: string | null;
+}
+
 export interface FormulaBuilderPanelController {
   readonly root: HTMLElement;
   isOpen(): boolean;
@@ -31,9 +40,14 @@ export interface FormulaBuilderPanelController {
   isPickingArgRefFromSheet(): boolean;
   /** 将当前表选区对应的绝对引用写入活动参数框（不含前导 `=`） */
   applyArgRefFromSheet(absoluteRefWithoutLeadingEquals: string): void;
+  /**
+   * 设置下次 `show()` 时的浏览范围与预选函数；传 `null` 清除限制（完整目录）。
+   * 不改变 `setEntries` 数据源，仅影响列表分组与过滤。
+   */
+  prepareBrowseContext(ctx: FormulaBuilderBrowseContext | null): void;
   show(): void;
   hide(): void;
-  /** 替换函数列表；会清空选中并重绘 */
+  /** 替换函数列表；会清空选中、浏览上下文与搜索并重绘 */
   setEntries(entries: readonly FormulaBuilderFunctionEntry[]): void;
   destroy(): void;
 }
@@ -192,7 +206,7 @@ function ensureFormulaBuilderPanelStyles(): void {
   padding: 0 0 6px 0;
 }
 .fs-formula-builder__cat-title {
-  padding: 8px 10px 4px 10px;
+  padding: 8px 10px 4px 14px;
   font-size: 11px;
   font-weight: 600;
   color: #605e5c;
@@ -204,7 +218,7 @@ function ensureFormulaBuilderPanelStyles(): void {
   width: 100%;
   box-sizing: border-box;
   margin: 0;
-  padding: 6px 10px;
+  padding: 6px 10px 6px 26px;
   border: none;
   background: transparent;
   font: inherit;
@@ -224,7 +238,7 @@ function ensureFormulaBuilderPanelStyles(): void {
   outline-offset: -2px;
 }
 .fs-formula-builder__muted {
-  padding: 4px 10px 8px 10px;
+  padding: 4px 10px 8px 26px;
   font-size: 12px;
   color: #8a8886;
 }
@@ -574,6 +588,11 @@ export function createFormulaBuilderPanel(options: CreateFormulaBuilderPanelOpti
   let selectedId: string | null = null;
   let open = false;
 
+  /** Ribbon 分类入口：限制为指定文档类；`null` 为完整目录 */
+  let browseDocCategories: readonly string[] | null = null;
+  let browseSectionLabel: string | null = null;
+  let pendingSelectFunctionName: string | null = null;
+
   let paramMode = false;
   let paramEntry: FormulaBuilderFunctionEntry | null = null;
   let paramValues: string[] = [];
@@ -922,12 +941,21 @@ export function createFormulaBuilderPanel(options: CreateFormulaBuilderPanelOpti
     options.onClose();
   };
 
-  function filteredEntries(): readonly FormulaBuilderFunctionEntry[] {
-    const q = searchQuery.trim().toLowerCase();
-    if (q.length === 0) {
+  function entriesForBrowse(): readonly FormulaBuilderFunctionEntry[] {
+    if (browseDocCategories === null || browseDocCategories.length === 0) {
       return entries;
     }
-    return entries.filter((e) => e.name.toLowerCase().includes(q));
+    const allow = new Set(browseDocCategories);
+    return entries.filter((e) => allow.has(e.category));
+  }
+
+  function filteredEntries(): readonly FormulaBuilderFunctionEntry[] {
+    const base = entriesForBrowse();
+    const q = searchQuery.trim().toLowerCase();
+    if (q.length === 0) {
+      return base;
+    }
+    return base.filter((e) => e.name.toLowerCase().includes(q));
   }
 
   function entryById(id: string): FormulaBuilderFunctionEntry | undefined {
@@ -1035,17 +1063,29 @@ export function createFormulaBuilderPanel(options: CreateFormulaBuilderPanelOpti
       return;
     }
 
-    const docCategories = orderedDocCategoriesForFilter(filtered);
-    const sectionMetas: { readonly id: string; readonly label: string }[] = [
-      { id: "common", label: "常用函数" },
-      ...docCategories.map((c) => ({ id: c, label: c })),
-    ];
+    const sectionMetas: { readonly id: string; readonly label: string }[] =
+      browseDocCategories !== null && browseDocCategories.length > 0
+        ? [
+            {
+              id: "__ribbon_filter__",
+              label: browseSectionLabel ?? browseDocCategories[0] ?? "函数",
+            },
+          ]
+        : (() => {
+            const docCategories = orderedDocCategoriesForFilter(filtered);
+            return [
+              { id: "common", label: "常用函数" },
+              ...docCategories.map((c) => ({ id: c, label: c })),
+            ];
+          })();
 
     for (const cat of sectionMetas) {
       const inCat =
-        cat.id === "common"
-          ? sortCommonEntries(filtered.filter((e) => e.category === "common"))
-          : filtered.filter((e) => e.category === cat.id);
+        cat.id === "__ribbon_filter__"
+          ? [...filtered].sort((a, b) => a.name.localeCompare(b.name, "en-US"))
+          : cat.id === "common"
+            ? sortCommonEntries(filtered.filter((e) => e.category === "common"))
+            : filtered.filter((e) => e.category === cat.id);
       const block = document.createElement("div");
       block.className = "fs-formula-builder__cat";
       const ct = document.createElement("div");
@@ -1096,11 +1136,32 @@ export function createFormulaBuilderPanel(options: CreateFormulaBuilderPanelOpti
     document.removeEventListener("keydown", escapeOnDoc, true);
   }
 
+  function applyPendingSelection(): void {
+    const want = pendingSelectFunctionName;
+    pendingSelectFunctionName = null;
+    if (want === null || want === "") {
+      return;
+    }
+    const u = want.toUpperCase();
+    const hit = filteredEntries().find((e) => e.name.toUpperCase() === u);
+    if (hit === undefined) {
+      return;
+    }
+    selectedId = hit.id;
+    renderList();
+    renderDetail();
+    queueMicrotask(() => {
+      const btn = listScroll.querySelector<HTMLButtonElement>(`button.fs-formula-builder__fn[data-id="${CSS.escape(hit.id)}"]`);
+      btn?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
   function show(): void {
     open = true;
     root.dataset.open = "1";
     attachEscape();
     renderList();
+    applyPendingSelection();
     queueMicrotask(() => {
       if (!paramMode) {
         searchInput.focus();
@@ -1114,6 +1175,15 @@ export function createFormulaBuilderPanel(options: CreateFormulaBuilderPanelOpti
     detachEscape();
     searchInput.blur();
     exitParamMode();
+    browseDocCategories = null;
+    browseSectionLabel = null;
+    pendingSelectFunctionName = null;
+  }
+
+  function clearBrowseContext(): void {
+    browseDocCategories = null;
+    browseSectionLabel = null;
+    pendingSelectFunctionName = null;
   }
 
   btnClose.addEventListener("click", () => {
@@ -1156,6 +1226,26 @@ export function createFormulaBuilderPanel(options: CreateFormulaBuilderPanelOpti
       renderParamRows();
       schedulePreview();
     },
+    prepareBrowseContext(ctx: FormulaBuilderBrowseContext | null): void {
+      if (ctx === null) {
+        clearBrowseContext();
+        return;
+      }
+      const cats = ctx.categories;
+      browseDocCategories =
+        cats === undefined || cats === null
+          ? null
+          : cats.length === 0
+            ? null
+            : [...cats];
+      browseSectionLabel =
+        ctx.sectionLabel === undefined || ctx.sectionLabel === null || ctx.sectionLabel === ""
+          ? null
+          : ctx.sectionLabel;
+      const sn = ctx.selectFunctionName;
+      pendingSelectFunctionName =
+        sn === undefined || sn === null || sn === "" ? null : sn;
+    },
     show(): void {
       show();
     },
@@ -1168,6 +1258,7 @@ export function createFormulaBuilderPanel(options: CreateFormulaBuilderPanelOpti
       searchQuery = "";
       searchInput.value = "";
       exitParamMode();
+      clearBrowseContext();
       if (open) {
         renderList();
       }

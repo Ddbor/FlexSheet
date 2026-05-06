@@ -373,6 +373,17 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.openInsertFunctionDialogFromRibbon();
       return true;
     }
+    case "formula.fn.pick": {
+      if (fs.openFormulaBuilderFromRibbon === undefined) {
+        return false;
+      }
+      const name = typeof ev.payload?.name === "string" ? ev.payload.name.trim() : "";
+      if (name === "") {
+        return false;
+      }
+      fs.openFormulaBuilderFromRibbon({ selectFunctionName: name });
+      return true;
+    }
     case "home.align.top":
       fs.applySelectionStylePatch({ vAlign: "top" });
       return true;

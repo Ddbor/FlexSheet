@@ -119,7 +119,7 @@ export class FlexSheetRibbon {
           mountPageLayoutTab(panel, emit);
           break;
         case "formula":
-          mountFormulaTab(panel, emit);
+          mountFormulaTab(panel, emit, () => this.flexSheet);
           break;
         case "data":
           mountDataTab(panel, emit);

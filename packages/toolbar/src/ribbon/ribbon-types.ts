@@ -150,6 +150,17 @@ export interface FlexSheetLike {
   ): void;
   /** Ribbon「插入函数」（`formula.insertFunction`）、「其他函数…」（`formula.fn.more`、自动求和下拉）打开插入函数相关 UI。 */
   openInsertFunctionDialogFromRibbon?(): void;
+  /** Ribbon「公式」分类下拉：按文档类列出函数名（与函数目录一致）。`categories` 含 `__other__` 时表示非主分类。 */
+  listFormulaNamesForRibbonCategories?(
+    categories: readonly string[],
+    maxNames?: number,
+  ): readonly string[];
+  /** Ribbon「公式」：打开公式生成器并按类筛选 / 预选函数（`formula.fn.pick`）。 */
+  openFormulaBuilderFromRibbon?(options?: {
+    readonly categories?: readonly string[];
+    readonly sectionLabel?: string;
+    readonly selectFunctionName?: string;
+  }): void;
   /** Ribbon「套用表格格式」：读取“自定义”分组样式项。 */
   getCustomTableStyleEntries?(): readonly RibbonCustomTableStyleEntry[];
 }

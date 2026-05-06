@@ -59,6 +59,7 @@ function fillOverview(sheet: Worksheet): void {
     "【网格】行列标、选择、填充柄、合并单元格、行列宽/隐藏、冻结窗格（视图）。",
     "【筛选】「筛选与表格」工作表：列筛选 + 表格样式联动；与 Ribbon「数据」筛选一致。",
     "【数据】排序与筛选、删除重复项、数据验证、模拟分析、合并计算、创建数据透视表等。",
+    "【公式】「公式示例」工作表含从函数目录抽取的一批示例公式（与公式生成器对照），并保留季度小计演示。",
     "【透视】「透视数据源」提供示例数据；打开本页后自动生成「透视表示例」工作表。",
     "【导入导出】文件菜单：FlexSheet JSON、Excel .xlsx（多表、样式、合并、条件格式、透视元数据）。",
     "【底栏】工作表标签、水平滚动、缩放滑块与状态栏。",
@@ -93,8 +94,50 @@ function fillFormulas(sheet: Worksheet): void {
   sheet.setCellLiteral(4, 0, "小计");
   sheet.setCellFormula(4, 1, "=SUM(B2:B4)");
 
-  sheet.setCellLiteral(5, 0, "达标提示");
-  sheet.setCellFormula(5, 1, '=IF(B5>=500,"达标","未达标")');
+  sheet.setCellLiteral(5, 0, "月均");
+  sheet.setCellFormula(5, 1, "=AVERAGE(B2:B4)");
+
+  /** 辅助数值区：用于 MAX / MIN / 多参数等示例（与上方 B2:B4 独立）。 */
+  sheet.setCellLiteral(10, 0, "样本");
+  sheet.setCellLiteral(10, 1, 40);
+  sheet.setCellLiteral(11, 1, 12);
+  sheet.setCellLiteral(12, 1, 55);
+  sheet.setCellLiteral(13, 1, 8);
+
+  sheet.setCellLiteral(7, 0, "以下为从公式生成器函数目录中抽取的示例（当前求值内核支持 SUM / AVERAGE / AVG / COUNT / MAX / MIN）：");
+  sheet.applyMergeForSelection(
+    { startRow: 7, endRow: 7, startCol: 0, endCol: 5 },
+    "mergeCenter",
+  );
+  sheet.setCellStyle(7, 0, { bold: true, fontSizePt: 11 });
+
+  sheet.setCellLiteral(8, 0, "说明");
+  sheet.setCellLiteral(8, 4, "公式");
+  sheet.setCellStyle(8, 0, { bold: true });
+  sheet.setCellStyle(8, 4, { bold: true });
+
+  const formulaShowcase: readonly (readonly [string, string])[] = [
+    ["COUNT（B2:B4 中数字个数）", "=COUNT(B2:B4)"],
+    ["AVERAGE（B2:B4）", "=AVERAGE(B2:B4)"],
+    ["AVG（与 AVERAGE 等价）", "=AVG(B2:B4)"],
+    ["SUM（B2:B4）", "=SUM(B2:B4)"],
+    ["MAX（B2:B4）", "=MAX(B2:B4)"],
+    ["MIN（B2:B4）", "=MIN(B2:B4)"],
+    ["多参数 MAX", "=MAX(B2,B3,B4)"],
+    ["多参数 AVERAGE", "=AVERAGE(B2,B4)"],
+    ["COUNT 多区域", "=COUNT(B2:B3,B4:B4)"],
+    ["SUM（样本 B11:B14）", "=SUM(B11:B14)"],
+    ["AVERAGE（样本）", "=AVERAGE(B11:B14)"],
+    ["MAX（样本）", "=MAX(B11:B14)"],
+    ["MIN（样本）", "=MIN(B11:B14)"],
+    ["COUNT（样本）", "=COUNT(B11:B14)"],
+  ];
+  let sr = 9;
+  for (const [label, fx] of formulaShowcase) {
+    sheet.setCellLiteral(sr, 0, label);
+    sheet.setCellFormula(sr, 4, fx);
+    sr++;
+  }
 
   recalcWorksheet(sheet);
 }

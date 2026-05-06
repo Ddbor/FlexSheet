@@ -1,5 +1,5 @@
 import { createToolbarButton, type RibbonEmit } from "../../toolbar/index.js";
-import { iconInsertTable } from "../../toolbar/icons.js";
+import { iconInsertPicture, iconInsertTable } from "../../toolbar/icons.js";
 import { createRibbonGroup } from "../ribbon-group.js";
 import type { RibbonTabId } from "../ribbon-types.js";
 
@@ -17,6 +17,8 @@ export function mountInsertTab(panel: HTMLElement, emit: RibbonEmit): void {
       label: string;
       icon: () => SVGSVGElement;
       variant?: "default" | "large";
+      /** 在该按钮前绘制竖向分割线（同组内） */
+      separatorBefore?: boolean;
     }[];
   }[] = [
     {
@@ -27,6 +29,13 @@ export function mountInsertTab(panel: HTMLElement, emit: RibbonEmit): void {
           label: "表格",
           icon: iconInsertTable,
           variant: "large",
+        },
+        {
+          id: "insert.picture",
+          label: "图片",
+          icon: iconInsertPicture,
+          variant: "large",
+          separatorBefore: true,
         },
         // {
         //   id: "insert.pivottable.options",
@@ -46,6 +55,12 @@ export function mountInsertTab(panel: HTMLElement, emit: RibbonEmit): void {
     const row = document.createElement("div");
     row.className = "fs-ribbon-stack__row";
     for (const b of g.buttons) {
+      if (b.separatorBefore === true) {
+        const sep = document.createElement("div");
+        sep.className = "fs-ribbon-insert__sep";
+        sep.setAttribute("aria-hidden", "true");
+        row.appendChild(sep);
+      }
       row.appendChild(
         createToolbarButton(
           { id: b.id, tab: TAB, label: b.label, icon: b.icon(), variant: b.variant },

@@ -1726,6 +1726,73 @@ export class FlexSheet {
       return;
     }
     this.formulaBuilderInsertCell = null;
+    this.formulaBuilderPanel.prepareBrowseContext(null);
+    this.formulaBuilderPanel.show();
+    this.syncSizeAndDraw();
+  }
+
+  /**
+   * Ribbon 公式库分类：按文档类列出函数名（供下拉菜单）；`categories` 为 `["__other__"]` 时表示非主分类分组。
+   */
+  listFormulaNamesForRibbonCategories(categories: readonly string[], maxNames = 48): readonly string[] {
+    const all = buildFormulaBuilderFunctionEntries();
+    const PRIMARY = new Set([
+      "财务",
+      "逻辑",
+      "文本",
+      "日期与时间",
+      "查找与引用",
+      "数学与三角函数",
+      "数学和三角",
+    ]);
+    const wantOther = categories.length === 1 && categories[0] === "__other__";
+    const allow = new Set(categories);
+    const picked = all.filter((e) => {
+      if (e.category === "common") {
+        return false;
+      }
+      if (wantOther) {
+        return !PRIMARY.has(e.category);
+      }
+      return allow.has(e.category);
+    });
+    const names = [...new Set(picked.map((e) => e.name))].sort((a, b) =>
+      a.localeCompare(b, "en-US"),
+    );
+    return names.slice(0, maxNames);
+  }
+
+  /**
+   * 打开公式生成器并可限制文档分类、预选函数（Ribbon 分类下拉）。
+   */
+  openFormulaBuilderFromRibbon(options?: {
+    readonly categories?: readonly string[];
+    readonly sectionLabel?: string;
+    readonly selectFunctionName?: string;
+  }): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    this.formulaBuilderInsertCell = null;
+    let categories: readonly string[] | null | undefined = options?.categories;
+    const selectName = options?.selectFunctionName;
+    if (
+      (categories === undefined || categories === null || categories.length === 0) &&
+      selectName !== undefined &&
+      selectName !== ""
+    ) {
+      const hit = buildFormulaBuilderFunctionEntries().find(
+        (e) => e.name.toUpperCase() === selectName.toUpperCase(),
+      );
+      if (hit !== undefined && hit.category !== "common") {
+        categories = [hit.category];
+      }
+    }
+    this.formulaBuilderPanel.prepareBrowseContext({
+      categories: categories ?? null,
+      sectionLabel: options?.sectionLabel ?? null,
+      selectFunctionName: selectName ?? null,
+    });
     this.formulaBuilderPanel.show();
     this.syncSizeAndDraw();
   }
