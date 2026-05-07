@@ -38,7 +38,6 @@ function ensureStyles(): void {
 .fs-fp-item__body{position:relative;width:100%;height:100%;overflow:hidden;box-sizing:border-box;}
 .fs-fp-item__img-wrap{position:absolute;left:0;top:0;box-sizing:border-box;}
 .fs-fp-item__img{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;}
-.fs-fp-item--cropping .fs-fp-item__img-wrap{box-shadow:0 0 0 4096px rgba(0,0,0,0.28);}
 .fs-fp-item__focus{position:absolute;inset:0;pointer-events:none;border:1px solid #333;box-sizing:border-box;}
 .fs-fp-item--selected .fs-fp-item__focus{display:block;}
 .fs-fp-item:not(.fs-fp-item--selected) .fs-fp-item__focus{display:none;}
@@ -152,7 +151,9 @@ function cloneFrameFill(f: FloatingPictureFrameFill): FloatingPictureFrameFill {
 }
 
 function frameFillFromSnapshot(s: FloatingPictureSnapshot): FloatingPictureFrameFill {
-  return s.frameFill !== undefined ? cloneFrameFill(s.frameFill) : cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL);
+  return s.frameFill !== undefined
+    ? cloneFrameFill(s.frameFill)
+    : cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL);
 }
 
 function normalizeSolidColorHex(input: string): string {
@@ -172,7 +173,9 @@ function normalizeSolidColorHex(input: string): string {
   return "#000000";
 }
 
-function parseHexRgb(hex: string): { readonly r: number; readonly g: number; readonly b: number } | null {
+function parseHexRgb(
+  hex: string,
+): { readonly r: number; readonly g: number; readonly b: number } | null {
   const h = normalizeSolidColorHex(hex);
   const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/.exec(h);
   if (m === null) {
@@ -749,7 +752,9 @@ export class FloatingPictureLayer {
   /**
    * 将单张浮动图栅格化为与裁剪框同尺寸的 PNG（透明留白 + `imgBox` 内绘图），供 OOXML 占位与格线后内容对齐。
    */
-  private async rasterizePictureModelToFramePngDataUrl(model: PictureModel): Promise<string | null> {
+  private async rasterizePictureModelToFramePngDataUrl(
+    model: PictureModel,
+  ): Promise<string | null> {
     if (typeof document === "undefined") {
       return null;
     }
@@ -795,7 +800,17 @@ export class FloatingPictureLayer {
       ctx.filter = "none";
       ctx.clearRect(0, 0, W, H);
       try {
-        ctx.drawImage(img, 0, 0, nw, nh, model.imgBoxX, model.imgBoxY, model.imgBoxW, model.imgBoxH);
+        ctx.drawImage(
+          img,
+          0,
+          0,
+          nw,
+          nh,
+          model.imgBoxX,
+          model.imgBoxY,
+          model.imgBoxW,
+          model.imgBoxH,
+        );
       } catch {
         return null;
       }
