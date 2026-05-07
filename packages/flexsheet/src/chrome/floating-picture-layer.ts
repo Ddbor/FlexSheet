@@ -33,8 +33,27 @@ function ensureStyles(): void {
 .fs-fp-root.fs-fp-root--crop-active{z-index:120;}
 .fs-fp-item{position:absolute;pointer-events:auto;box-sizing:border-box;}
 .fs-fp-item__body{position:relative;width:100%;height:100%;overflow:hidden;box-sizing:border-box;}
-.fs-fp-item__img-wrap{position:absolute;left:0;top:0;box-sizing:border-box;}
+.fs-fp-item--cropping .fs-fp-item__body{overflow:visible;}
+.fs-fp-item__img-wrap{position:absolute;left:0;top:0;box-sizing:border-box;z-index:0;}
 .fs-fp-item__img{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;}
+.fs-fp-crop-img-dim-layer{
+  display:none;
+  position:absolute;
+  left:0;
+  top:0;
+  width:100%;
+  height:100%;
+  overflow:visible;
+  pointer-events:none;
+  z-index:2;
+}
+.fs-fp-item--cropping .fs-fp-crop-img-dim-layer{display:block;}
+.fs-fp-crop-img-dim-frag{
+  position:absolute;
+  box-sizing:border-box;
+  pointer-events:none;
+  background:rgba(12,12,14,0.52);
+}
 .fs-fp-item__focus{position:absolute;inset:0;pointer-events:none;border:1px solid #333;box-sizing:border-box;}
 .fs-fp-item--selected .fs-fp-item__focus{display:block;}
 .fs-fp-item:not(.fs-fp-item--selected) .fs-fp-item__focus{display:none;}
@@ -363,6 +382,65 @@ function canvasDeltaToLocal(dcx: number, dcy: number, rot: number): { dlx: numbe
 function normalizeImgBoxInModel(m: PictureModel): void {
   m.imgBoxW = Math.max(MIN_W, m.imgBoxW);
   m.imgBoxH = Math.max(MIN_H, m.imgBoxH);
+}
+
+/**
+ * 裁剪框为 [0,frameW]×[0,frameH]，图片矩形为 (ix,iy,iw,ih)（与 body 坐标一致）。
+ * 返回若干轴对齐矩形，并集为「图片区域内、裁剪框外」的部分，用于仅对越界图像叠暗色（不遮整张画布）。
+ */
+function computeImageOutsideFrameDimRects(
+  frameW: number,
+  frameH: number,
+  ix: number,
+  iy: number,
+  iw: number,
+  ih: number,
+): { readonly left: number; readonly top: number; readonly width: number; readonly height: number }[] {
+  const out: { left: number; top: number; width: number; height: number }[] = [];
+  const eps = 1e-6;
+  if (!(iw > eps) || !(ih > eps) || !(frameW > eps) || !(frameH > eps)) {
+    return out;
+  }
+  const x0i = Math.max(ix, 0);
+  const x1i = Math.min(ix + iw, frameW);
+  const y0i = Math.max(iy, 0);
+  const y1i = Math.min(iy + ih, frameH);
+  if (x1i <= x0i + eps || y1i <= y0i + eps) {
+    return [{ left: ix, top: iy, width: iw, height: ih }];
+  }
+  if (iy < -eps) {
+    const y1 = Math.min(iy + ih, 0);
+    const h = y1 - iy;
+    if (h > eps) {
+      out.push({ left: ix, top: iy, width: iw, height: h });
+    }
+  }
+  if (iy + ih > frameH + eps) {
+    const y0 = Math.max(iy, frameH);
+    const h = iy + ih - y0;
+    if (h > eps) {
+      out.push({ left: ix, top: y0, width: iw, height: h });
+    }
+  }
+  if (ix < -eps) {
+    const x1 = Math.min(ix + iw, 0);
+    const w = x1 - ix;
+    const y0 = Math.max(iy, 0);
+    const y1 = Math.min(iy + ih, frameH);
+    if (w > eps && y1 - y0 > eps) {
+      out.push({ left: ix, top: y0, width: w, height: y1 - y0 });
+    }
+  }
+  if (ix + iw > frameW + eps) {
+    const x0 = Math.max(ix, frameW);
+    const w = ix + iw - x0;
+    const y0 = Math.max(iy, 0);
+    const y1 = Math.min(iy + ih, frameH);
+    if (w > eps && y1 - y0 > eps) {
+      out.push({ left: x0, top: y0, width: w, height: y1 - y0 });
+    }
+  }
+  return out;
 }
 
 export class FloatingPictureLayer {
@@ -1090,6 +1168,10 @@ export class FloatingPictureLayer {
     });
     imgWrap.appendChild(im);
     body.appendChild(imgWrap);
+    const cropImgDimLayer = document.createElement("div");
+    cropImgDimLayer.className = "fs-fp-crop-img-dim-layer";
+    cropImgDimLayer.setAttribute("aria-hidden", "true");
+    body.appendChild(cropImgDimLayer);
     const focus = document.createElement("div");
     focus.className = "fs-fp-item__focus";
     for (const h of CROP_HANDLE_IDS) {
@@ -1113,6 +1195,7 @@ export class FloatingPictureLayer {
     wrap.addEventListener("pointerdown", (ev) => this.onItemPointerDown(ev, model.id));
     this.applyImageFilterToElement(wrap, model);
     this.applyFrameFillToItem(wrap, model.frameFill);
+    this.ensureCropImgDimLayerMounted(wrap);
     this.ensureCropOverlayMounted(wrap);
     this.syncInnerLayout(model, wrap);
     return wrap;
@@ -1140,6 +1223,52 @@ export class FloatingPictureLayer {
       imgHandles.style.width = `${model.imgBoxW}px`;
       imgHandles.style.height = `${model.imgBoxH}px`;
     }
+    this.syncCropImageOutsideDim(model, el);
+  }
+
+  /** 仅对「图片矩形 ∩ 裁剪框外」区域叠暗色，不遮盖表体画布。 */
+  private syncCropImageOutsideDim(model: PictureModel, el: HTMLDivElement): void {
+    const layer = el.querySelector(".fs-fp-crop-img-dim-layer");
+    if (!(layer instanceof HTMLElement)) {
+      return;
+    }
+    if (!el.classList.contains("fs-fp-item--cropping")) {
+      layer.replaceChildren();
+      return;
+    }
+    const rects = computeImageOutsideFrameDimRects(
+      model.width,
+      model.height,
+      model.imgBoxX,
+      model.imgBoxY,
+      model.imgBoxW,
+      model.imgBoxH,
+    );
+    layer.replaceChildren();
+    for (const r of rects) {
+      const d = document.createElement("div");
+      d.className = "fs-fp-crop-img-dim-frag";
+      d.style.left = `${r.left}px`;
+      d.style.top = `${r.top}px`;
+      d.style.width = `${r.width}px`;
+      d.style.height = `${r.height}px`;
+      layer.appendChild(d);
+    }
+  }
+
+  private ensureCropImgDimLayerMounted(wrap: HTMLDivElement): void {
+    const body = wrap.querySelector(":scope > .fs-fp-item__body");
+    if (!(body instanceof HTMLElement)) {
+      return;
+    }
+    body.querySelector(":scope > .fs-fp-crop-outside-dim")?.remove();
+    if (body.querySelector(":scope > .fs-fp-crop-img-dim-layer") !== null) {
+      return;
+    }
+    const layer = document.createElement("div");
+    layer.className = "fs-fp-crop-img-dim-layer";
+    layer.setAttribute("aria-hidden", "true");
+    body.appendChild(layer);
   }
 
   private ensureCropOverlayMounted(wrap: HTMLDivElement): void {
@@ -1230,6 +1359,7 @@ export class FloatingPictureLayer {
     if (this.croppingPictureId === pictureId) {
       this.setCropOverlayVisible(rec.el, true);
       rec.el.classList.add("fs-fp-item--cropping");
+      this.ensureCropImgDimLayerMounted(rec.el);
       this.syncClipToTableBody();
       this.syncCropSessionStacking();
       this.layout();
@@ -1246,6 +1376,7 @@ export class FloatingPictureLayer {
     this.croppingPictureId = pictureId;
     this.cropEnterSnapshot = snap;
     rec.el.classList.add("fs-fp-item--cropping");
+    this.ensureCropImgDimLayerMounted(rec.el);
     this.ensureCropOverlayMounted(rec.el);
     this.setCropOverlayVisible(rec.el, true);
     this.syncInnerLayout(rec.model, rec.el);
