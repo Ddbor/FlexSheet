@@ -2,6 +2,8 @@ export {
   DEFAULT_XLSX_EXPORT_OPTIONS,
   exportWorkbookToXlsxBlob,
   exportWorkbookToXlsxBytes,
+  floatingPictureNeedsFrameCompositeForXlsx,
+  floatingPictureSrcRectSides,
   type XlsxExportOptions,
   type XlsxFloatingPictureExport,
 } from "./export-xlsx.js";

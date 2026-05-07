@@ -4,7 +4,10 @@
  */
 
 import type { Workbook } from "@flexsheet/core";
-import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
+import {
+  floatingPictureNeedsFrameCompositeForXlsx,
+  type XlsxFloatingPictureExport,
+} from "@flexsheet/import-export";
 import {
   HEADER_STRIP_BASE_HEIGHT,
   HEADER_STRIP_BASE_WIDTH,
@@ -30,11 +33,41 @@ function ensureStyles(): void {
   s.id = STYLE_ID;
   s.textContent = `
 .fs-fp-root{position:absolute;inset:0;pointer-events:none;z-index:5;overflow:visible;}
+.fs-fp-root.fs-fp-root--crop-active{z-index:120;}
 .fs-fp-item{position:absolute;pointer-events:auto;box-sizing:border-box;}
+.fs-fp-item__body{position:relative;width:100%;height:100%;overflow:hidden;box-sizing:border-box;}
+.fs-fp-item__img-wrap{position:absolute;left:0;top:0;box-sizing:border-box;}
 .fs-fp-item__img{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;}
+.fs-fp-item--cropping .fs-fp-item__img-wrap{box-shadow:0 0 0 4096px rgba(0,0,0,0.28);}
 .fs-fp-item__focus{position:absolute;inset:0;pointer-events:none;border:1px solid #333;box-sizing:border-box;}
 .fs-fp-item--selected .fs-fp-item__focus{display:block;}
 .fs-fp-item:not(.fs-fp-item--selected) .fs-fp-item__focus{display:none;}
+.fs-fp-item--cropping.fs-fp-item--selected .fs-fp-item__focus{visibility:hidden;}
+.fs-fp-item--cropping.fs-fp-item--selected .fs-fp-item__focus .fs-fp-handle,
+.fs-fp-item--cropping.fs-fp-item--selected .fs-fp-item__focus .fs-fp-rotate,
+.fs-fp-item--cropping.fs-fp-item--selected .fs-fp-item__focus .fs-fp-rotate-line{display:none !important;}
+.fs-fp-item:focus{outline:none;}
+.fs-fp-crop-overlay{position:absolute;inset:0;pointer-events:none;z-index:10;}
+.fs-fp-crop-frame-handles{position:absolute;inset:0;pointer-events:none;z-index:2;}
+.fs-fp-crop-img-handles{position:absolute;pointer-events:none;z-index:1;}
+.fs-fp-crop-h{position:absolute;box-sizing:border-box;pointer-events:auto;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--nw{left:-3px;top:-3px;width:14px;height:14px;border-left:3px solid #111;border-top:3px solid #111;cursor:nwse-resize;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--n{left:50%;top:-4px;width:28px;height:8px;margin-left:-14px;border-top:3px solid #111;cursor:ns-resize;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--ne{right:-3px;top:-3px;width:14px;height:14px;border-right:3px solid #111;border-top:3px solid #111;cursor:nesw-resize;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--e{right:-4px;top:50%;width:8px;height:28px;margin-top:-14px;border-right:3px solid #111;cursor:ew-resize;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--se{right:-3px;bottom:-3px;width:14px;height:14px;border-right:3px solid #111;border-bottom:3px solid #111;cursor:nwse-resize;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--s{left:50%;bottom:-4px;width:28px;height:8px;margin-left:-14px;border-bottom:3px solid #111;cursor:ns-resize;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--sw{left:-3px;bottom:-3px;width:14px;height:14px;border-left:3px solid #111;border-bottom:3px solid #111;cursor:nesw-resize;}
+.fs-fp-crop-h--frame.fs-fp-crop-h--w{left:-4px;top:50%;width:8px;height:28px;margin-top:-14px;border-left:3px solid #111;cursor:ew-resize;}
+.fs-fp-crop-h--img{background:#fff;border:1px solid #333;}
+.fs-fp-crop-h--img.fs-fp-crop-h--nw{left:-4px;top:-4px;width:7px;height:7px;margin:0;cursor:nwse-resize;border:none;}
+.fs-fp-crop-h--img.fs-fp-crop-h--n{left:50%;top:-4px;width:7px;height:7px;margin-left:-4px;cursor:ns-resize;border:none;}
+.fs-fp-crop-h--img.fs-fp-crop-h--ne{right:-4px;top:-4px;width:7px;height:7px;margin:0;cursor:nesw-resize;border:none;}
+.fs-fp-crop-h--img.fs-fp-crop-h--e{right:-4px;top:50%;width:7px;height:7px;margin-top:-4px;cursor:ew-resize;border:none;}
+.fs-fp-crop-h--img.fs-fp-crop-h--se{right:-4px;bottom:-4px;width:7px;height:7px;margin:0;cursor:nwse-resize;border:none;}
+.fs-fp-crop-h--img.fs-fp-crop-h--s{left:50%;bottom:-4px;width:7px;height:7px;margin-left:-4px;cursor:ns-resize;border:none;}
+.fs-fp-crop-h--img.fs-fp-crop-h--sw{left:-4px;bottom:-4px;width:7px;height:7px;margin:0;cursor:nesw-resize;border:none;}
+.fs-fp-crop-h--img.fs-fp-crop-h--w{left:-4px;top:50%;width:7px;height:7px;margin-top:-4px;cursor:ew-resize;border:none;}
 .fs-fp-handle{position:absolute;width:${HANDLE_PX}px;height:${HANDLE_PX}px;margin:-${Math.floor(HANDLE_PX / 2)}px;background:#fff;border:1px solid #333;box-sizing:border-box;pointer-events:auto;z-index:2;}
 .fs-fp-handle--n{left:50%;top:0;cursor:ns-resize;}
 .fs-fp-handle--s{left:50%;bottom:0;cursor:ns-resize;}
@@ -58,6 +91,17 @@ export interface FloatingPictureLayerOptions {
   readonly getWorkbook: () => Workbook;
   /** 插入图片时锚定的单元格（通常为当前活动单元格）。 */
   readonly getAnchorCell: () => { readonly row: number; readonly col: number };
+  /** 结束裁剪会话时提交 before/after（用于撤销栈）；由 FlexSheet 注入。 */
+  readonly onCommitCropSession?: (payload: {
+    readonly before: FloatingPictureSnapshot;
+    readonly after: FloatingPictureSnapshot;
+  }) => void;
+  /** Delete / Backspace 删除选中浮动图（由 FlexSheet 入栈撤销）。 */
+  readonly onRequestDeleteFloatingPicture?: (pictureId: string) => void;
+  /**
+   * 裁剪会话期间需抬高整块表体视图（含浮动层）的叠放顺序，避免被宿主上其它控件（如内联编辑器 z-20）压住黑框。
+   */
+  readonly onCropSessionBoostChange?: (boost: boolean) => void;
 }
 
 /** 浮动图显示调整（CSS filter，与「设置图片格式」面板一致）。 */
@@ -140,6 +184,14 @@ export interface FloatingPictureSnapshot {
   readonly dataUrl: string;
   readonly z: number;
   readonly adjustments: FloatingPictureAdjustments;
+  /** 源图像素（解码后；旧快照省略则为 0） */
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
+  /** 相对裁剪框（frame）左上角的图片内容矩形（画布像素） */
+  readonly imgBoxX?: number;
+  readonly imgBoxY?: number;
+  readonly imgBoxW?: number;
+  readonly imgBoxH?: number;
 }
 
 /** 粘贴前异步算好的几何与像素（不含 id/z，避免未执行命令就占用序号）。 */
@@ -154,6 +206,12 @@ export interface FloatingPicturePastePrepared {
   readonly height: number;
   readonly rotationRad: number;
   readonly dataUrl: string;
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
+  readonly imgBoxX?: number;
+  readonly imgBoxY?: number;
+  readonly imgBoxW?: number;
+  readonly imgBoxH?: number;
 }
 
 interface PictureModel {
@@ -172,9 +230,18 @@ interface PictureModel {
   dataUrl: string;
   z: number;
   adjustments: FloatingPictureAdjustments;
+  naturalWidth: number;
+  naturalHeight: number;
+  /** 图片内容在裁剪框（width×height）内的局部矩形 */
+  imgBoxX: number;
+  imgBoxY: number;
+  imgBoxW: number;
+  imgBoxH: number;
 }
 
 type ResizeHandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+
+const CROP_HANDLE_IDS: readonly ResizeHandleId[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
 
 type DragMode =
   | { kind: "move"; startCX: number; startCY: number; startRelCX: number; startRelCY: number }
@@ -187,7 +254,22 @@ type DragMode =
       startH: number;
       startRot: number;
     }
-  | { kind: "rotate"; startAngle: number; startRot: number; cx: number; cy: number };
+  | { kind: "rotate"; startAngle: number; startRot: number; cx: number; cy: number }
+  | {
+      kind: "cropImgMove";
+      startCX: number;
+      startCY: number;
+      startImgBoxX: number;
+      startImgBoxY: number;
+    }
+  | {
+      kind: "cropImgResize";
+      handle: ResizeHandleId;
+      startX: number;
+      startY: number;
+      startW: number;
+      startH: number;
+    };
 
 function rotLocalToWorld(
   lx: number,
@@ -199,12 +281,26 @@ function rotLocalToWorld(
   return { x: lx * c - ly * s, y: lx * s + ly * c };
 }
 
+function canvasDeltaToLocal(dcx: number, dcy: number, rot: number): { dlx: number; dly: number } {
+  const c = Math.cos(-rot);
+  const s = Math.sin(-rot);
+  return { dlx: dcx * c - dcy * s, dly: dcx * s + dcy * c };
+}
+
+function normalizeImgBoxInModel(m: PictureModel): void {
+  m.imgBoxW = Math.max(MIN_W, m.imgBoxW);
+  m.imgBoxH = Math.max(MIN_H, m.imgBoxH);
+}
+
 export class FloatingPictureLayer {
   private readonly mount: HTMLElement;
   private readonly getCanvas: () => HTMLCanvasElement;
   private readonly getRenderer: () => CanvasRenderer;
   private readonly getWorkbook: () => Workbook;
   private readonly getAnchorCell: () => { readonly row: number; readonly col: number };
+  private readonly onCommitCropSession?: FloatingPictureLayerOptions["onCommitCropSession"];
+  private readonly onRequestDeleteFloatingPicture?: FloatingPictureLayerOptions["onRequestDeleteFloatingPicture"];
+  private readonly onCropSessionBoostChange?: FloatingPictureLayerOptions["onCropSessionBoostChange"];
   private readonly root: HTMLDivElement;
   private readonly byId = new Map<string, { model: PictureModel; el: HTMLDivElement }>();
   private readonly floatingPictureFocusListeners = new Set<(active: boolean) => void>();
@@ -212,6 +308,11 @@ export class FloatingPictureLayer {
   private selectedId: string | null = null;
   private drag: (DragMode & { id: string }) | null = null;
   private idSeq = 0;
+  /** 交互裁剪会话：右键「裁剪」进入，失焦 / Esc / Enter 结束并提交。 */
+  private croppingPictureId: string | null = null;
+  private cropEnterSnapshot: FloatingPictureSnapshot | null = null;
+  private cropKeyHandler: ((ev: KeyboardEvent) => void) | null = null;
+  private cropPointerHandler: ((ev: PointerEvent) => void) | null = null;
 
   constructor(options: FloatingPictureLayerOptions) {
     ensureStyles();
@@ -220,6 +321,9 @@ export class FloatingPictureLayer {
     this.getRenderer = options.getRenderer;
     this.getWorkbook = options.getWorkbook;
     this.getAnchorCell = options.getAnchorCell;
+    this.onCommitCropSession = options.onCommitCropSession;
+    this.onRequestDeleteFloatingPicture = options.onRequestDeleteFloatingPicture;
+    this.onCropSessionBoostChange = options.onCropSessionBoostChange;
     this.root = document.createElement("div");
     this.root.className = "fs-fp-root";
     this.mount.appendChild(this.root);
@@ -230,6 +334,12 @@ export class FloatingPictureLayer {
    * 裁剪到表体区域（与 Canvas 行列标题带一致），避免拖动时图片盖住行号/列标。
    */
   syncClipToTableBody(): void {
+    /** 裁剪时把手伸出图片外，根层 clip-path 会裁切黑框；会话期间临时关闭裁剪。 */
+    if (this.croppingPictureId !== null) {
+      this.root.style.clipPath = "none";
+      this.root.style.removeProperty("-webkit-clip-path");
+      return;
+    }
     const renderer = this.getRenderer();
     if (!renderer.showHeadings) {
       this.root.style.clipPath = "none";
@@ -244,8 +354,23 @@ export class FloatingPictureLayer {
     this.root.style.setProperty("-webkit-clip-path", clip);
   }
 
+  /** 裁剪会话叠放：抬高浮动根与宿主表体布局，避免黑框被内联编辑器等盖住。 */
+  private syncCropSessionStacking(): void {
+    const active = this.croppingPictureId !== null;
+    this.root.classList.toggle("fs-fp-root--crop-active", active);
+    try {
+      this.onCropSessionBoostChange?.(active);
+    } catch {
+      /* 宿主回调错误不阻断裁剪 */
+    }
+  }
+
   destroy(): void {
     this.endDrag();
+    this.detachCropOutsideListeners();
+    this.croppingPictureId = null;
+    this.cropEnterSnapshot = null;
+    this.syncCropSessionStacking();
     const hadFocus = this.selectedId !== null;
     this.selectedId = null;
     this.root.remove();
@@ -275,12 +400,16 @@ export class FloatingPictureLayer {
 
   clearAll(): void {
     this.endDrag();
+    this.detachCropOutsideListeners();
+    this.croppingPictureId = null;
+    this.cropEnterSnapshot = null;
     const hadFocus = this.selectedId !== null;
     this.selectedId = null;
     for (const { el } of this.byId.values()) {
       el.remove();
     }
     this.byId.clear();
+    this.syncCropSessionStacking();
     if (hadFocus) {
       this.emitFloatingPictureFocus(false);
     }
@@ -295,6 +424,15 @@ export class FloatingPictureLayer {
     const rec = this.byId.get(id);
     if (rec === undefined) {
       return;
+    }
+    if (this.croppingPictureId === id) {
+      this.detachCropOutsideListeners();
+      this.croppingPictureId = null;
+      this.cropEnterSnapshot = null;
+      rec.el.classList.remove("fs-fp-item--cropping");
+      this.setCropOverlayVisible(rec.el, false);
+      this.syncClipToTableBody();
+      this.syncCropSessionStacking();
     }
     if (this.drag?.id === id) {
       this.endDrag();
@@ -343,6 +481,12 @@ export class FloatingPictureLayer {
       dataUrl: m.dataUrl,
       z: m.z,
       adjustments: cloneAdjustments(m.adjustments),
+      naturalWidth: m.naturalWidth,
+      naturalHeight: m.naturalHeight,
+      imgBoxX: m.imgBoxX,
+      imgBoxY: m.imgBoxY,
+      imgBoxW: m.imgBoxW,
+      imgBoxH: m.imgBoxH,
     };
   }
 
@@ -365,7 +509,14 @@ export class FloatingPictureLayer {
       dataUrl: snapshot.dataUrl,
       z: snapshot.z,
       adjustments: cloneAdjustments(snapshot.adjustments),
+      naturalWidth: snapshot.naturalWidth ?? 0,
+      naturalHeight: snapshot.naturalHeight ?? 0,
+      imgBoxX: snapshot.imgBoxX ?? 0,
+      imgBoxY: snapshot.imgBoxY ?? 0,
+      imgBoxW: snapshot.imgBoxW ?? snapshot.width,
+      imgBoxH: snapshot.imgBoxH ?? snapshot.height,
     };
+    normalizeImgBoxInModel(model);
     this.zCounter = Math.max(this.zCounter, snapshot.z);
     const seqNum = Number.parseInt(snapshot.id.replace(/^fp-/, ""), 10);
     if (Number.isFinite(seqNum)) {
@@ -425,6 +576,12 @@ export class FloatingPictureLayer {
           height: h,
           rotationRad: 0,
           dataUrl: exportableUrl,
+          naturalWidth: img.naturalWidth || 0,
+          naturalHeight: img.naturalHeight || 0,
+          imgBoxX: 0,
+          imgBoxY: 0,
+          imgBoxW: w,
+          imgBoxH: h,
         });
       };
       img.onerror = (): void => {
@@ -452,7 +609,14 @@ export class FloatingPictureLayer {
       dataUrl: p.dataUrl,
       z,
       adjustments: cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS),
+      naturalWidth: p.naturalWidth ?? 0,
+      naturalHeight: p.naturalHeight ?? 0,
+      imgBoxX: p.imgBoxX ?? 0,
+      imgBoxY: p.imgBoxY ?? 0,
+      imgBoxW: p.imgBoxW ?? p.width,
+      imgBoxH: p.imgBoxH ?? p.height,
     };
+    normalizeImgBoxInModel(model);
     const el = this.createItemElement(model);
     this.byId.set(id, { model, el });
     this.root.appendChild(el);
@@ -472,35 +636,145 @@ export class FloatingPictureLayer {
       dataUrl: model.dataUrl,
       z: model.z,
       adjustments: cloneAdjustments(model.adjustments),
+      naturalWidth: model.naturalWidth,
+      naturalHeight: model.naturalHeight,
+      imgBoxX: model.imgBoxX,
+      imgBoxY: model.imgBoxY,
+      imgBoxW: model.imgBoxW,
+      imgBoxH: model.imgBoxH,
     };
+  }
+
+  private pictureModelToXlsxExportDto(model: PictureModel): XlsxFloatingPictureExport {
+    return {
+      sheetName: model.sheetName,
+      anchorRow: model.anchorRow,
+      anchorCol: model.anchorCol,
+      relCX: model.relCX,
+      relCY: model.relCY,
+      width: model.width,
+      height: model.height,
+      rotationRad: model.rotationRad,
+      dataUrl: model.dataUrl,
+      naturalWidth: model.naturalWidth,
+      naturalHeight: model.naturalHeight,
+      imgBoxX: model.imgBoxX,
+      imgBoxY: model.imgBoxY,
+      imgBoxW: model.imgBoxW,
+      imgBoxH: model.imgBoxH,
+    };
+  }
+
+  /**
+   * 将单张浮动图栅格化为与裁剪框同尺寸的 PNG（透明留白 + `imgBox` 内绘图），供 OOXML 占位与格线后内容对齐。
+   */
+  private async rasterizePictureModelToFramePngDataUrl(model: PictureModel): Promise<string | null> {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    const W = Math.max(1, Math.round(model.width));
+    const H = Math.max(1, Math.round(model.height));
+    let nw = model.naturalWidth;
+    let nh = model.naturalHeight;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (ctx === null) {
+      return null;
+    }
+    const img = new Image();
+    img.decoding = "async";
+    try {
+      await new Promise<void>((resolve, reject) => {
+        img.onload = (): void => resolve();
+        img.onerror = (): void => reject(new Error("floating picture load failed"));
+        img.src = model.dataUrl;
+      });
+    } catch {
+      return null;
+    }
+    if (nw <= 0 || nh <= 0) {
+      nw = img.naturalWidth;
+      nh = img.naturalHeight;
+    }
+    if (nw <= 0 || nh <= 0) {
+      return null;
+    }
+    const f = buildFloatingPictureCssFilter(model.adjustments);
+    ctx.clearRect(0, 0, W, H);
+    ctx.filter = f;
+    try {
+      ctx.drawImage(img, 0, 0, nw, nh, model.imgBoxX, model.imgBoxY, model.imgBoxW, model.imgBoxH);
+    } catch {
+      ctx.filter = "none";
+      ctx.clearRect(0, 0, W, H);
+      try {
+        ctx.drawImage(img, 0, 0, nw, nh, model.imgBoxX, model.imgBoxY, model.imgBoxW, model.imgBoxH);
+      } catch {
+        return null;
+      }
+    }
+    ctx.filter = "none";
+    try {
+      return canvas.toDataURL("image/png");
+    } catch {
+      return null;
+    }
   }
 
   /** 供 XLSX 导出：当前浮动图片快照（画布像素 + `viewZoom` 在导出侧换算）。 */
   getPicturesForXlsxExport(): readonly XlsxFloatingPictureExport[] {
     const out: XlsxFloatingPictureExport[] = [];
     for (const { model } of this.byId.values()) {
-      out.push({
-        sheetName: model.sheetName,
-        anchorRow: model.anchorRow,
-        anchorCol: model.anchorCol,
-        relCX: model.relCX,
-        relCY: model.relCY,
-        width: model.width,
-        height: model.height,
-        rotationRad: model.rotationRad,
-        dataUrl: model.dataUrl,
-      });
+      out.push(this.pictureModelToXlsxExportDto(model));
+    }
+    return out;
+  }
+
+  /**
+   * 供 XLSX 导出：在裁剪框大于图片留白时，先合成与裁剪框同尺寸的 PNG，保证 Excel 中占位与格线/后续内容一致。
+   */
+  async preparePicturesForXlsxExport(): Promise<readonly XlsxFloatingPictureExport[]> {
+    const out: XlsxFloatingPictureExport[] = [];
+    for (const { model } of this.byId.values()) {
+      const dto = this.pictureModelToXlsxExportDto(model);
+      if (floatingPictureNeedsFrameCompositeForXlsx(dto)) {
+        const url = await this.rasterizePictureModelToFramePngDataUrl(model);
+        if (url !== null) {
+          const rw = Math.max(1, Math.round(model.width));
+          const rh = Math.max(1, Math.round(model.height));
+          out.push({
+            ...dto,
+            dataUrl: url,
+            naturalWidth: rw,
+            naturalHeight: rh,
+            imgBoxX: 0,
+            imgBoxY: 0,
+            imgBoxW: rw,
+            imgBoxH: rh,
+          });
+          continue;
+        }
+      }
+      out.push(dto);
     }
     return out;
   }
 
   deselect(): void {
+    if (this.croppingPictureId !== null) {
+      this.finishCropSessionAndNotify();
+    }
     if (this.selectedId === null) {
       return;
     }
     const rec = this.byId.get(this.selectedId);
     if (rec !== undefined) {
       rec.el.classList.remove("fs-fp-item--selected");
+      if (document.activeElement instanceof Node && rec.el.contains(document.activeElement)) {
+        rec.el.blur();
+      }
     }
     this.selectedId = null;
     this.emitFloatingPictureFocus(false);
@@ -514,6 +788,9 @@ export class FloatingPictureLayer {
     const rec = this.byId.get(this.selectedId);
     if (rec !== undefined) {
       rec.el.classList.remove("fs-fp-item--selected");
+      if (document.activeElement instanceof Node && rec.el.contains(document.activeElement)) {
+        rec.el.blur();
+      }
     }
     this.selectedId = null;
   }
@@ -548,6 +825,10 @@ export class FloatingPictureLayer {
       model.relCY *= k;
       model.width *= k;
       model.height *= k;
+      model.imgBoxX *= k;
+      model.imgBoxY *= k;
+      model.imgBoxW *= k;
+      model.imgBoxH *= k;
     }
   }
 
@@ -634,7 +915,14 @@ export class FloatingPictureLayer {
         dataUrl: exportableUrl,
         z: ++this.zCounter,
         adjustments: cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS),
+        naturalWidth: img.naturalWidth || 0,
+        naturalHeight: img.naturalHeight || 0,
+        imgBoxX: 0,
+        imgBoxY: 0,
+        imgBoxW: w,
+        imgBoxH: h,
       };
+      normalizeImgBoxInModel(model);
       const el = this.createItemElement(model);
       this.byId.set(id, { model, el });
       this.root.appendChild(el);
@@ -650,17 +938,42 @@ export class FloatingPictureLayer {
   private createItemElement(model: PictureModel): HTMLDivElement {
     const wrap = document.createElement("div");
     wrap.className = "fs-fp-item";
+    wrap.tabIndex = -1;
     wrap.dataset.fpId = model.id;
     wrap.dataset.fsFloatingSheet = model.sheetName;
+    wrap.addEventListener("keydown", (ev: KeyboardEvent) => {
+      if (ev.isComposing || ev.ctrlKey || ev.metaKey || ev.altKey) {
+        return;
+      }
+      if (ev.key !== "Delete" && ev.key !== "Backspace") {
+        return;
+      }
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.onRequestDeleteFloatingPicture?.(model.id);
+    });
+    const body = document.createElement("div");
+    body.className = "fs-fp-item__body";
+    const imgWrap = document.createElement("div");
+    imgWrap.className = "fs-fp-item__img-wrap";
     const im = document.createElement("img");
     im.className = "fs-fp-item__img";
     im.draggable = false;
     im.alt = "";
     im.src = model.dataUrl;
+    im.addEventListener("load", () => {
+      const r = this.byId.get(model.id);
+      if (r === undefined) {
+        return;
+      }
+      r.model.naturalWidth = im.naturalWidth || 0;
+      r.model.naturalHeight = im.naturalHeight || 0;
+    });
+    imgWrap.appendChild(im);
+    body.appendChild(imgWrap);
     const focus = document.createElement("div");
     focus.className = "fs-fp-item__focus";
-    const handles: ResizeHandleId[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
-    for (const h of handles) {
+    for (const h of CROP_HANDLE_IDS) {
       const d = document.createElement("div");
       d.className = `fs-fp-handle fs-fp-handle--${h}`;
       d.dataset.handle = h;
@@ -676,10 +989,12 @@ export class FloatingPictureLayer {
     rot.addEventListener("pointerdown", (ev) => this.onRotatePointerDown(ev, model.id));
     focus.appendChild(rot);
 
-    wrap.appendChild(im);
+    wrap.appendChild(body);
     wrap.appendChild(focus);
     wrap.addEventListener("pointerdown", (ev) => this.onItemPointerDown(ev, model.id));
     this.applyImageFilterToElement(wrap, model);
+    this.ensureCropOverlayMounted(wrap);
+    this.syncInnerLayout(model, wrap);
     return wrap;
   }
 
@@ -688,6 +1003,199 @@ export class FloatingPictureLayer {
     if (img instanceof HTMLImageElement) {
       img.style.filter = buildFloatingPictureCssFilter(model.adjustments);
     }
+  }
+
+  private syncInnerLayout(model: PictureModel, el: HTMLDivElement): void {
+    const wrap = el.querySelector(".fs-fp-item__img-wrap");
+    if (wrap instanceof HTMLElement) {
+      wrap.style.left = `${model.imgBoxX}px`;
+      wrap.style.top = `${model.imgBoxY}px`;
+      wrap.style.width = `${model.imgBoxW}px`;
+      wrap.style.height = `${model.imgBoxH}px`;
+    }
+    const imgHandles = el.querySelector(".fs-fp-crop-img-handles");
+    if (imgHandles instanceof HTMLElement) {
+      imgHandles.style.left = `${model.imgBoxX}px`;
+      imgHandles.style.top = `${model.imgBoxY}px`;
+      imgHandles.style.width = `${model.imgBoxW}px`;
+      imgHandles.style.height = `${model.imgBoxH}px`;
+    }
+  }
+
+  private ensureCropOverlayMounted(wrap: HTMLDivElement): void {
+    if (wrap.querySelector(":scope > .fs-fp-crop-overlay") !== null) {
+      return;
+    }
+    const overlay = document.createElement("div");
+    overlay.className = "fs-fp-crop-overlay";
+    overlay.style.display = "none";
+    const fh = document.createElement("div");
+    fh.className = "fs-fp-crop-frame-handles";
+    const ih = document.createElement("div");
+    ih.className = "fs-fp-crop-img-handles";
+    for (const h of CROP_HANDLE_IDS) {
+      const d = document.createElement("div");
+      d.className = `fs-fp-crop-h fs-fp-crop-h--frame fs-fp-crop-h--${h}`;
+      d.dataset.cropFrameHandle = h;
+      d.addEventListener("pointerdown", (ev) => this.onCropFrameHandlePointerDown(ev, wrap, h));
+      fh.appendChild(d);
+      const di = document.createElement("div");
+      di.className = `fs-fp-crop-h fs-fp-crop-h--img fs-fp-crop-h--${h}`;
+      di.dataset.cropImgHandle = h;
+      di.addEventListener("pointerdown", (ev) => this.onCropImgHandlePointerDown(ev, wrap, h));
+      ih.appendChild(di);
+    }
+    /* 图片白把手在后、裁剪黑框在前，避免角部重叠时白块盖住 L 形黑框 */
+    overlay.appendChild(ih);
+    overlay.appendChild(fh);
+    wrap.appendChild(overlay);
+  }
+
+  private setCropOverlayVisible(wrap: HTMLDivElement, vis: boolean): void {
+    const ov = wrap.querySelector(":scope > .fs-fp-crop-overlay");
+    if (ov instanceof HTMLElement) {
+      ov.style.display = vis ? "" : "none";
+    }
+  }
+
+  private attachCropOutsideListeners(): void {
+    if (this.cropKeyHandler !== null) {
+      return;
+    }
+    this.cropKeyHandler = (ev: KeyboardEvent): void => {
+      if (this.croppingPictureId === null) {
+        return;
+      }
+      if (ev.key === "Escape" || ev.key === "Enter") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.finishCropSessionAndNotify();
+      }
+    };
+    this.cropPointerHandler = (ev: PointerEvent): void => {
+      if (this.croppingPictureId === null) {
+        return;
+      }
+      const rec = this.byId.get(this.croppingPictureId);
+      if (rec === undefined) {
+        this.finishCropSessionAndNotify();
+        return;
+      }
+      if (rec.el.contains(ev.target as Node)) {
+        return;
+      }
+      this.finishCropSessionAndNotify();
+    };
+    document.addEventListener("keydown", this.cropKeyHandler, true);
+    document.addEventListener("pointerdown", this.cropPointerHandler, true);
+  }
+
+  private detachCropOutsideListeners(): void {
+    if (this.cropKeyHandler !== null) {
+      document.removeEventListener("keydown", this.cropKeyHandler, true);
+      this.cropKeyHandler = null;
+    }
+    if (this.cropPointerHandler !== null) {
+      document.removeEventListener("pointerdown", this.cropPointerHandler, true);
+      this.cropPointerHandler = null;
+    }
+  }
+
+  /** 右键「裁剪」进入交互编辑；已处于该图裁剪时重复调用为 no-op。 */
+  startCropSession(pictureId: string): boolean {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return false;
+    }
+    if (this.croppingPictureId === pictureId) {
+      this.setCropOverlayVisible(rec.el, true);
+      rec.el.classList.add("fs-fp-item--cropping");
+      this.syncClipToTableBody();
+      this.syncCropSessionStacking();
+      this.layout();
+      return true;
+    }
+    if (this.croppingPictureId !== null) {
+      this.finishCropSessionAndNotify();
+    }
+    this.selectById(pictureId);
+    const snap = this.takeFloatingPictureSnapshot(pictureId);
+    if (snap === null) {
+      return false;
+    }
+    this.croppingPictureId = pictureId;
+    this.cropEnterSnapshot = snap;
+    rec.el.classList.add("fs-fp-item--cropping");
+    this.ensureCropOverlayMounted(rec.el);
+    this.setCropOverlayVisible(rec.el, true);
+    this.syncInnerLayout(rec.model, rec.el);
+    this.attachCropOutsideListeners();
+    this.syncClipToTableBody();
+    this.syncCropSessionStacking();
+    this.layout();
+    return true;
+  }
+
+  isCropSessionActive(): boolean {
+    return this.croppingPictureId !== null;
+  }
+
+  private finishCropSessionAndNotify(): void {
+    if (this.croppingPictureId === null || this.cropEnterSnapshot === null) {
+      return;
+    }
+    const id = this.croppingPictureId;
+    const before = this.cropEnterSnapshot;
+    this.detachCropOutsideListeners();
+    const rec = this.byId.get(id);
+    if (rec !== undefined) {
+      rec.el.classList.remove("fs-fp-item--cropping");
+      this.setCropOverlayVisible(rec.el, false);
+    }
+    this.croppingPictureId = null;
+    this.cropEnterSnapshot = null;
+    const after = this.takeFloatingPictureSnapshot(id);
+    if (after !== null) {
+      this.onCommitCropSession?.({ before, after });
+    }
+    this.syncClipToTableBody();
+    this.syncCropSessionStacking();
+  }
+
+  /** 将快照写回已存在的浮动图（撤销/重做）；id 必须已存在。 */
+  applySnapshotToPicture(snapshot: FloatingPictureSnapshot): void {
+    const rec = this.byId.get(snapshot.id);
+    if (rec === undefined) {
+      return;
+    }
+    const m = rec.model;
+    m.sheetName = snapshot.sheetName;
+    m.sheetIndex = snapshot.sheetIndex;
+    m.anchorRow = snapshot.anchorRow;
+    m.anchorCol = snapshot.anchorCol;
+    m.relCX = snapshot.relCX;
+    m.relCY = snapshot.relCY;
+    m.width = snapshot.width;
+    m.height = snapshot.height;
+    m.rotationRad = snapshot.rotationRad;
+    m.dataUrl = snapshot.dataUrl;
+    m.z = snapshot.z;
+    m.adjustments = cloneAdjustments(snapshot.adjustments);
+    m.naturalWidth = snapshot.naturalWidth ?? 0;
+    m.naturalHeight = snapshot.naturalHeight ?? 0;
+    m.imgBoxX = snapshot.imgBoxX ?? 0;
+    m.imgBoxY = snapshot.imgBoxY ?? 0;
+    m.imgBoxW = snapshot.imgBoxW ?? snapshot.width;
+    m.imgBoxH = snapshot.imgBoxH ?? snapshot.height;
+    normalizeImgBoxInModel(m);
+    rec.el.style.zIndex = String(m.z);
+    const img = rec.el.querySelector(".fs-fp-item__img");
+    if (img instanceof HTMLImageElement && img.src !== m.dataUrl) {
+      img.src = m.dataUrl;
+    }
+    this.applyImageFilterToElement(rec.el, m);
+    this.syncInnerLayout(m, rec.el);
+    this.applyGeometry(m, rec.el);
   }
 
   getFloatingPictureAdjustments(pictureId: string): FloatingPictureAdjustments | null {
@@ -780,9 +1288,13 @@ export class FloatingPictureLayer {
     el.style.zIndex = String(model.z);
     el.style.transform = `rotate(${model.rotationRad}rad)`;
     el.style.transformOrigin = "center center";
+    this.syncInnerLayout(model, el);
   }
 
   private selectById(id: string): void {
+    if (this.croppingPictureId !== null && this.croppingPictureId !== id) {
+      this.finishCropSessionAndNotify();
+    }
     this.clearSelectionWithoutNotify();
     this.selectedId = id;
     const rec = this.byId.get(id);
@@ -795,6 +1307,11 @@ export class FloatingPictureLayer {
     rec.model.z = this.zCounter;
     rec.el.style.zIndex = String(rec.model.z);
     this.emitFloatingPictureFocus(true);
+    try {
+      rec.el.focus({ preventScroll: true });
+    } catch {
+      /* 部分环境下 focus 可能不可用 */
+    }
   }
 
   private onItemPointerDown(ev: PointerEvent, id: string): void {
@@ -802,7 +1319,7 @@ export class FloatingPictureLayer {
       return;
     }
     const t = ev.target as HTMLElement;
-    if (t.closest(".fs-fp-handle, .fs-fp-rotate")) {
+    if (t.closest(".fs-fp-handle, .fs-fp-rotate, .fs-fp-crop-h")) {
       return;
     }
     ev.stopPropagation();
@@ -817,13 +1334,108 @@ export class FloatingPictureLayer {
       return;
     }
     const { x, y } = this.clientToCanvas(ev.clientX, ev.clientY);
+    if (this.croppingPictureId === id && t.closest(".fs-fp-item__img-wrap")) {
+      this.drag = {
+        kind: "cropImgMove",
+        id,
+        startCX: x,
+        startCY: y,
+        startImgBoxX: rec.model.imgBoxX,
+        startImgBoxY: rec.model.imgBoxY,
+      };
+    } else {
+      this.drag = {
+        kind: "move",
+        id,
+        startCX: x,
+        startCY: y,
+        startRelCX: rec.model.relCX,
+        startRelCY: rec.model.relCY,
+      };
+    }
+    this.attachDragListeners();
+    try {
+      (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private onCropFrameHandlePointerDown(
+    ev: PointerEvent,
+    wrap: HTMLDivElement,
+    handle: ResizeHandleId,
+  ): void {
+    if (ev.button !== 0) {
+      return;
+    }
+    const pictureId = wrap.dataset.fpId;
+    if (pictureId === undefined || pictureId === "") {
+      return;
+    }
+    if (this.croppingPictureId !== pictureId) {
+      return;
+    }
+    ev.stopPropagation();
+    ev.preventDefault();
+    this.selectById(pictureId);
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    const c = this.getCenterCanvas(rec.model);
+    if (c === null) {
+      return;
+    }
     this.drag = {
-      kind: "move",
-      id,
-      startCX: x,
-      startCY: y,
-      startRelCX: rec.model.relCX,
-      startRelCY: rec.model.relCY,
+      kind: "resize",
+      id: pictureId,
+      handle,
+      startCenterX: c.cx,
+      startCenterY: c.cy,
+      startW: rec.model.width,
+      startH: rec.model.height,
+      startRot: rec.model.rotationRad,
+    };
+    this.attachDragListeners();
+    try {
+      (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private onCropImgHandlePointerDown(
+    ev: PointerEvent,
+    wrap: HTMLDivElement,
+    handle: ResizeHandleId,
+  ): void {
+    if (ev.button !== 0) {
+      return;
+    }
+    const pictureId = wrap.dataset.fpId;
+    if (pictureId === undefined || pictureId === "") {
+      return;
+    }
+    if (this.croppingPictureId !== pictureId) {
+      return;
+    }
+    ev.stopPropagation();
+    ev.preventDefault();
+    this.selectById(pictureId);
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    const m = rec.model;
+    this.drag = {
+      kind: "cropImgResize",
+      id: pictureId,
+      handle,
+      startX: m.imgBoxX,
+      startY: m.imgBoxY,
+      startW: m.imgBoxW,
+      startH: m.imgBoxH,
     };
     this.attachDragListeners();
     try {
@@ -835,6 +1447,9 @@ export class FloatingPictureLayer {
 
   private onHandlePointerDown(ev: PointerEvent, id: string, handle: ResizeHandleId): void {
     if (ev.button !== 0) {
+      return;
+    }
+    if (this.croppingPictureId === id) {
       return;
     }
     ev.stopPropagation();
@@ -868,6 +1483,9 @@ export class FloatingPictureLayer {
 
   private onRotatePointerDown(ev: PointerEvent, id: string): void {
     if (ev.button !== 0) {
+      return;
+    }
+    if (this.croppingPictureId === id) {
       return;
     }
     ev.stopPropagation();
@@ -912,6 +1530,27 @@ export class FloatingPictureLayer {
     };
   }
 
+  /** 指针在画布中的位置换算到浮动图局部坐标（原点为裁剪框左上角，未旋转前）。 */
+  private clientToFrameLocal(
+    clientX: number,
+    clientY: number,
+    m: PictureModel,
+  ): { lx: number; ly: number } | null {
+    const c = this.getCenterCanvas(m);
+    if (c === null) {
+      return null;
+    }
+    const { x, y } = this.clientToCanvas(clientX, clientY);
+    const dx = x - c.cx;
+    const dy = y - c.cy;
+    const rot = m.rotationRad;
+    const co = Math.cos(-rot);
+    const si = Math.sin(-rot);
+    const lx = dx * co - dy * si + m.width / 2;
+    const ly = dx * si + dy * co + m.height / 2;
+    return { lx, ly };
+  }
+
   private attachDragListeners(): void {
     document.addEventListener("pointermove", this.onDocPointerMove);
     document.addEventListener("pointerup", this.onDocPointerUp);
@@ -949,11 +1588,98 @@ export class FloatingPictureLayer {
       return;
     }
 
+    if (this.drag.kind === "cropImgMove") {
+      const dx = x - this.drag.startCX;
+      const dy = y - this.drag.startCY;
+      const { dlx, dly } = canvasDeltaToLocal(dx, dy, m.rotationRad);
+      m.imgBoxX = this.drag.startImgBoxX + dlx;
+      m.imgBoxY = this.drag.startImgBoxY + dly;
+      normalizeImgBoxInModel(m);
+      this.syncInnerLayout(m, rec.el);
+      return;
+    }
+
+    if (this.drag.kind === "cropImgResize") {
+      const pl = this.clientToFrameLocal(ev.clientX, ev.clientY, m);
+      if (pl === null) {
+        return;
+      }
+      const { lx, ly } = pl;
+      const d = this.drag;
+      const sx = d.startX;
+      const sy = d.startY;
+      const sw = d.startW;
+      const sh = d.startH;
+      let nx = sx;
+      let ny = sy;
+      let nw = sw;
+      let nh = sh;
+      switch (d.handle) {
+        case "e":
+          nw = Math.max(MIN_W, lx - sx);
+          break;
+        case "w": {
+          const right = sx + sw;
+          nx = Math.min(lx, right - MIN_W);
+          nw = Math.max(MIN_W, right - nx);
+          break;
+        }
+        case "s":
+          nh = Math.max(MIN_H, ly - sy);
+          break;
+        case "n": {
+          const bottom = sy + sh;
+          ny = Math.min(ly, bottom - MIN_H);
+          nh = Math.max(MIN_H, bottom - ny);
+          break;
+        }
+        case "se":
+          nw = Math.max(MIN_W, lx - sx);
+          nh = Math.max(MIN_H, ly - sy);
+          break;
+        case "nw": {
+          const rx = sx + sw;
+          const by = sy + sh;
+          nx = Math.min(lx, rx - MIN_W);
+          ny = Math.min(ly, by - MIN_H);
+          nw = Math.max(MIN_W, rx - nx);
+          nh = Math.max(MIN_H, by - ny);
+          break;
+        }
+        case "ne": {
+          const bottom = sy + sh;
+          nw = Math.max(MIN_W, lx - sx);
+          nh = Math.max(MIN_H, bottom - ly);
+          nx = sx;
+          ny = bottom - nh;
+          break;
+        }
+        case "sw": {
+          const right = sx + sw;
+          nw = Math.max(MIN_W, right - lx);
+          nh = Math.max(MIN_H, ly - sy);
+          nx = right - nw;
+          ny = sy;
+          break;
+        }
+      }
+      m.imgBoxX = nx;
+      m.imgBoxY = ny;
+      m.imgBoxW = nw;
+      m.imgBoxH = nh;
+      normalizeImgBoxInModel(m);
+      this.syncInnerLayout(m, rec.el);
+      return;
+    }
+
     /**
      * resize：画布空间几何同步
      * - 边：固定对边中点，宽度/高度 = 指针在边法向上的投影（与鼠标 1:1）
      * - 角：固定对角顶点，沿「宽+高比例」对角射线投影，保持起始宽高比
      */
+    if (this.drag.kind !== "resize") {
+      return;
+    }
     const d = this.drag;
     const rot = d.startRot;
     const sx = d.startCenterX;
@@ -1098,6 +1824,14 @@ export class FloatingPictureLayer {
       rec.model.relCX = Math.round(rec.model.relCX);
       rec.model.relCY = Math.round(rec.model.relCY);
       this.applyGeometry(rec.model, rec.el, { snapPixels: true });
+    }
+    if (kind === "cropImgMove" || kind === "cropImgResize") {
+      const m = rec.model;
+      m.imgBoxX = Math.round(m.imgBoxX);
+      m.imgBoxY = Math.round(m.imgBoxY);
+      m.imgBoxW = Math.max(MIN_W, Math.round(m.imgBoxW));
+      m.imgBoxH = Math.max(MIN_H, Math.round(m.imgBoxH));
+      this.syncInnerLayout(m, rec.el);
     }
   }
 }

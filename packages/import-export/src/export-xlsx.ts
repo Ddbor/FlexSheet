@@ -542,6 +542,10 @@ export const DEFAULT_XLSX_EXPORT_OPTIONS: XlsxExportOptions = {
 };
 
 export type { XlsxFloatingPictureExport } from "./export-xlsx-drawing.js";
+export {
+  floatingPictureNeedsFrameCompositeForXlsx,
+  floatingPictureSrcRectSides,
+} from "./export-xlsx-drawing.js";
 
 /** 从样式中去掉四边边框，供合并格按边拆分后与主格非边框属性合并。 */
 function stripBorderSides(st: CellStyle | null | undefined): CellStyle {

@@ -12,6 +12,14 @@ export interface XlsxFloatingPictureExport {
   readonly height: number;
   readonly rotationRad: number;
   readonly dataUrl: string;
+  /** 源图像素宽；与 `imgBox*` 一并用于 OOXML `srcRect` 裁剪；缺省或 0 则整张图拉伸进占位（旧行为）。 */
+  readonly naturalWidth?: number;
+  readonly naturalHeight?: number;
+  /** 相对裁剪框左上角的图片内容矩形（画布像素）；缺省视为铺满 `width`×`height`。 */
+  readonly imgBoxX?: number;
+  readonly imgBoxY?: number;
+  readonly imgBoxW?: number;
+  readonly imgBoxH?: number;
 }
 
 const EMU_PER_PX = 9525;
@@ -146,6 +154,107 @@ function rotationToOoxmlRot60000(rotationRad: number): number {
   return Math.round(deg * 60000);
 }
 
+/** OOXML `CT_RelativeRect`：从各边裁掉的占比（ST_Percentage，如 `"12.5%"`）。 */
+function formatOoxmlPercentage(fraction: number): string {
+  const p = Math.max(0, Math.min(100, fraction * 100));
+  if (p <= 0) {
+    return "0%";
+  }
+  if (p >= 100) {
+    return "100%";
+  }
+  const s = p.toFixed(4).replace(/\.?0+$/, "");
+  return `${s}%`;
+}
+
+/**
+ * 由 FlexSheet 裁剪模型推算 `blipFill/srcRect`（与 DOM：`object-fit: fill` + `img-wrap` 几何一致）。
+ * 若无法推算或等价于未裁剪，返回 `undefined`（不写 `srcRect`）。
+ */
+/**
+ * 裁剪框内是否存在未被图片覆盖的留白（仅几何判断）。
+ * 此时仅用 `srcRect`+`stretch` 无法得到透明边距，需在导出侧合成与裁剪框同尺寸的 PNG。
+ */
+export function floatingPictureNeedsFrameCompositeForXlsx(pic: XlsxFloatingPictureExport): boolean {
+  const fw = pic.width;
+  const fh = pic.height;
+  if (!(fw > 0) || !(fh > 0)) {
+    return false;
+  }
+  const ibx = pic.imgBoxX ?? 0;
+  const iby = pic.imgBoxY ?? 0;
+  const ibw = pic.imgBoxW ?? fw;
+  const ibh = pic.imgBoxH ?? fh;
+  if (!(ibw > 0) || !(ibh > 0)) {
+    return true;
+  }
+  const visL = Math.max(0, ibx);
+  const visT = Math.max(0, iby);
+  const visR = Math.min(fw, ibx + ibw);
+  const visB = Math.min(fh, iby + ibh);
+  const eps = 1e-3;
+  if (visR <= visL + eps || visB <= visT + eps) {
+    return true;
+  }
+  const cw = visR - visL;
+  const ch = visB - visT;
+  return cw < fw - eps || ch < fh - eps;
+}
+
+export function floatingPictureSrcRectSides(
+  pic: XlsxFloatingPictureExport,
+): { readonly l: string; readonly t: string; readonly r: string; readonly b: string } | undefined {
+  const nw = pic.naturalWidth ?? 0;
+  const nh = pic.naturalHeight ?? 0;
+  if (!(nw > 0) || !(nh > 0)) {
+    return undefined;
+  }
+  const fw = pic.width;
+  const fh = pic.height;
+  if (!(fw > 0) || !(fh > 0)) {
+    return undefined;
+  }
+  const ibx = pic.imgBoxX ?? 0;
+  const iby = pic.imgBoxY ?? 0;
+  const ibw = pic.imgBoxW ?? fw;
+  const ibh = pic.imgBoxH ?? fh;
+  if (!(ibw > 0) || !(ibh > 0)) {
+    return undefined;
+  }
+  const visL = Math.max(0, ibx);
+  const visT = Math.max(0, iby);
+  const visR = Math.min(fw, ibx + ibw);
+  const visB = Math.min(fh, iby + ibh);
+  if (visR <= visL || visB <= visT) {
+    return undefined;
+  }
+  const u0 = (nw * (visL - ibx)) / ibw;
+  const u1 = (nw * (visR - ibx)) / ibw;
+  const v0 = (nh * (visT - iby)) / ibh;
+  const v1 = (nh * (visB - iby)) / ibh;
+  const u0c = Math.max(0, Math.min(nw, u0));
+  const u1c = Math.max(0, Math.min(nw, u1));
+  const v0c = Math.max(0, Math.min(nh, v0));
+  const v1c = Math.max(0, Math.min(nh, v1));
+  if (u1c <= u0c || v1c <= v0c) {
+    return undefined;
+  }
+  const l = u0c / nw;
+  const r = (nw - u1c) / nw;
+  const t = v0c / nh;
+  const b = (nh - v1c) / nh;
+  const eps = 1e-6;
+  if (l <= eps && r <= eps && t <= eps && b <= eps) {
+    return undefined;
+  }
+  return {
+    l: formatOoxmlPercentage(l),
+    t: formatOoxmlPercentage(t),
+    r: formatOoxmlPercentage(r),
+    b: formatOoxmlPercentage(b),
+  };
+}
+
 function buildOnePictureAnchorXml(
   pic: XlsxFloatingPictureExport,
   sheet: Worksheet,
@@ -159,6 +268,9 @@ function buildOnePictureAnchorXml(
   const cyEmu = Math.max(1, Math.round(box.h * EMU_PER_PX));
   const rot = rotationToOoxmlRot60000(pic.rotationRad);
   const rotAttr = rot === 0 ? "" : ` rot="${rot}"`;
+  const src = floatingPictureSrcRectSides(pic);
+  const srcRectXml =
+    src === undefined ? "" : `<a:srcRect l="${src.l}" t="${src.t}" r="${src.r}" b="${src.b}"/>`;
   return (
     `<xdr:oneCellAnchor>` +
     `<xdr:from>` +
@@ -175,6 +287,7 @@ function buildOnePictureAnchorXml(
     `</xdr:nvPicPr>` +
     `<xdr:blipFill>` +
     `<a:blip xmlns:r="${REL_NS}" r:embed="${embedRid}"/>` +
+    srcRectXml +
     `<a:stretch><a:fillRect/></a:stretch>` +
     `</xdr:blipFill>` +
     `<xdr:spPr>` +

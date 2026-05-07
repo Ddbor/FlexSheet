@@ -459,6 +459,14 @@ export class SheetContextMenuPlugin extends PluginBase {
           void flex.clipboardCopyFloatingPicture(pictureId);
         },
       },
+      {
+        id: "floatingPicture.crop",
+        label: "裁剪",
+        order: 2,
+        onSelect: () => {
+          flex.enterFloatingPictureCropMode(pictureId);
+        },
+      },
     ];
     this.showMenu(ev.clientX, ev.clientY, items);
   };

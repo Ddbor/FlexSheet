@@ -57,3 +57,25 @@ export class PasteFloatingPictureCommand implements ICommand {
     }
   }
 }
+
+/**
+ * 键盘 Delete / Backspace 删除浮动图：经 `Workspace.commands` 入栈，
+ * Ctrl+Z / Ctrl+Y（或 Cmd）可撤销/重做；不写剪贴板。
+ */
+export class DeleteFloatingPictureCommand implements ICommand {
+  readonly id = "floatingPicture.delete";
+  readonly label = "删除图片";
+
+  constructor(
+    private readonly flex: FlexSheet,
+    private readonly snapshot: FloatingPictureSnapshot,
+  ) {}
+
+  execute(): void {
+    this.flex.removeFloatingPictureById(this.snapshot.id);
+  }
+
+  undo(): void {
+    this.flex.restoreFloatingPictureFromSnapshot(this.snapshot);
+  }
+}

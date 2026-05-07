@@ -82,8 +82,10 @@ import {
 } from "./commands/cell-style-commands.js";
 import {
   CutFloatingPictureCommand,
+  DeleteFloatingPictureCommand,
   PasteFloatingPictureCommand,
 } from "./commands/floating-picture-clipboard-commands.js";
+import { ReplaceFloatingPictureStateCommand } from "./commands/floating-picture-state-command.js";
 import type { FormatCellsBorderState } from "./format-cells/format-cells-border.js";
 import {
   AddConditionalFormatRuleCommand,
@@ -155,6 +157,7 @@ export interface FlexSheetOptions {
   /**
    * 可选：Ribbon + 编辑栏 + 表格 + 底部栏等共同祖先。
    * 传入后在此区域内统一拦截浏览器默认右键与部分快捷键，并在其上监听撤销/剪贴板快捷键。
+   * 未传入时，撤销/剪贴板快捷键挂在「Canvas 挂载区」（含浮动图 DOM），避免焦点在图片上时 Ctrl+Z 不生效。
    */
   readonly chromeRoot?: HTMLElement;
 }
@@ -385,6 +388,29 @@ export class FlexSheet {
       getRenderer: () => this.renderer,
       getWorkbook: () => this.workbook,
       getAnchorCell: () => this.selection.getActiveCell(),
+      onCommitCropSession: ({ before, after }) => {
+        if (!ReplaceFloatingPictureStateCommand.isNoOp(before, after)) {
+          this.workspace.commands.execute(new ReplaceFloatingPictureStateCommand(this, before, after));
+        }
+      },
+      onRequestDeleteFloatingPicture: (pictureId) => {
+        if (this.isCellEditing()) {
+          return;
+        }
+        const snap = this.floatingPictureLayer.takeFloatingPictureSnapshot(pictureId);
+        if (snap !== null) {
+          this.workspace.commands.execute(new DeleteFloatingPictureCommand(this, snap));
+        }
+      },
+      onCropSessionBoostChange: (boost) => {
+        if (boost) {
+          this.sheetViewLayout.style.position = "relative";
+          this.sheetViewLayout.style.zIndex = "100";
+        } else {
+          this.sheetViewLayout.style.removeProperty("z-index");
+          this.sheetViewLayout.style.removeProperty("position");
+        }
+      },
     });
     this.lastFloatingPictureViewZoom = this.renderer.getViewZoom();
     this.renderer.subscribeScroll(() => {
@@ -463,7 +489,8 @@ export class FlexSheet {
     this.workspace.use(editorPlugin);
     this.cellEditor = editorPlugin.getCellEditor();
 
-    const keyRoot = options.chromeRoot ?? this.canvas;
+    /** 须为同时包含 Canvas 与浮动图层的祖先（默认 canvas 挂载区），否则焦点在图片上时 Ctrl+Z 无法命中撤销监听。 */
+    const keyRoot = options.chromeRoot ?? this.canvasMountEl;
 
     this.workspace.use(useUndoRedo({ canvas: this.canvas, keyTarget: keyRoot }));
 
@@ -1605,8 +1632,29 @@ export class FlexSheet {
     this.floatingPictureLayer.restoreFloatingPicture(snapshot);
   }
 
+  /** 供裁剪撤销/重做：将已有 id 的浮动图整体状态替换为快照。 */
+  applyFloatingPictureSnapshotInPlace(snapshot: FloatingPictureSnapshot): void {
+    this.floatingPictureLayer.applySnapshotToPicture(snapshot);
+  }
+
+  /** 右键「裁剪」：进入交互裁剪（黑框为裁剪区域，白框为图片）。 */
+  enterFloatingPictureCropMode(pictureId: string): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    this.formulaBuilderPanel.hide();
+    this.formatPicturePane.hide();
+    this.floatingPictureLayer.startCropSession(pictureId);
+  }
+
   removeFloatingPictureById(pictureId: string): void {
     this.floatingPictureLayer.removePictureById(pictureId);
+    this.renderer.requestRedraw();
+    try {
+      this.canvas.focus({ preventScroll: true });
+    } catch {
+      /* ignore */
+    }
   }
 
   insertFloatingPictureFromPrepared(
@@ -2126,6 +2174,14 @@ export class FlexSheet {
   /** XLSX 导出：浮动插入图片的描述列表（与 `exportWorkbookToXlsxBlob` 的 `floatingPictures` / `viewZoom` 配合）。 */
   getFloatingPicturesForXlsxExport(): readonly XlsxFloatingPictureExport[] {
     return this.floatingPictureLayer.getPicturesForXlsxExport();
+  }
+
+  /**
+   * XLSX 导出（推荐）：裁剪框大于图片时合成与框同尺寸的 PNG，使 Excel 占位与格线/后续填充一致。
+   * 浏览器环境可用；失败时回退为未合成的几何描述。
+   */
+  prepareFloatingPicturesForXlsxExport(): Promise<readonly XlsxFloatingPictureExport[]> {
+    return this.floatingPictureLayer.preparePicturesForXlsxExport();
   }
 
   /** Ribbon「图片格式」：浮动图选中状态变化（订阅后立即回调当前状态）。 */
@@ -3192,6 +3248,23 @@ export class FlexSheet {
 
   private readonly onKeyDown = (ev: KeyboardEvent): void => {
     if (this.cellEditor.isEditing()) {
+      return;
+    }
+    const fpIdForDelete = this.getSelectedFloatingPictureId();
+    if (
+      fpIdForDelete !== null &&
+      (ev.key === "Delete" || ev.key === "Backspace") &&
+      !ev.isComposing &&
+      !(ev.ctrlKey || ev.metaKey || ev.altKey)
+    ) {
+      ev.preventDefault();
+      const snap = this.floatingPictureLayer.takeFloatingPictureSnapshot(fpIdForDelete);
+      if (snap !== null) {
+        this.workspace.commands.execute(new DeleteFloatingPictureCommand(this, snap));
+      }
+      return;
+    }
+    if (this.floatingPictureLayer.isCropSessionActive()) {
       return;
     }
     if (this.workbook.getActiveSheet() === undefined) {

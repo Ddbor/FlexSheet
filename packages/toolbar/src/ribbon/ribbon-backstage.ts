@@ -727,27 +727,33 @@ function mountExportPanel(container: HTMLElement, flexSheet: FlexSheetLike | und
     card.appendChild(iconWrap);
     card.appendChild(cardLabel);
     card.addEventListener("click", () => {
-      msg.hidden = true;
-      if (pwdInput.value.trim().length > 0) {
-        showImportError(msg, "当前版本不支持密码保护导出，请清空密码。");
-        return;
-      }
-      try {
-        const xlsxOpts: XlsxExportOptions = {
-          includeStyles: cStyles.input.checked,
-          includeFormulas: cFormulas.input.checked,
-          includeSparseStyledEmpty: cSparse.input.checked,
-          viewZoom: host.getRenderer().getViewZoom(),
-          floatingPictures: host.getFloatingPicturesForXlsxExport?.(),
-        };
-        const blob = exportWorkbookToXlsxBlob(workbook, xlsxOpts);
-        const active = workbook.getActiveSheet();
-        const base =
-          active !== undefined ? active.name.replace(/[^\w\u4e00-\u9fa5.-]+/g, "_") : "export";
-        downloadXlsxBlob(blob, `${base || "export"}.xlsx`);
-      } catch (e: unknown) {
-        showImportError(msg, e instanceof Error ? e.message : String(e));
-      }
+      void (async (): Promise<void> => {
+        msg.hidden = true;
+        if (pwdInput.value.trim().length > 0) {
+          showImportError(msg, "当前版本不支持密码保护导出，请清空密码。");
+          return;
+        }
+        try {
+          const floatingPictures =
+            host.prepareFloatingPicturesForXlsxExport !== undefined
+              ? await host.prepareFloatingPicturesForXlsxExport()
+              : host.getFloatingPicturesForXlsxExport?.();
+          const xlsxOpts: XlsxExportOptions = {
+            includeStyles: cStyles.input.checked,
+            includeFormulas: cFormulas.input.checked,
+            includeSparseStyledEmpty: cSparse.input.checked,
+            viewZoom: host.getRenderer().getViewZoom(),
+            floatingPictures,
+          };
+          const blob = exportWorkbookToXlsxBlob(workbook, xlsxOpts);
+          const active = workbook.getActiveSheet();
+          const base =
+            active !== undefined ? active.name.replace(/[^\w\u4e00-\u9fa5.-]+/g, "_") : "export";
+          downloadXlsxBlob(blob, `${base || "export"}.xlsx`);
+        } catch (e: unknown) {
+          showImportError(msg, e instanceof Error ? e.message : String(e));
+        }
+      })();
     });
 
     detailCol.appendChild(sub);

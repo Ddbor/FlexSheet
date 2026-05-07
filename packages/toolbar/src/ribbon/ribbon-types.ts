@@ -155,6 +155,8 @@ export interface FlexSheetLike {
   openInsertPictureFromRibbon?(): void;
   /** 导出 Excel 时附带浮动图片（与 `viewZoom` 配合写入 DrawingML）。 */
   getFloatingPicturesForXlsxExport?(): readonly XlsxFloatingPictureExport[];
+  /** 导出前异步合成大图框留白（优先于 `getFloatingPicturesForXlsxExport`）。 */
+  prepareFloatingPicturesForXlsxExport?(): Promise<readonly XlsxFloatingPictureExport[]>;
   /**
    * 浮动插入图片获得/失去选中时通知（用于 Ribbon 动态「图片格式」选项卡）。
    * 订阅时应立即用当前状态调用一次 listener。
