@@ -8,7 +8,7 @@ import {
   downloadJsonText,
   downloadXlsxBlob,
   exportWorkbookToXlsxBlob,
-  importXlsxToWorkbook,
+  importXlsx,
   parseFlexSheetJson,
   serializeWorkbookToJsonDocument,
   workbookFromFlexSheetJsonDocument,
@@ -591,18 +591,20 @@ function mountImportPanel(
           void f
             .arrayBuffer()
             .then((buf) =>
-              importXlsxToWorkbook(
+              importXlsx(
                 new Blob([buf], {
                   type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 }),
               ),
             )
-            .then((wb) => {
+            .then((result) => {
               const lw = fs.loadWorkbook;
               if (lw === undefined) {
                 return;
               }
-              lw.call(fs, wb);
+              lw.call(fs, result.workbook, {
+                importedFloatingPictures: result.floatingPictures,
+              });
               onSuccessClose();
             })
             .catch((e: unknown) => {

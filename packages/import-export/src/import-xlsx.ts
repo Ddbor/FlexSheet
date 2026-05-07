@@ -15,6 +15,8 @@ import { ooxmlTableStyleNameToParsed } from "@flexsheet/core";
 import { isCellFillPatternType } from "@flexsheet/core";
 import { isUnconfiguredPivotDefinition, writeUnconfiguredPivotPlaceholderToSheet } from "@flexsheet/core";
 import { parseCellRef } from "./a1.js";
+import { collectSheetFloatingPicturesFromXlsx } from "./import-xlsx-drawing.js";
+import type { XlsxImportedFloatingPicture } from "./import-xlsx-drawing.js";
 import { unzipToMap } from "./zip-reader.js";
 import { recalcWorksheet } from "@flexsheet/formula";
 
@@ -1264,8 +1266,17 @@ function parseWorksheetPivotDefinitions(
   ];
 }
 
-/** 自标准 XLSX Blob 导入为 `Workbook`（纯前端）。 */
-export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
+/** 标准 XLSX 导入结果：单元格数据 + 工作表级浮动绘图（图片等）。 */
+export interface XlsxImportResult {
+  readonly workbook: Workbook;
+  readonly floatingPictures: readonly XlsxImportedFloatingPicture[];
+}
+
+/**
+ * 自标准 XLSX Blob 导入工作簿与浮动图片（DrawingML / `xl/drawings`）。
+ * 若只需 `Workbook`，可使用 `importXlsxToWorkbook`。
+ */
+export async function importXlsx(blob: Blob): Promise<XlsxImportResult> {
   const buf = await blob.arrayBuffer();
   const files = unzipToMap(buf);
 
@@ -1433,6 +1444,23 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
     }
   }
 
+  const floatingPictures: XlsxImportedFloatingPicture[] = [];
+  for (const binding of importedSheetBindings) {
+    const sh = out.getSheet(binding.importedIndex);
+    if (sh === undefined) {
+      continue;
+    }
+    floatingPictures.push(
+      ...collectSheetFloatingPicturesFromXlsx(
+        files,
+        binding.sheetPath,
+        sh,
+        binding.sheetName,
+        binding.importedIndex,
+      ),
+    );
+  }
+
   for (let i = 0; i < out.sheetCount; i++) {
     const sh = out.getSheet(i);
     if (sh !== undefined) {
@@ -1440,5 +1468,10 @@ export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
     }
   }
 
-  return out;
+  return { workbook: out, floatingPictures };
+}
+
+/** 自标准 XLSX Blob 导入为 `Workbook`（纯前端）；不含浮动图时请用 `importXlsx`。 */
+export async function importXlsxToWorkbook(blob: Blob): Promise<Workbook> {
+  return (await importXlsx(blob)).workbook;
 }

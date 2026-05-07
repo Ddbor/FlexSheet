@@ -7,6 +7,7 @@ import type { Workbook } from "@flexsheet/core";
 import {
   floatingPictureNeedsRasterForXlsxExport,
   type XlsxFloatingPictureExport,
+  type XlsxImportedFloatingPicture,
 } from "@flexsheet/import-export";
 import {
   HEADER_STRIP_BASE_HEIGHT,
@@ -726,6 +727,38 @@ export class FloatingPictureLayer {
       imgBoxH: model.imgBoxH,
       frameFill: cloneFrameFill(model.frameFill),
     };
+  }
+
+  /**
+   * XLSX 导入后批量恢复浮动图（`import-xlsx-drawing` 使用工作表逻辑 px，在此乘 `viewZoom` 与导出侧一致）。
+   */
+  applyImportedFloatingPicturesFromXlsx(
+    pictures: readonly XlsxImportedFloatingPicture[],
+    viewZoom: number,
+  ): void {
+    const z = Math.max(1e-6, viewZoom);
+    for (const pic of pictures) {
+      this.insertFloatingPictureFromPrepared({
+        sheetName: pic.sheetName,
+        sheetIndex: pic.sheetIndex,
+        anchorRow: pic.anchorRow,
+        anchorCol: pic.anchorCol,
+        relCX: pic.relCX * z,
+        relCY: pic.relCY * z,
+        width: pic.width * z,
+        height: pic.height * z,
+        rotationRad: pic.rotationRad,
+        dataUrl: pic.dataUrl,
+        naturalWidth: pic.naturalWidth,
+        naturalHeight: pic.naturalHeight,
+        imgBoxX: pic.imgBoxX * z,
+        imgBoxY: pic.imgBoxY * z,
+        imgBoxW: pic.imgBoxW * z,
+        imgBoxH: pic.imgBoxH * z,
+        frameFill: pic.frameFill,
+      });
+    }
+    this.deselect();
   }
 
   private pictureModelToXlsxExportDto(model: PictureModel): XlsxFloatingPictureExport {

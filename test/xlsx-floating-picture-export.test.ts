@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { Workbook, Worksheet } from "@flexsheet/core";
 import {
+  collectSheetFloatingPicturesFromXlsx,
   exportWorkbookToXlsxBytes,
   floatingPictureNeedsFrameCompositeForXlsx,
   floatingPictureNeedsRasterForXlsxExport,
   floatingPictureSrcRectSides,
+  importXlsx,
   unzipToMap,
   type XlsxFloatingPictureExport,
 } from "@flexsheet/import-export";
@@ -199,5 +201,72 @@ describe("xlsx export floating pictures", () => {
     expect(drawing).toContain("<a:srcRect ");
     expect(drawing).toContain('l="0%"');
     expect(drawing).toContain('r="50%"');
+  });
+
+  it("collectSheetFloatingPicturesFromXlsx reads picture and solid fill from exported zip", () => {
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 12, 12);
+    wb.addSheet(sh);
+    const pic: XlsxFloatingPictureExport = {
+      sheetName: sh.name,
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      width: 64,
+      height: 64,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+      frameFill: { kind: "solid", solidColor: "#FDE9D9", solidTransparencyPct: 0 },
+    };
+    const bytes = exportWorkbookToXlsxBytes(wb, {
+      includeStyles: true,
+      includeFormulas: true,
+      includeSparseStyledEmpty: true,
+      viewZoom: 1,
+      floatingPictures: [pic],
+    });
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const found = collectSheetFloatingPicturesFromXlsx(map, "xl/worksheets/sheet1.xml", sh, "S1", 0);
+    expect(found.length).toBe(1);
+    expect(found[0]?.frameFill?.solidColor.toUpperCase()).toBe("#FDE9D9");
+  });
+
+  it("importXlsx restores floating picture and solid frame fill from export", async () => {
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 12, 12);
+    wb.addSheet(sh);
+    const pic: XlsxFloatingPictureExport = {
+      sheetName: sh.name,
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      width: 64,
+      height: 64,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+      frameFill: { kind: "solid", solidColor: "#FDE9D9", solidTransparencyPct: 0 },
+    };
+    const bytes = exportWorkbookToXlsxBytes(wb, {
+      includeStyles: true,
+      includeFormulas: true,
+      includeSparseStyledEmpty: true,
+      viewZoom: 1,
+      floatingPictures: [pic],
+    });
+    const result = await importXlsx(
+      new Blob([bytes], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    expect(result.floatingPictures.length).toBe(1);
+    const p = result.floatingPictures[0]!;
+    expect(p.dataUrl.startsWith("data:image/png")).toBe(true);
+    expect(p.sheetName).toBe("S1");
+    expect(p.frameFill?.kind).toBe("solid");
+    expect(p.frameFill?.solidColor.toUpperCase()).toBe("#FDE9D9");
   });
 });

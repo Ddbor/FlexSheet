@@ -44,7 +44,7 @@ import {
 } from "@flexsheet/renderer";
 import { ScrollPlugin } from "@flexsheet/scroll";
 import { SelectionRegistryPlugin } from "@flexsheet/selection";
-import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
+import type { FlexSheetLoadWorkbookOptions, XlsxFloatingPictureExport } from "@flexsheet/import-export";
 import { columnIndexToLabel } from "@flexsheet/shared";
 import { createDefaultDarkTheme, createDefaultLightTheme, type SheetTheme } from "@flexsheet/theme";
 
@@ -592,7 +592,7 @@ export class FlexSheet {
     });
   }
 
-  loadWorkbook(wb: Workbook): void {
+  loadWorkbook(wb: Workbook, options?: FlexSheetLoadWorkbookOptions): void {
     this.workbookUnsub?.();
     this._workbook = wb;
     this.clipboardMarqueeRange = null;
@@ -627,6 +627,11 @@ export class FlexSheet {
     this.renderer.requestRedraw();
     this.syncPivotTableFieldsPaneToSelection();
     this.floatingPictureLayer.clearAll();
+    const fp = options?.importedFloatingPictures;
+    if (fp !== undefined && fp.length > 0) {
+      const z = options?.floatingPictureViewZoom ?? this.renderer.getViewZoom();
+      this.floatingPictureLayer.applyImportedFloatingPicturesFromXlsx(fp, z);
+    }
     this.emitWorkbookReplaced();
   }
 

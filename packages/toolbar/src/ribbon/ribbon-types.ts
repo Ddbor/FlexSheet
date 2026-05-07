@@ -9,7 +9,7 @@ import type {
   SelectionRange,
   Workbook,
 } from "@flexsheet/core";
-import type { XlsxFloatingPictureExport } from "@flexsheet/import-export";
+import type { FlexSheetLoadWorkbookOptions, XlsxFloatingPictureExport } from "@flexsheet/import-export";
 import type { CanvasRenderer } from "@flexsheet/renderer";
 import type { SheetTheme } from "@flexsheet/theme";
 export type RibbonTabId =
@@ -112,7 +112,7 @@ export interface FlexSheetLike {
   openGotoSpecialDialogFromRibbon?(): void;
   /** 存在时 Backstage 可提供 JSON 保存/导入。 */
   readonly workbook?: Workbook;
-  loadWorkbook?(wb: Workbook): void;
+  loadWorkbook?(wb: Workbook, options?: FlexSheetLoadWorkbookOptions): void;
   /** 数据选项卡：按活动列对选区行排序。 */
   sortSelectionRowsByKeyColumn?(
     sortCol: number,
