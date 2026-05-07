@@ -4,11 +4,7 @@
  */
 
 import type { Workbook } from "@flexsheet/core";
-import {
-  floatingPictureNeedsRasterForXlsxExport,
-  type XlsxFloatingPictureExport,
-  type XlsxImportedFloatingPicture,
-} from "@flexsheet/import-export";
+import { type XlsxFloatingPictureExport, type XlsxImportedFloatingPicture } from "@flexsheet/import-export";
 import {
   HEADER_STRIP_BASE_HEIGHT,
   HEADER_STRIP_BASE_WIDTH,
@@ -783,21 +779,16 @@ export class FloatingPictureLayer {
   }
 
   /**
-   * 将单张浮动图栅格化为与裁剪框同尺寸的 PNG（透明留白 + `imgBox` 内绘图），供 OOXML 占位与格线后内容对齐。
+   * 仅将 CSS 滤镜烘焙进嵌入位图（不绘制 `frameFill`、不改变 `imgBox`/裁剪语义），供 XLSX 嵌入；
+   * 填充与边距仍由 OOXML `spPr` 与内嵌 `xfrm` 表达，避免与主体图合并。
    */
-  private async rasterizePictureModelToFramePngDataUrl(
-    model: PictureModel,
-  ): Promise<string | null> {
+  private async rasterizePictureModelFilteredSourceOnly(model: PictureModel): Promise<string | null> {
     if (typeof document === "undefined") {
       return null;
     }
-    const W = Math.max(1, Math.round(model.width));
-    const H = Math.max(1, Math.round(model.height));
     let nw = model.naturalWidth;
     let nh = model.naturalHeight;
     const canvas = document.createElement("canvas");
-    canvas.width = W;
-    canvas.height = H;
     const ctx = canvas.getContext("2d");
     if (ctx === null) {
       return null;
@@ -820,30 +811,17 @@ export class FloatingPictureLayer {
     if (nw <= 0 || nh <= 0) {
       return null;
     }
+    canvas.width = nw;
+    canvas.height = nh;
     const f = buildFloatingPictureCssFilter(model.adjustments);
-    ctx.clearRect(0, 0, W, H);
-    if (model.frameFill.kind === "solid") {
-      ctx.fillStyle = frameFillToCssBackground(model.frameFill);
-      ctx.fillRect(0, 0, W, H);
-    }
+    ctx.clearRect(0, 0, nw, nh);
     ctx.filter = f;
     try {
-      ctx.drawImage(img, 0, 0, nw, nh, model.imgBoxX, model.imgBoxY, model.imgBoxW, model.imgBoxH);
+      ctx.drawImage(img, 0, 0, nw, nh, 0, 0, nw, nh);
     } catch {
       ctx.filter = "none";
-      ctx.clearRect(0, 0, W, H);
       try {
-        ctx.drawImage(
-          img,
-          0,
-          0,
-          nw,
-          nh,
-          model.imgBoxX,
-          model.imgBoxY,
-          model.imgBoxW,
-          model.imgBoxH,
-        );
+        ctx.drawImage(img, 0, 0, nw, nh, 0, 0, nw, nh);
       } catch {
         return null;
       }
@@ -856,6 +834,18 @@ export class FloatingPictureLayer {
     }
   }
 
+  private pictureNeedsBakedCssFilterForXlsxExport(m: PictureModel): boolean {
+    const d = DEFAULT_FLOATING_PICTURE_ADJUSTMENTS;
+    return (
+      m.adjustments.brightnessPct !== d.brightnessPct ||
+      m.adjustments.contrastPct !== d.contrastPct ||
+      m.adjustments.sharpnessPct !== d.sharpnessPct ||
+      m.adjustments.saturationPct !== d.saturationPct ||
+      m.adjustments.colorTemperatureK !== d.colorTemperatureK ||
+      m.adjustments.transparencyPct !== d.transparencyPct
+    );
+  }
+
   /** 供 XLSX 导出：当前浮动图片快照（画布像素 + `viewZoom` 在导出侧换算）。 */
   getPicturesForXlsxExport(): readonly XlsxFloatingPictureExport[] {
     const out: XlsxFloatingPictureExport[] = [];
@@ -866,29 +856,16 @@ export class FloatingPictureLayer {
   }
 
   /**
-   * 供 XLSX 导出：在裁剪框大于图片留白时，先合成与裁剪框同尺寸的 PNG，保证 Excel 中占位与格线/后续内容一致。
+   * 供 XLSX 异步导出：不把填充与主体图栅格合并；仅当存在非默认「图片格式」CSS 滤镜时烘焙源图。
    */
   async preparePicturesForXlsxExport(): Promise<readonly XlsxFloatingPictureExport[]> {
     const out: XlsxFloatingPictureExport[] = [];
     for (const { model } of this.byId.values()) {
-      const dto = this.pictureModelToXlsxExportDto(model);
-      if (floatingPictureNeedsRasterForXlsxExport(dto)) {
-        const url = await this.rasterizePictureModelToFramePngDataUrl(model);
+      let dto = this.pictureModelToXlsxExportDto(model);
+      if (this.pictureNeedsBakedCssFilterForXlsxExport(model)) {
+        const url = await this.rasterizePictureModelFilteredSourceOnly(model);
         if (url !== null) {
-          const rw = Math.max(1, Math.round(model.width));
-          const rh = Math.max(1, Math.round(model.height));
-          out.push({
-            ...dto,
-            dataUrl: url,
-            naturalWidth: rw,
-            naturalHeight: rh,
-            imgBoxX: 0,
-            imgBoxY: 0,
-            imgBoxW: rw,
-            imgBoxH: rh,
-            frameFill: undefined,
-          });
-          continue;
+          dto = { ...dto, dataUrl: url };
         }
       }
       out.push(dto);

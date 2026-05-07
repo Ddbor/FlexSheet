@@ -30,8 +30,7 @@ export interface XlsxFloatingPictureExport {
   readonly imgBoxW?: number;
   readonly imgBoxH?: number;
   /**
-   * 裁剪框内纯色填充。异步导出栅格化后应置为 `undefined`，避免与已烘焙的位图重复。
-   * 同步导出时写入 `xdr:spPr` 的 `a:solidFill`，供 Excel 显示边距区底色。
+   * 裁剪框内纯色填充。写入 `xdr:spPr` 的 `a:solidFill`（边距区），与 `blipFill` 主体图分层，不合并栅格。
    */
   readonly frameFill?: XlsxFloatingPictureFrameFill;
 }
@@ -224,28 +223,14 @@ function formatOoxmlPercentage(fraction: number): string {
 }
 
 /**
- * 由 FlexSheet 裁剪模型推算 `blipFill/srcRect`（与 DOM：`object-fit: fill` + `img-wrap` 几何一致）。
- * 若无法推算或等价于未裁剪，返回 `undefined`（不写 `srcRect`）。
+ * FlexSheet 侧是否仍需在导出前用 Canvas 处理位图（当前始终为 false）。
+ * 填充与边距由 `spPr/a:solidFill` 与内嵌 `a:xfrm` 表达；源图滤镜在宿主侧按需烘焙。
  */
-/**
- * 裁剪框内是否存在未被图片覆盖的留白（仅几何判断）。
- * 此时仅用 `srcRect`+`stretch` 无法得到透明边距，需在导出侧合成与裁剪框同尺寸的 PNG。
- */
-/**
- * 是否需要在导出前将占位栅格化为 PNG（透明边距、裁剪留白，或纯色填充与位图合成）。
- * 与 `preparePicturesForXlsxExport` / 浏览器 Canvas 路径配合。
- */
-export function floatingPictureNeedsRasterForXlsxExport(pic: XlsxFloatingPictureExport): boolean {
-  if (floatingPictureNeedsFrameCompositeForXlsx(pic)) {
-    return true;
-  }
-  const f = pic.frameFill;
-  if (f === undefined || f.kind !== "solid") {
-    return false;
-  }
-  return f.solidTransparencyPct < 100;
+export function floatingPictureNeedsRasterForXlsxExport(_pic: XlsxFloatingPictureExport): boolean {
+  return false;
 }
 
+/** 裁剪框内是否存在未被图片覆盖的留白（几何判断；导出用内嵌 `xfrm` + `solidFill`，不合并栅格）。 */
 export function floatingPictureNeedsFrameCompositeForXlsx(pic: XlsxFloatingPictureExport): boolean {
   const fw = pic.width;
   const fh = pic.height;
@@ -272,6 +257,10 @@ export function floatingPictureNeedsFrameCompositeForXlsx(pic: XlsxFloatingPictu
   return cw < fw - eps || ch < fh - eps;
 }
 
+/**
+ * 由 FlexSheet 裁剪模型推算 `blipFill/srcRect`（与 DOM：`object-fit: fill` + `img-wrap` 几何一致）。
+ * 若无法推算或等价于未裁剪，返回 `undefined`（不写 `srcRect`）。
+ */
 export function floatingPictureSrcRectSides(
   pic: XlsxFloatingPictureExport,
 ): { readonly l: string; readonly t: string; readonly r: string; readonly b: string } | undefined {
@@ -326,6 +315,60 @@ export function floatingPictureSrcRectSides(
   };
 }
 
+function picHasImgBoxMargins(pic: XlsxFloatingPictureExport, viewZoom: number): boolean {
+  const z = Math.max(1e-6, viewZoom);
+  const W = pic.width / z;
+  const H = pic.height / z;
+  const ibx = (pic.imgBoxX ?? 0) / z;
+  const iby = (pic.imgBoxY ?? 0) / z;
+  const ibw = (pic.imgBoxW ?? pic.width) / z;
+  const ibh = (pic.imgBoxH ?? pic.height) / z;
+  const eps = 1e-3;
+  return (
+    ibx > eps || iby > eps || W - ibx - ibw > eps || H - iby - ibh > eps
+  );
+}
+
+/**
+ * 框内留白（`imgBox` 未铺满裁剪框）用 `a:srcRect` 的 **100000 分度整数** 表达（可为负），与 Excel / SpreadJS 一致；
+ * 与 `import-xlsx-drawing` 中 `tryParsePicture` 的 `du/imgBoxW` 公式对偶。
+ * 勿用 `stretch/fillRect`：进入裁剪模式时 Excel 易丢弃 fillRect，导致位图突然铺满 `spPr`。
+ */
+function buildMarginSrcRectXml(pic: XlsxFloatingPictureExport, viewZoom: number): string {
+  const z = Math.max(1e-6, viewZoom);
+  const W = pic.width / z;
+  const H = pic.height / z;
+  const ibx = (pic.imgBoxX ?? 0) / z;
+  const iby = (pic.imgBoxY ?? 0) / z;
+  const ibw = (pic.imgBoxW ?? pic.width) / z;
+  const ibh = (pic.imgBoxH ?? pic.height) / z;
+  const fl = -ibx / ibw;
+  const fr = (ibw + ibx - W) / ibw;
+  const ft = -iby / ibh;
+  const fb = (ibh + iby - H) / ibh;
+  const q = (x: number): string => String(Math.round(x * 100000));
+  return `<a:srcRect l="${q(fl)}" t="${q(ft)}" r="${q(fr)}" b="${q(fb)}"/>`;
+}
+
+function buildBlipSrcRectAndStretchXml(
+  pic: XlsxFloatingPictureExport,
+  viewZoom: number,
+): { readonly srcRectXml: string; readonly stretchXml: string } {
+  const stretchXml = `<a:stretch/>`;
+  if (picHasImgBoxMargins(pic, viewZoom)) {
+    /** 与源图裁剪 `floatingPictureSrcRectSides` 并存时优先留白编码（极少数场景会损失额外源裁剪在 OOXML 中的独立表达）。 */
+    return { srcRectXml: buildMarginSrcRectXml(pic, viewZoom), stretchXml };
+  }
+  const src = floatingPictureSrcRectSides(pic);
+  if (src === undefined) {
+    return { srcRectXml: `<a:srcRect l="0" t="0" r="0" b="0"/>`, stretchXml };
+  }
+  return {
+    srcRectXml: `<a:srcRect l="${src.l}" t="${src.t}" r="${src.r}" b="${src.b}"/>`,
+    stretchXml,
+  };
+}
+
 function buildOnePictureAnchorXml(
   pic: XlsxFloatingPictureExport,
   sheet: Worksheet,
@@ -335,14 +378,17 @@ function buildOnePictureAnchorXml(
 ): string {
   const box = pictureSheetBoxPx(sheet, pic, viewZoom);
   const from = pxToFromAnchor(sheet, box.left, box.top);
-  const cxEmu = Math.max(1, Math.round(box.w * EMU_PER_PX));
-  const cyEmu = Math.max(1, Math.round(box.h * EMU_PER_PX));
+  const cxFullEmu = Math.max(1, Math.round(box.w * EMU_PER_PX));
+  const cyFullEmu = Math.max(1, Math.round(box.h * EMU_PER_PX));
   const rot = rotationToOoxmlRot60000(pic.rotationRad);
   const rotAttr = rot === 0 ? "" : ` rot="${rot}"`;
-  const src = floatingPictureSrcRectSides(pic);
-  const srcRectXml =
-    src === undefined ? "" : `<a:srcRect l="${src.l}" t="${src.t}" r="${src.r}" b="${src.b}"/>`;
+  const { srcRectXml, stretchXml } = buildBlipSrcRectAndStretchXml(pic, viewZoom);
   const spPrFillXml = buildPicSpPrSolidFillXml(pic.frameFill);
+  /**
+   * Excel 将 `solidFill` 铺在 `spPr/a:xfrm` 的整个几何上；`xfrm` 与锚点外框同大。
+   * 框内图片几何用 `blipFill/srcRect`（整数分度，见 SpreadJS），勿用 `stretch/fillRect` 以免裁剪模式错乱。
+   */
+  const spPrLnXml = `<a:ln cmpd="sng" cap="flat"><a:noFill/><a:prstDash val="solid"/><a:round/></a:ln>`;
   return (
     `<xdr:oneCellAnchor>` +
     `<xdr:from>` +
@@ -351,24 +397,25 @@ function buildOnePictureAnchorXml(
     `<xdr:row>${from.row}</xdr:row>` +
     `<xdr:rowOff>${from.rowOff}</xdr:rowOff>` +
     `</xdr:from>` +
-    `<xdr:ext cx="${cxEmu}" cy="${cyEmu}"/>` +
+    `<xdr:ext cx="${cxFullEmu}" cy="${cyFullEmu}"/>` +
     `<xdr:pic>` +
     `<xdr:nvPicPr>` +
     `<xdr:cNvPr id="${shapeId}" name="${escapeXml(`Picture ${shapeId}`)}"/>` +
-    `<xdr:cNvPicPr><a:picLocks noChangeAspect="0"/></xdr:cNvPicPr>` +
+    `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr>` +
     `</xdr:nvPicPr>` +
     `<xdr:blipFill>` +
     `<a:blip xmlns:r="${REL_NS}" r:embed="${embedRid}"/>` +
     srcRectXml +
-    `<a:stretch><a:fillRect/></a:stretch>` +
+    stretchXml +
     `</xdr:blipFill>` +
     `<xdr:spPr>` +
     `<a:xfrm${rotAttr}>` +
     `<a:off x="0" y="0"/>` +
-    `<a:ext cx="${cxEmu}" cy="${cyEmu}"/>` +
+    `<a:ext cx="${cxFullEmu}" cy="${cyFullEmu}"/>` +
     `</a:xfrm>` +
-    spPrFillXml +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
+    spPrFillXml +
+    spPrLnXml +
     `</xdr:spPr>` +
     `</xdr:pic>` +
     `<xdr:clientData/>` +

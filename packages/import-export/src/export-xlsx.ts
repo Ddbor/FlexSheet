@@ -1100,16 +1100,7 @@ export function exportWorkbookToXlsxBytes(
     const pivotFrag = pivotFragmentBySheet.get(i) ?? "";
     const drawingRid = drawingRidBySheet.get(i);
     sheetParts.push(
-      buildSheetXml(
-        sh,
-        i,
-        sstMap,
-        styleTable.xfBySig,
-        options,
-        cfDxfIndex,
-        pivotFrag,
-        drawingRid,
-      ),
+      buildSheetXml(sh, i, sstMap, styleTable.xfBySig, options, cfDxfIndex, pivotFrag, drawingRid),
     );
   }
 

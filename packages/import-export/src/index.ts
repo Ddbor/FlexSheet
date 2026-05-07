@@ -10,11 +10,7 @@ export {
   type XlsxFloatingPictureFrameFill,
 } from "./export-xlsx.js";
 export { decodeTextFileBytes } from "./text-file-decode.js";
-export {
-  importXlsx,
-  importXlsxToWorkbook,
-  type XlsxImportResult,
-} from "./import-xlsx.js";
+export { importXlsx, importXlsxToWorkbook, type XlsxImportResult } from "./import-xlsx.js";
 export { collectSheetFloatingPicturesFromXlsx } from "./import-xlsx-drawing.js";
 export type {
   FlexSheetLoadWorkbookOptions,

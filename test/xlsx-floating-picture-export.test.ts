@@ -66,7 +66,7 @@ describe("xlsx export floating pictures", () => {
     ).toBe(true);
   });
 
-  it("raster export when solid frame fill even if image fills geometry", () => {
+  it("solid frame fill does not force raster merge (OOXML layered spPr + blip)", () => {
     const base: Pick<
       XlsxFloatingPictureExport,
       "sheetName" | "anchorRow" | "anchorCol" | "relCX" | "relCY" | "rotationRad" | "dataUrl"
@@ -90,7 +90,62 @@ describe("xlsx export floating pictures", () => {
       frameFill: { kind: "solid", solidColor: "#fde9d9", solidTransparencyPct: 0 },
     };
     expect(floatingPictureNeedsFrameCompositeForXlsx(full)).toBe(false);
-    expect(floatingPictureNeedsRasterForXlsxExport(full)).toBe(true);
+    expect(floatingPictureNeedsRasterForXlsxExport(full)).toBe(false);
+  });
+
+  it("writes full spPr xfrm and integer blip srcRect for imgBox (Excel crop mode; not stretch/fillRect)", () => {
+    const EMU = 9525;
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 12, 12);
+    wb.addSheet(sh);
+    const pic: XlsxFloatingPictureExport = {
+      sheetName: sh.name,
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      width: 64,
+      height: 64,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+      imgBoxX: 10,
+      imgBoxY: 10,
+      imgBoxW: 32,
+      imgBoxH: 32,
+      frameFill: { kind: "solid", solidColor: "#FDE9D9", solidTransparencyPct: 0 },
+    };
+    const bytes = exportWorkbookToXlsxBytes(wb, {
+      includeStyles: true,
+      includeFormulas: true,
+      includeSparseStyledEmpty: true,
+      viewZoom: 1,
+      floatingPictures: [pic],
+    });
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const drawing = new TextDecoder().decode(map.get("xl/drawings/drawing1.xml"));
+    expect(drawing).toContain(`<a:off x="0" y="0"/>`);
+    expect(drawing).toContain(`<a:ext cx="${64 * EMU}" cy="${64 * EMU}"/>`);
+    expect(drawing).toContain("<a:srcRect ");
+    expect(drawing).toContain('l="-31250"');
+    expect(drawing).toContain('r="-68750"');
+    expect(drawing).not.toContain("fillRect");
+    expect(drawing).toContain("<a:solidFill>");
+    expect(drawing).toContain("<a:stretch/>");
+
+    const roundtrip = collectSheetFloatingPicturesFromXlsx(
+      map,
+      "xl/worksheets/sheet1.xml",
+      sh,
+      "S1",
+      0,
+    );
+    expect(roundtrip.length).toBe(1);
+    expect(roundtrip[0]?.imgBoxX).toBeCloseTo(10, 5);
+    expect(roundtrip[0]?.imgBoxY).toBeCloseTo(10, 5);
+    expect(roundtrip[0]?.imgBoxW).toBeCloseTo(32, 5);
+    expect(roundtrip[0]?.imgBoxH).toBeCloseTo(32, 5);
   });
 
   it("writes a:solidFill in drawing when frameFill is solid (sync export)", () => {
@@ -284,7 +339,13 @@ describe("xlsx export floating pictures", () => {
       ["xl/worksheets/_rels/sheet1.xml.rels", new TextEncoder().encode(sheetRels)],
       ["xl/media/image0.png", pngBytes],
     ]);
-    const pics = collectSheetFloatingPicturesFromXlsx(files, "xl/worksheets/sheet1.xml", sh, "S1", 0);
+    const pics = collectSheetFloatingPicturesFromXlsx(
+      files,
+      "xl/worksheets/sheet1.xml",
+      sh,
+      "S1",
+      0,
+    );
     expect(pics.length).toBe(1);
     const p = pics[0]!;
     expect(p.width).toBeCloseTo(100, 2);

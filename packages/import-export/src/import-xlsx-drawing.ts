@@ -490,6 +490,37 @@ function parsePicSpPrInnerDestPx(
   return { offX, offY, destW, destH };
 }
 
+/**
+ * 历史导出曾用 `blipFill/stretch/fillRect` 表达框内留白；新导出改用 `srcRect` 整数（Excel 裁剪模式兼容）。
+ * 有非零 fillRect 时仍解析，以读入旧包。
+ */
+function applyStretchFillRectToDest(
+  blipFill: Element,
+  outerW: number,
+  outerH: number,
+  inner: { offX: number; offY: number; destW: number; destH: number },
+): { offX: number; offY: number; destW: number; destH: number } {
+  const stretch = firstLocal(blipFill, "stretch");
+  if (stretch === undefined) {
+    return inner;
+  }
+  const fillRect = firstLocal(stretch, "fillRect");
+  if (fillRect === undefined) {
+    return inner;
+  }
+  const fl = parseOoxmlRelativeRectRatio(fillRect.getAttribute("l"));
+  const ft = parseOoxmlRelativeRectRatio(fillRect.getAttribute("t"));
+  const fr = parseOoxmlRelativeRectRatio(fillRect.getAttribute("r"));
+  const fb = parseOoxmlRelativeRectRatio(fillRect.getAttribute("b"));
+  const eps = 1e-9;
+  if (fl <= eps && ft <= eps && fr <= eps && fb <= eps) {
+    return inner;
+  }
+  const w = Math.max(1e-6, (1 - fl - fr) * outerW);
+  const h = Math.max(1e-6, (1 - ft - fb) * outerH);
+  return { offX: fl * outerW, offY: ft * outerH, destW: w, destH: h };
+}
+
 /** Office 默认主题基色（6 位 hex，无 `#`）；`schemeClr` 无 sRGB 时的兜底。 */
 const DEFAULT_OFFICE_SCHEME_SRGB: Readonly<Record<string, string>> = {
   dk1: "000000",
@@ -633,34 +664,26 @@ function tryParsePicture(
 
   const spPr = firstLocal(picEl, "spPr");
   let geom: { left: number; top: number; w: number; h: number };
-  let offX: number;
-  let offY: number;
-  let destW: number;
-  let destH: number;
+  let baseInner: { offX: number; offY: number; destW: number; destH: number };
   if (anchorKind === "twoCellAnchor") {
     const g2 = parsePicShapeGeomTwoCellFromSpPr(sheet, spPr);
     if (g2 !== null) {
       geom = g2;
-      offX = 0;
-      offY = 0;
-      destW = geom.w;
-      destH = geom.h;
+      baseInner = { offX: 0, offY: 0, destW: geom.w, destH: geom.h };
     } else {
       geom = anchorGeom;
-      const inner = parsePicSpPrInnerDestPx(spPr, geom.w, geom.h);
-      offX = inner.offX;
-      offY = inner.offY;
-      destW = inner.destW;
-      destH = inner.destH;
+      baseInner = parsePicSpPrInnerDestPx(spPr, geom.w, geom.h);
     }
   } else {
     geom = anchorGeom;
-    const inner = parsePicSpPrInnerDestPx(spPr, geom.w, geom.h);
-    offX = inner.offX;
-    offY = inner.offY;
-    destW = inner.destW;
-    destH = inner.destH;
+    baseInner = parsePicSpPrInnerDestPx(spPr, geom.w, geom.h);
   }
+  const { offX, offY, destW, destH } = applyStretchFillRectToDest(
+    blipFill,
+    geom.w,
+    geom.h,
+    baseInner,
+  );
 
   const srcRect = firstLocal(blipFill, "srcRect");
   let imgBoxX = offX;
