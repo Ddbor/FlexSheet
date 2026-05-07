@@ -302,6 +302,51 @@
   font-size: 11px;
 }
 
+/* 「图片格式 → 大小」：高度/宽度数值框（无图标） */
+.fs-ribbon-group__content.fs-ribbon-picture-size {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  padding: 2px 2px 4px;
+  min-width: 0;
+  width: max-content;
+  max-width: calc(100vw - 24px);
+}
+
+.fs-ribbon-picture-size__row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+.fs-ribbon-picture-size__label {
+  flex: 0 0 auto;
+  min-width: 32px;
+  font-size: 12px;
+  color: var(--fs-ribbon-chrome-text, #323130);
+  white-space: nowrap;
+}
+
+.fs-ribbon-picture-size__input {
+  box-sizing: border-box;
+  width: 68px;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  border: 1px solid var(--fs-ribbon-border, #c8c6c4);
+  border-radius: 2px;
+  background: var(--fs-sheet-surface, #fff);
+  color: inherit;
+}
+
+.fs-ribbon-picture-size__input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* 「公式 → 函数库」：横排顶部对齐；图标与标签留小间隙；底缘随内容高低 */
 .fs-ribbon-group__content.fs-ribbon-formula-function-lib {
   justify-content: flex-start;
@@ -1546,6 +1591,40 @@
   width: 0;
   aspect-ratio: 1;
   height: auto;
+}
+
+/* 「图片格式 → 颜色」：与「更正」相同缩略图行 + 3×7 重新着色 */
+.fs-pic-color-menu {
+  padding: 6px 8px 5px;
+  max-width: min(360px, calc(100vw - 12px));
+  max-height: min(85vh, 720px);
+  overflow-y: auto;
+}
+
+/* 「图片格式 → 透明度」：一行 7 档预设（缩略图略大于饱和度等行，便于辨认） */
+.fs-pic-transparency-menu {
+  padding: 6px 8px 5px;
+  max-width: min(420px, calc(100vw - 12px));
+  max-height: min(85vh, 360px);
+  overflow-y: auto;
+}
+
+.fs-pic-transparency-menu .fs-pic-corr-menu__sh-row {
+  gap: 5px;
+}
+
+.fs-pic-transparency-menu .fs-pic-corr-menu__sh-row .fs-pic-corr-menu__thumb {
+  flex: 1 1 50px;
+  min-width: 50px;
+  width: auto;
+}
+
+.fs-pic-color-menu__rec-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 3px;
+  width: 100%;
+  margin-bottom: 5px;
 }
 
 .fs-pic-corr-menu__sep {

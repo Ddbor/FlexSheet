@@ -22,6 +22,16 @@ const MIN_W = 24;
 const MIN_H = 24;
 const INSERT_MAX_DIM = 280;
 
+/** 与 {@link FloatingPictureLayer.addPictureFromDataUrl} 一致的默认显示尺寸（按像素边长上限缩放）。 */
+function defaultFloatingPictureDisplaySize(naturalW: number, naturalH: number): { w: number; h: number } {
+  let w = naturalW > 0 ? naturalW : 1;
+  let h = naturalH > 0 ? naturalH : 1;
+  const scale = Math.min(1, INSERT_MAX_DIM / Math.max(w, h));
+  w = Math.max(MIN_W, w * scale);
+  h = Math.max(MIN_H, h * scale);
+  return { w, h };
+}
+
 function dot2(ax: number, ay: number, bx: number, by: number): number {
   return ax * bx + ay * by;
 }
@@ -124,6 +134,86 @@ export interface FloatingPictureLayerOptions {
   readonly onCropSessionBoostChange?: (boost: boolean) => void;
 }
 
+/** 与 Excel「图片格式 → 颜色 → 重新着色」预设对应的 CSS 滤镜附加片段（不含亮度/对比度/饱和度/色温/透明度主链）。 */
+export const FLOATING_PICTURE_RECOLOR_PRESET_IDS = [
+  "none",
+  "r_gray",
+  "r_sepia",
+  "r_washout",
+  "r_bwsoft",
+  "r_bwmid",
+  "r_bwhard",
+  "r_dkgray",
+  "r_dkblue",
+  "r_dkorange",
+  "r_dksilver",
+  "r_dkgold",
+  "r_dklblue",
+  "r_dkgreen",
+  "r_plgray",
+  "r_plblue",
+  "r_plorange",
+  "r_plsilver",
+  "r_plgold",
+  "r_pllblue",
+  "r_plgreen",
+] as const;
+
+export type FloatingPictureRecolorPresetId = (typeof FLOATING_PICTURE_RECOLOR_PRESET_IDS)[number];
+
+/** Ribbon / 任务窗格共用的 3×7 重新着色网格（行优先，含左上角「无」）。 */
+export const FLOATING_PICTURE_RECOLOR_PRESET_GRID: readonly (readonly FloatingPictureRecolorPresetId[])[] = [
+  ["none", "r_gray", "r_sepia", "r_washout", "r_bwsoft", "r_bwmid", "r_bwhard"],
+  ["r_dkgray", "r_dkblue", "r_dkorange", "r_dksilver", "r_dkgold", "r_dklblue", "r_dkgreen"],
+  ["r_plgray", "r_plblue", "r_plorange", "r_plsilver", "r_plgold", "r_pllblue", "r_plgreen"],
+];
+
+const RECOLOR_PRESET_ID_SET = new Set<string>(FLOATING_PICTURE_RECOLOR_PRESET_IDS);
+
+const RECOLOR_EXTRA_CSS: { readonly [K in FloatingPictureRecolorPresetId]: string } = {
+  none: "",
+  r_gray: "grayscale(1)",
+  r_sepia: "sepia(0.92) saturate(0.22) brightness(1.04)",
+  r_washout: "brightness(1.14) contrast(0.72) saturate(0.88)",
+  r_bwsoft: "grayscale(1) contrast(1.32) brightness(1.06)",
+  r_bwmid: "grayscale(1) contrast(2.15) brightness(0.96)",
+  r_bwhard: "grayscale(1) contrast(3.4) brightness(0.86)",
+  r_dkgray: "sepia(0.12) saturate(0.12) brightness(0.78) contrast(1.08)",
+  r_dkblue: "sepia(1) hue-rotate(185deg) saturate(1.85) brightness(0.66) contrast(1.12)",
+  r_dkorange: "sepia(1) hue-rotate(-18deg) saturate(1.75) brightness(0.7) contrast(1.08)",
+  r_dksilver: "sepia(0.18) saturate(0.28) brightness(0.8) contrast(1.05)",
+  r_dkgold: "sepia(1) hue-rotate(12deg) saturate(1.9) brightness(0.74) contrast(1.1)",
+  r_dklblue: "sepia(1) hue-rotate(135deg) saturate(1.55) brightness(0.72) contrast(1.08)",
+  r_dkgreen: "sepia(1) hue-rotate(58deg) saturate(1.75) brightness(0.7) contrast(1.08)",
+  r_plgray: "sepia(0.08) saturate(0.14) brightness(1.06) contrast(0.98)",
+  r_plblue: "sepia(0.38) hue-rotate(178deg) saturate(0.85) brightness(1.1) contrast(0.98)",
+  r_plorange: "sepia(0.48) hue-rotate(-14deg) saturate(0.78) brightness(1.1) contrast(0.98)",
+  r_plsilver: "sepia(0.07) saturate(0.1) brightness(1.12) contrast(0.97)",
+  r_plgold: "sepia(0.52) hue-rotate(8deg) saturate(0.72) brightness(1.1) contrast(0.98)",
+  r_pllblue: "sepia(0.28) hue-rotate(158deg) saturate(0.58) brightness(1.12) contrast(0.97)",
+  r_plgreen: "sepia(0.36) hue-rotate(52deg) saturate(0.64) brightness(1.1) contrast(0.98)",
+};
+
+function normalizeRecolorPresetId(raw: string | undefined): FloatingPictureRecolorPresetId {
+  return raw !== undefined && RECOLOR_PRESET_ID_SET.has(raw)
+    ? (raw as FloatingPictureRecolorPresetId)
+    : "none";
+}
+
+function normalizeAdjustmentsPartial(
+  partial: Partial<FloatingPictureAdjustments>,
+): FloatingPictureAdjustments {
+  return {
+    brightnessPct: partial.brightnessPct ?? 0,
+    contrastPct: partial.contrastPct ?? 0,
+    sharpnessPct: partial.sharpnessPct ?? 0,
+    saturationPct: partial.saturationPct ?? 100,
+    colorTemperatureK: partial.colorTemperatureK ?? 6500,
+    transparencyPct: partial.transparencyPct ?? 0,
+    recolorPreset: normalizeRecolorPresetId(partial.recolorPreset),
+  };
+}
+
 /** 浮动图显示调整（CSS filter，与「设置图片格式」面板一致）。 */
 export interface FloatingPictureAdjustments {
   /** 亮度偏移 %，约 -100～100，0 为原始 */
@@ -138,6 +228,8 @@ export interface FloatingPictureAdjustments {
   colorTemperatureK: number;
   /** 不透明度损失 %，0 完全不透明 */
   transparencyPct: number;
+  /** Excel 风格「重新着色」预设；`none` 表示仅使用上方参数 */
+  recolorPreset: FloatingPictureRecolorPresetId;
 }
 
 export const DEFAULT_FLOATING_PICTURE_ADJUSTMENTS: FloatingPictureAdjustments = {
@@ -147,9 +239,10 @@ export const DEFAULT_FLOATING_PICTURE_ADJUSTMENTS: FloatingPictureAdjustments = 
   saturationPct: 100,
   colorTemperatureK: 6500,
   transparencyPct: 0,
+  recolorPreset: "none",
 };
 
-/** 裁剪框内背景填充类型（与「设置图片格式 → 填充与线条」一致）。 */
+/** 裁剪框内背景填充类型（与「设置图片格式 → 填充」一致）。 */
 export type FloatingPictureFillKind = "none" | "solid" | "gradient" | "picture" | "pattern";
 
 export type FloatingPictureGradientType = "linear" | "radial";
@@ -486,21 +579,22 @@ export function frameFillToFillLayerStyles(f: FloatingPictureFrameFill): {
 }
 
 function cloneAdjustments(a: FloatingPictureAdjustments): FloatingPictureAdjustments {
-  return { ...a };
+  return normalizeAdjustmentsPartial(a);
 }
 
 /** 将调整合成为 `img` 的 `filter` 字符串（Canvas 上 DOM 叠加层使用）。 */
 export function buildFloatingPictureCssFilter(a: FloatingPictureAdjustments): string {
-  const b = clampN(1 + a.brightnessPct / 100, 0.05, 3);
-  const c0 = clampN(1 + a.contrastPct / 100, 0.05, 3);
-  const sat = clampN(a.saturationPct / 100, 0, 4);
-  const op = clampN(1 - a.transparencyPct / 100, 0, 1);
+  const n = normalizeAdjustmentsPartial(a);
+  const b = clampN(1 + n.brightnessPct / 100, 0.05, 3);
+  const c0 = clampN(1 + n.contrastPct / 100, 0.05, 3);
+  const sat = clampN(n.saturationPct / 100, 0, 4);
+  const op = clampN(1 - n.transparencyPct / 100, 0, 1);
   let blurPx = 0;
   let sharpenBoost = 1;
-  if (a.sharpnessPct < 0) {
-    blurPx = clampN((-a.sharpnessPct / 100) * 3, 0, 3.5);
-  } else if (a.sharpnessPct > 0) {
-    sharpenBoost = 1 + (a.sharpnessPct / 100) * 0.55;
+  if (n.sharpnessPct < 0) {
+    blurPx = clampN((-n.sharpnessPct / 100) * 3, 0, 3.5);
+  } else if (n.sharpnessPct > 0) {
+    sharpenBoost = 1 + (n.sharpnessPct / 100) * 0.55;
   }
   const c = c0 * sharpenBoost;
   const parts: string[] = [];
@@ -510,12 +604,16 @@ export function buildFloatingPictureCssFilter(a: FloatingPictureAdjustments): st
   parts.push(`brightness(${b})`);
   parts.push(`contrast(${c})`);
   parts.push(`saturate(${sat})`);
-  const tk = a.colorTemperatureK;
+  const tk = n.colorTemperatureK;
   if (Number.isFinite(tk) && tk !== 6500) {
     const deg = clampN(((tk - 6500) / 4500) * 28, -32, 32);
     if (Math.abs(deg) > 0.3) {
       parts.push(`hue-rotate(${deg}deg)`);
     }
+  }
+  const recolor = RECOLOR_EXTRA_CSS[n.recolorPreset];
+  if (recolor !== "") {
+    parts.push(recolor);
   }
   parts.push(`opacity(${op})`);
   return parts.join(" ");
@@ -727,6 +825,8 @@ export class FloatingPictureLayer {
   private readonly root: HTMLDivElement;
   private readonly byId = new Map<string, { model: PictureModel; el: HTMLDivElement }>();
   private readonly floatingPictureFocusListeners = new Set<(active: boolean) => void>();
+  /** Ribbon「大小」等：占位宽高等变化时刷新（不含每次 layout 重绘）。 */
+  private readonly floatingPictureLayoutListeners = new Set<() => void>();
   private zCounter = 10;
   private selectedId: string | null = null;
   private drag: (DragMode & { id: string }) | null = null;
@@ -802,6 +902,28 @@ export class FloatingPictureLayer {
       this.emitFloatingPictureFocus(false);
     }
     this.floatingPictureFocusListeners.clear();
+    this.floatingPictureLayoutListeners.clear();
+  }
+
+  /** Ribbon「图片格式 → 大小」：占位宽高变化时订阅；订阅后立即回调一次。 */
+  subscribeFloatingPictureLayout(listener: () => void): () => void {
+    this.floatingPictureLayoutListeners.add(listener);
+    try {
+      listener();
+    } catch {
+      /* 宿主 */
+    }
+    return () => this.floatingPictureLayoutListeners.delete(listener);
+  }
+
+  private notifyFloatingPictureLayout(): void {
+    for (const fn of this.floatingPictureLayoutListeners) {
+      try {
+        fn();
+      } catch {
+        /* 宿主 */
+      }
+    }
   }
 
   /** Ribbon「图片格式」等：浮动图选中/取消时订阅；订阅后会立即用当前状态回调一次。 */
@@ -836,6 +958,7 @@ export class FloatingPictureLayer {
     if (hadFocus) {
       this.emitFloatingPictureFocus(false);
     }
+    this.notifyFloatingPictureLayout();
   }
 
   getDataUrlForPicture(id: string): string | null {
@@ -1194,7 +1317,8 @@ export class FloatingPictureLayer {
       m.adjustments.sharpnessPct !== d.sharpnessPct ||
       m.adjustments.saturationPct !== d.saturationPct ||
       m.adjustments.colorTemperatureK !== d.colorTemperatureK ||
-      m.adjustments.transparencyPct !== d.transparencyPct
+      m.adjustments.transparencyPct !== d.transparencyPct ||
+      m.adjustments.recolorPreset !== d.recolorPreset
     );
   }
 
@@ -1293,6 +1417,9 @@ export class FloatingPictureLayer {
       model.imgBoxW *= k;
       model.imgBoxH *= k;
     }
+    if (this.selectedId !== null) {
+      this.notifyFloatingPictureLayout();
+    }
   }
 
   layout(): void {
@@ -1342,11 +1469,7 @@ export class FloatingPictureLayer {
     }
     const img = new Image();
     img.onload = (): void => {
-      let w = img.naturalWidth || 1;
-      let h = img.naturalHeight || 1;
-      const scale = Math.min(1, INSERT_MAX_DIM / Math.max(w, h));
-      w = Math.max(MIN_W, w * scale);
-      h = Math.max(MIN_H, h * scale);
+      const { w, h } = defaultFloatingPictureDisplaySize(img.naturalWidth || 0, img.naturalHeight || 0);
 
       const ac = this.getAnchorCell();
       const sheet0 = wb.getActiveSheet();
@@ -1397,6 +1520,67 @@ export class FloatingPictureLayer {
       /* 忽略损坏文件 */
     };
     img.src = dataUrl;
+  }
+
+  /**
+   * 「更改图片」：保留占位框宽高与画布位置，仅替换位图数据；
+   * 并重置旋转、图片校正/颜色/透明度、裁剪矩形（铺满框）、裁剪区填充为默认。
+   */
+  replaceFloatingPictureImageKeepingFrame(pictureId: string, dataUrl: string): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    this.abortCropSessionWithoutCommitIfPicture(pictureId);
+    const img = new Image();
+    img.onload = (): void => {
+      const rec2 = this.byId.get(pictureId);
+      if (rec2 === undefined) {
+        return;
+      }
+      const m = rec2.model;
+      const exportableUrl = normalizeToExportableDataUrl(img, dataUrl);
+      m.dataUrl = exportableUrl;
+      m.rotationRad = 0;
+      m.adjustments = cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS);
+      m.frameFill = cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL);
+      m.naturalWidth = img.naturalWidth || 0;
+      m.naturalHeight = img.naturalHeight || 0;
+      m.imgBoxX = 0;
+      m.imgBoxY = 0;
+      m.imgBoxW = m.width;
+      m.imgBoxH = m.height;
+      normalizeImgBoxInModel(m);
+      const im = rec2.el.querySelector(".fs-fp-item__img");
+      if (im instanceof HTMLImageElement) {
+        im.src = exportableUrl;
+      }
+      this.applyImageFilterToElement(rec2.el, m);
+      this.applyFrameFillToItem(rec2.el, m.frameFill, m.rotationRad);
+      this.syncInnerLayout(m, rec2.el);
+      this.applyGeometry(m, rec2.el);
+      this.notifyFloatingPictureLayout();
+    };
+    img.onerror = (): void => {
+      /* 忽略损坏文件 */
+    };
+    img.src = dataUrl;
+  }
+
+  private abortCropSessionWithoutCommitIfPicture(pictureId: string): void {
+    if (this.croppingPictureId !== pictureId) {
+      return;
+    }
+    this.detachCropOutsideListeners();
+    this.croppingPictureId = null;
+    this.cropEnterSnapshot = null;
+    const rec = this.byId.get(pictureId);
+    if (rec !== undefined) {
+      rec.el.classList.remove("fs-fp-item--cropping");
+      this.setCropOverlayVisible(rec.el, false);
+    }
+    this.syncClipToTableBody();
+    this.syncCropSessionStacking();
   }
 
   private applyFrameFillToItem(
@@ -1751,6 +1935,9 @@ export class FloatingPictureLayer {
     this.applyFrameFillToItem(rec.el, m.frameFill, m.rotationRad);
     this.syncInnerLayout(m, rec.el);
     this.applyGeometry(m, rec.el);
+    if (this.selectedId === snapshot.id) {
+      this.notifyFloatingPictureLayout();
+    }
   }
 
   getFloatingPictureAdjustments(pictureId: string): FloatingPictureAdjustments | null {
@@ -1769,7 +1956,7 @@ export class FloatingPictureLayer {
     if (rec === undefined) {
       return;
     }
-    rec.model.adjustments = { ...rec.model.adjustments, ...patch };
+    rec.model.adjustments = normalizeAdjustmentsPartial({ ...rec.model.adjustments, ...patch });
     this.applyImageFilterToElement(rec.el, rec.model);
   }
 
@@ -1808,6 +1995,78 @@ export class FloatingPictureLayer {
     this.applyFrameFillToItem(rec.el, rec.model.frameFill, rec.model.rotationRad);
   }
 
+  /**
+   * 「重置图片」：恢复默认校正/颜色/透明度、裁剪区填充、旋转角为 0；
+   * 占位宽高恢复为与「插入图片」相同的默认显示尺寸（按自然分辨率与 `INSERT_MAX_DIM` 缩放）；
+   * 保持图片中心在画布上的位置不变；图片矩形铺满框；`dataUrl` 不变。
+   * 若正在裁剪该图则退出裁剪 UI（不单独提交裁剪撤销点）。
+   */
+  resetFloatingPictureToDefaultFormatting(pictureId: string): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    this.abortCropSessionWithoutCommitIfPicture(pictureId);
+    const m = rec.model;
+    let nwNat = m.naturalWidth;
+    let nhNat = m.naturalHeight;
+    const domImg = rec.el.querySelector(".fs-fp-item__img");
+    if (
+      (nwNat <= 0 || nhNat <= 0) &&
+      domImg instanceof HTMLImageElement &&
+      domImg.naturalWidth > 0 &&
+      domImg.naturalHeight > 0
+    ) {
+      nwNat = domImg.naturalWidth;
+      nhNat = domImg.naturalHeight;
+      m.naturalWidth = nwNat;
+      m.naturalHeight = nhNat;
+    }
+    const { w: nw, h: nh } = defaultFloatingPictureDisplaySize(nwNat, nhNat);
+
+    const renderer = this.getRenderer();
+    const cr = renderer.getCellRectInCanvasPixels(m.anchorRow, m.anchorCol);
+    if (cr !== null) {
+      const cx = cr.x + m.relCX + m.width / 2;
+      const cy = cr.y + m.relCY + m.height / 2;
+      m.width = nw;
+      m.height = nh;
+      m.relCX = cx - cr.x - nw / 2;
+      m.relCY = cy - cr.y - nh / 2;
+    } else {
+      m.width = nw;
+      m.height = nh;
+    }
+
+    m.rotationRad = 0;
+    m.adjustments = cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS);
+    m.frameFill = cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL);
+    m.imgBoxX = 0;
+    m.imgBoxY = 0;
+    m.imgBoxW = m.width;
+    m.imgBoxH = m.height;
+    normalizeImgBoxInModel(m);
+    this.applyImageFilterToElement(rec.el, m);
+    this.syncInnerLayout(m, rec.el);
+    this.applyGeometry(m, rec.el);
+    this.notifyFloatingPictureLayout();
+  }
+
+  /**
+   * 绕占位框中心旋转 ±90°（与 Ribbon「向右/向左旋转 90°」一致；CSS 正角为顺时针）。
+   */
+  rotateFloatingPicture90Degrees(pictureId: string, clockwise: boolean): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    this.abortCropSessionWithoutCommitIfPicture(pictureId);
+    const m = rec.model;
+    m.rotationRad += clockwise ? Math.PI / 2 : -Math.PI / 2;
+    this.applyGeometry(m, rec.el);
+    this.notifyFloatingPictureLayout();
+  }
+
   /** 画布像素下的尺寸与偏移（格式窗格「裁剪」区只读展示；偏移为相对锚点格左上角）。 */
   getFloatingPictureLayoutPx(pictureId: string): {
     readonly widthPx: number;
@@ -1821,6 +2080,50 @@ export class FloatingPictureLayer {
     }
     const m = rec.model;
     return { widthPx: m.width, heightPx: m.height, offsetXPx: m.relCX, offsetYPx: m.relCY };
+  }
+
+  /**
+   * 设置占位框显示尺寸（画布像素），保持中心不动；`imgBox` 随比例缩放（与拖动手柄缩放一致）。
+   */
+  setFloatingPictureDisplaySizePixels(pictureId: string, widthPx: number, heightPx: number): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    this.abortCropSessionWithoutCommitIfPicture(pictureId);
+    const m = rec.model;
+    const renderer = this.getRenderer();
+    const cr = renderer.getCellRectInCanvasPixels(m.anchorRow, m.anchorCol);
+    if (cr === null) {
+      return;
+    }
+    const nw = Math.max(MIN_W, Math.round(widthPx));
+    const nh = Math.max(MIN_H, Math.round(heightPx));
+    const cx = cr.x + m.relCX + m.width / 2;
+    const cy = cr.y + m.relCY + m.height / 2;
+    const ow = m.width;
+    const oh = m.height;
+    if (ow > 1e-9 && oh > 1e-9) {
+      const sx = nw / ow;
+      const sy = nh / oh;
+      m.imgBoxX *= sx;
+      m.imgBoxY *= sy;
+      m.imgBoxW *= sx;
+      m.imgBoxH *= sy;
+      normalizeImgBoxInModel(m);
+    } else {
+      m.imgBoxX = 0;
+      m.imgBoxY = 0;
+      m.imgBoxW = nw;
+      m.imgBoxH = nh;
+      normalizeImgBoxInModel(m);
+    }
+    m.width = nw;
+    m.height = nh;
+    m.relCX = Math.round(cx - cr.x - nw / 2);
+    m.relCY = Math.round(cy - cr.y - nh / 2);
+    this.applyGeometry(m, rec.el, { snapPixels: true });
+    this.notifyFloatingPictureLayout();
   }
 
   private getCenterCanvas(model: PictureModel): { cx: number; cy: number } | null {
@@ -1895,6 +2198,7 @@ export class FloatingPictureLayer {
     } catch {
       /* 部分环境下 focus 可能不可用 */
     }
+    this.notifyFloatingPictureLayout();
   }
 
   private onItemPointerDown(ev: PointerEvent, id: string): void {
@@ -2278,6 +2582,17 @@ export class FloatingPictureLayer {
     }
 
     const applyCenterSize = (c1x: number, c1y: number, nw: number, nh: number): void => {
+      const ow = m.width;
+      const oh = m.height;
+      if (ow > 1e-9 && oh > 1e-9) {
+        const sx = nw / ow;
+        const sy = nh / oh;
+        m.imgBoxX *= sx;
+        m.imgBoxY *= sy;
+        m.imgBoxW *= sx;
+        m.imgBoxH *= sy;
+        normalizeImgBoxInModel(m);
+      }
       m.width = nw;
       m.height = nh;
       m.relCX = c1x - crNow.x - nw / 2;
@@ -2400,11 +2715,29 @@ export class FloatingPictureLayer {
       return;
     }
     if (kind === "move" || kind === "resize" || kind === "rotate") {
-      rec.model.width = Math.max(MIN_W, Math.round(rec.model.width));
-      rec.model.height = Math.max(MIN_H, Math.round(rec.model.height));
-      rec.model.relCX = Math.round(rec.model.relCX);
-      rec.model.relCY = Math.round(rec.model.relCY);
+      const m = rec.model;
+      if (kind === "resize") {
+        const bw = m.width;
+        const bh = m.height;
+        const tw = Math.max(MIN_W, Math.round(bw));
+        const th = Math.max(MIN_H, Math.round(bh));
+        if (bw > 1e-9 && bh > 1e-9) {
+          m.imgBoxX *= tw / bw;
+          m.imgBoxY *= th / bh;
+          m.imgBoxW *= tw / bw;
+          m.imgBoxH *= th / bh;
+        }
+        m.width = tw;
+        m.height = th;
+      } else {
+        m.width = Math.max(MIN_W, Math.round(m.width));
+        m.height = Math.max(MIN_H, Math.round(m.height));
+      }
+      m.relCX = Math.round(m.relCX);
+      m.relCY = Math.round(m.relCY);
+      normalizeImgBoxInModel(m);
       this.applyGeometry(rec.model, rec.el, { snapPixels: true });
+      this.notifyFloatingPictureLayout();
     }
     if (kind === "cropImgMove" || kind === "cropImgResize") {
       const m = rec.model;

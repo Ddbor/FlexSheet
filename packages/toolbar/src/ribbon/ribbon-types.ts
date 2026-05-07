@@ -30,6 +30,16 @@ export interface FloatingPictureAdjustmentsState {
   saturationPct: number;
   colorTemperatureK: number;
   transparencyPct: number;
+  /** 与 flexsheet `FloatingPictureAdjustments.recolorPreset` 一致 */
+  recolorPreset: string;
+}
+
+/** 与 flexsheet 浮动图占位布局（画布像素）一致。 */
+export interface SelectedFloatingPictureLayoutPx {
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly offsetXPx: number;
+  readonly offsetYPx: number;
 }
 
 export interface RibbonCommandEvent {
@@ -153,6 +163,8 @@ export interface FlexSheetLike {
   openFillSeriesDialog?(): void;
   /** Ribbon「插入 -> 图片」：打开本地文件选择并插入浮动图片。 */
   openInsertPictureFromRibbon?(): void;
+  /** Ribbon「图片格式 -> 更改图片」：选择新文件替换当前选中浮动图并恢复默认样式。 */
+  openChangePictureFromRibbon?(): void;
   /** 导出 Excel 时附带浮动图片（与 `viewZoom` 配合写入 DrawingML）。 */
   getFloatingPicturesForXlsxExport?(): readonly XlsxFloatingPictureExport[];
   /** 导出前异步合成大图框留白（优先于 `getFloatingPicturesForXlsxExport`）。 */
@@ -170,6 +182,13 @@ export interface FlexSheetLike {
   openFloatingPictureFormatPane?(): void;
   /** 将当前浮动图显示调整恢复为默认（亮度、对比度、透明度等）。 */
   resetFloatingPictureFormatting?(): void;
+  /** Ribbon「图片格式 → 旋转」：选中浮动图绕中心 ±90°（true=向右/顺时针）。 */
+  rotateSelectedFloatingPicture90Degrees?(clockwise: boolean): void;
+  /** Ribbon「图片格式 → 大小」：当前选中图占位尺寸（画布像素）。 */
+  getSelectedFloatingPictureLayoutPx?(): SelectedFloatingPictureLayoutPx | null;
+  setSelectedFloatingPictureSizePx?(widthPx: number, heightPx: number): void;
+  /** 占位尺寸变化时通知（订阅后立即回调一次）。 */
+  subscribeSelectedFloatingPictureLayout?(listener: () => void): () => void;
   /** Ribbon「插入 -> 数据透视表」：打开数据透视表创建对话框。 */
   openPivotTableDialog?(): void;
   /** Ribbon「数据 -> 字段列表」：在透视区域内打开字段窗格。 */

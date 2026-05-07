@@ -12,9 +12,12 @@ import type {
 } from "./floating-picture-layer.js";
 import {
   DEFAULT_FLOATING_PICTURE_ADJUSTMENTS,
+  FLOATING_PICTURE_RECOLOR_PRESET_GRID,
+  buildFloatingPictureCssFilter,
   frameFillToFillLayerStyles,
   gradientStopToRgbaCss,
   gradientStopsToHorizontalBarBackground,
+  type FloatingPictureRecolorPresetId,
 } from "./floating-picture-layer.js";
 import {
   FORMAT_PICTURE_GRADIENT_PRESETS,
@@ -45,6 +48,8 @@ export interface CreateFormatPicturePaneOptions {
   readonly getAdjustments: () => FloatingPictureAdjustments | null;
   readonly getLayout: () => FormatPicturePaneLayout | null;
   readonly setAdjustments: (patch: Partial<FloatingPictureAdjustments>) => void;
+  /** 重新着色缩略图预览；缺省为占位图 */
+  readonly getPreviewPictureDataUrl?: () => string | null;
   readonly getFrameFill: () => FloatingPictureFrameFill | null;
   readonly setFrameFill: (patch: Partial<FloatingPictureFrameFill>) => void;
   readonly onClose: () => void;
@@ -182,6 +187,44 @@ function ensureFormatPictureStyles(): void {
   color: inherit;
   opacity: 0.85;
 }
+.fs-format-picture__recolor-pop {
+  max-width: min(320px, calc(100vw - 24px));
+}
+.fs-format-picture__recolor-pop-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 32px);
+  gap: 4px;
+  width: max-content;
+}
+.fs-format-picture__recolor-pop-grid .fs-format-picture__recolor-thumb {
+  width: 32px;
+  height: 32px;
+}
+.fs-format-picture__recolor-thumb {
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  border: 1px solid var(--fs-ribbon-border, #c8c6c4);
+  border-radius: 2px;
+  background: var(--fs-sheet-surface, #fff);
+  cursor: pointer;
+  overflow: hidden;
+  line-height: 0;
+  aspect-ratio: 1;
+}
+.fs-format-picture__recolor-thumb:hover {
+  border-color: var(--fs-ribbon-chrome-text, #605e5c);
+}
+.fs-format-picture__recolor-thumb--selected {
+  border: 2px solid #217346;
+  box-shadow: 0 0 0 1px rgba(33, 115, 70, 0.25);
+}
+.fs-format-picture__recolor-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
 .fs-format-picture__reset {
   margin-top: 6px;
   padding: 4px 10px;
@@ -213,14 +256,10 @@ function ensureFormatPictureStyles(): void {
   opacity: 0.6;
   font-size: 12px;
 }
-/* 「填充与线条」：第一节可折叠；「线条」区仅占位 */
+/* 「填充」区可折叠 */
 .fs-format-picture__sec--interactive > summary {
   pointer-events: auto;
   cursor: pointer;
-}
-.fs-format-picture__panel-fill-line .fs-format-picture__sec--lines-static > summary {
-  pointer-events: none;
-  cursor: default;
 }
 .fs-format-picture__fill-radio-row {
   display: flex;
@@ -332,17 +371,6 @@ function ensureFormatPictureStyles(): void {
 .fs-format-picture__sec--chrome .fs-format-picture__sec-body {
   background: var(--fs-format-picture-sec-body, #faf9f8);
   padding: 10px 12px 12px;
-}
-.fs-format-picture__radio-static-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0;
-  font-size: 12px;
-  color: var(--fs-ribbon-chrome-text, #323130);
-  user-select: none;
-  pointer-events: none;
-  cursor: default;
 }
 .fs-format-picture__radio-disk {
   width: 14px;
@@ -533,6 +561,63 @@ function pxToIn(px: number): string {
   return (px / 96).toFixed(2);
 }
 
+const FORMAT_PICTURE_PREVIEW_PLACEHOLDER =
+  "data:image/svg+xml," +
+  encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="36" viewBox="0 0 48 36"><rect fill="#c8c6c4" width="48" height="36"/><path fill="#a19f9d" d="M4 28l12-14 8 10 10-12 10 16H4z"/></svg>`,
+  );
+
+function adjForRecolorThumbPreview(preset: FloatingPictureRecolorPresetId): FloatingPictureAdjustments {
+  if (preset === "none") {
+    return { ...DEFAULT_FLOATING_PICTURE_ADJUSTMENTS, recolorPreset: "none" };
+  }
+  return {
+    ...DEFAULT_FLOATING_PICTURE_ADJUSTMENTS,
+    recolorPreset: preset,
+    brightnessPct: 0,
+    contrastPct: 0,
+    saturationPct: 100,
+    colorTemperatureK: 6500,
+  };
+}
+
+function patchForRecolorSelection(preset: FloatingPictureRecolorPresetId): Partial<FloatingPictureAdjustments> {
+  if (preset === "none") {
+    return { recolorPreset: "none" };
+  }
+  return {
+    recolorPreset: preset,
+    brightnessPct: 0,
+    contrastPct: 0,
+    saturationPct: 100,
+    colorTemperatureK: 6500,
+  };
+}
+
+const RECOLOR_PRESET_LABELS: Record<FloatingPictureRecolorPresetId, string> = {
+  none: "原始",
+  r_gray: "灰度",
+  r_sepia: "褐色",
+  r_washout: "冲蚀",
+  r_bwsoft: "黑白（弱）",
+  r_bwmid: "黑白（中）",
+  r_bwhard: "黑白（强）",
+  r_dkgray: "深色灰",
+  r_dkblue: "深色蓝",
+  r_dkorange: "深色橙",
+  r_dksilver: "深色银灰",
+  r_dkgold: "深色金",
+  r_dklblue: "深色浅蓝",
+  r_dkgreen: "深色绿",
+  r_plgray: "浅色灰",
+  r_plblue: "浅色蓝",
+  r_plorange: "浅色橙",
+  r_plsilver: "浅色银灰",
+  r_plgold: "浅色金",
+  r_pllblue: "浅色浅蓝",
+  r_plgreen: "浅色绿",
+};
+
 export function createFormatPicturePane(
   options: CreateFormatPicturePaneOptions,
 ): FormatPicturePaneController {
@@ -541,6 +626,7 @@ export function createFormatPicturePane(
   let syncing = false;
   let fillColorPopoverCleanup: (() => void) | null = null;
   let gradPopoverCleanup: (() => void) | null = null;
+  let recolorPopoverCleanup: (() => void) | null = null;
   let selectedGradientStopIdx = 0;
   /** 拖动光圈时与 `gradientStops` 数组下标一致（已按位置排序） */
   let gradStopDragSortedIdx: number | null = null;
@@ -557,6 +643,76 @@ export function createFormatPicturePane(
       gradPopoverCleanup();
       gradPopoverCleanup = null;
     }
+  }
+
+  function closeRecolorPopover(): void {
+    if (recolorPopoverCleanup !== null) {
+      recolorPopoverCleanup();
+      recolorPopoverCleanup = null;
+    }
+  }
+
+  function mountRecolorPresetPopover(anchor: HTMLElement): void {
+    closeRecolorPopover();
+    const curAdj = options.getAdjustments();
+    const curPreset = curAdj?.recolorPreset ?? "none";
+    const picRaw = options.getPreviewPictureDataUrl?.() ?? null;
+    const picUrl = picRaw !== null && picRaw !== "" ? picRaw : FORMAT_PICTURE_PREVIEW_PLACEHOLDER;
+    const pop = document.createElement("div");
+    pop.className = "fs-format-picture__grad-pop fs-format-picture__recolor-pop";
+    const grid = document.createElement("div");
+    grid.className = "fs-format-picture__recolor-pop-grid";
+    for (const row of FLOATING_PICTURE_RECOLOR_PRESET_GRID) {
+      for (const preset of row) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className =
+          "fs-format-picture__recolor-thumb" +
+          (preset === curPreset ? " fs-format-picture__recolor-thumb--selected" : "");
+        b.title = RECOLOR_PRESET_LABELS[preset];
+        const img = document.createElement("img");
+        img.alt = "";
+        img.draggable = false;
+        img.src = picUrl;
+        img.style.filter = buildFloatingPictureCssFilter(adjForRecolorThumbPreview(preset));
+        b.appendChild(img);
+        const p = preset;
+        b.addEventListener("click", () => {
+          if (!syncing) {
+            options.setAdjustments(patchForRecolorSelection(p));
+          }
+          closeRecolorPopover();
+        });
+        grid.appendChild(b);
+      }
+    }
+    pop.appendChild(grid);
+    document.body.appendChild(pop);
+    const position = (): void => {
+      const r = anchor.getBoundingClientRect();
+      const pw = pop.offsetWidth;
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8));
+      pop.style.left = `${left}px`;
+      const ph = pop.offsetHeight;
+      let top = r.bottom + 4;
+      if (top + ph > window.innerHeight - 8) {
+        top = Math.max(8, r.top - ph - 4);
+      }
+      pop.style.top = `${top}px`;
+    };
+    requestAnimationFrame(position);
+    const onDoc = (ev: PointerEvent): void => {
+      const t = ev.target as Node | null;
+      if (t !== null && (pop.contains(t) || anchor.contains(t))) {
+        return;
+      }
+      closeRecolorPopover();
+    };
+    recolorPopoverCleanup = (): void => {
+      pop.remove();
+      document.removeEventListener("pointerdown", onDoc, true);
+    };
+    setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
   }
 
   const root = document.createElement("aside");
@@ -578,12 +734,12 @@ export function createFormatPicturePane(
 
   const tabs = document.createElement("div");
   tabs.className = "fs-format-picture__tabs";
-  const tabIds = ["填充与线条", "效果", "大小", "图片"] as const;
+  const tabIds = ["填充", "大小与属性", "图片"] as const;
   const tabBtns: HTMLButtonElement[] = [];
   for (let i = 0; i < tabIds.length; i++) {
     const t = document.createElement("button");
     t.type = "button";
-    t.className = "fs-format-picture__tab" + (i === 3 ? " fs-format-picture__tab--active" : "");
+    t.className = "fs-format-picture__tab" + (i === 2 ? " fs-format-picture__tab--active" : "");
     t.textContent = tabIds[i];
     tabBtns.push(t);
     tabs.appendChild(t);
@@ -599,27 +755,13 @@ export function createFormatPicturePane(
   panelFillLine.className = "fs-format-picture__panel-fill-line";
   panelFillLine.hidden = true;
 
-  function mkStaticRadioRow(label: string, on: boolean): HTMLDivElement {
-    const row = document.createElement("div");
-    row.className = "fs-format-picture__radio-static-row";
-    const disk = document.createElement("span");
-    disk.className =
-      "fs-format-picture__radio-disk" + (on ? " fs-format-picture__radio-disk--on" : "");
-    disk.setAttribute("aria-hidden", "true");
-    const lab = document.createElement("span");
-    lab.textContent = label;
-    row.appendChild(disk);
-    row.appendChild(lab);
-    return row;
-  }
-
   const fillKindRows = new Map<FloatingPictureFillKind, HTMLDivElement>();
   const fillDetails = document.createElement("details");
   fillDetails.className =
     "fs-format-picture__sec fs-format-picture__sec--chrome fs-format-picture__sec--interactive";
   fillDetails.open = true;
   const fillSum = document.createElement("summary");
-  fillSum.textContent = "填充与线条";
+  fillSum.textContent = "填充";
   const fillBody = document.createElement("div");
   fillBody.className = "fs-format-picture__sec-body";
 
@@ -1647,25 +1789,6 @@ export function createFormatPicturePane(
     }
   }
 
-  const lineDetails = document.createElement("details");
-  lineDetails.className =
-    "fs-format-picture__sec fs-format-picture__sec--chrome fs-format-picture__sec--lines-static";
-  lineDetails.open = true;
-  const lineSum = document.createElement("summary");
-  lineSum.textContent = "线条";
-  const lineBody = document.createElement("div");
-  lineBody.className = "fs-format-picture__sec-body";
-  for (const [text, sel] of [
-    ["无线条", true],
-    ["实线", false],
-    ["渐变线", false],
-  ] as const) {
-    lineBody.appendChild(mkStaticRadioRow(text, sel));
-  }
-  lineDetails.appendChild(lineSum);
-  lineDetails.appendChild(lineBody);
-  panelFillLine.appendChild(lineDetails);
-
   const panelOther = document.createElement("div");
   panelOther.className = "fs-format-picture__panel-other";
   panelOther.hidden = true;
@@ -1677,7 +1800,7 @@ export function createFormatPicturePane(
   function showPanel(idx: number): void {
     closeFillColorPopover();
     closeGradPopovers();
-    const isPic = idx === 3;
+    const isPic = idx === 2;
     const isFill = idx === 0;
     panelPicture.hidden = !isPic;
     panelFillLine.hidden = !isFill;
@@ -1714,6 +1837,7 @@ export function createFormatPicturePane(
     key: keyof FloatingPictureAdjustments,
     format: (v: number) => string,
     parse: (s: string) => number | null,
+    extraPatch?: Partial<FloatingPictureAdjustments>,
   ): { range: HTMLInputElement; num: HTMLInputElement } {
     const row = document.createElement("div");
     row.className = "fs-format-picture__row";
@@ -1732,7 +1856,11 @@ export function createFormatPicturePane(
         return;
       }
       const v = Number(range.value);
-      options.setAdjustments({ [key]: v } as Partial<FloatingPictureAdjustments>);
+      const patch: Partial<FloatingPictureAdjustments> = { [key]: v } as Partial<FloatingPictureAdjustments>;
+      if (extraPatch !== undefined) {
+        Object.assign(patch, extraPatch);
+      }
+      options.setAdjustments(patch);
       num.value = format(v);
     };
     const applyFromNum = (): void => {
@@ -1744,7 +1872,11 @@ export function createFormatPicturePane(
         return;
       }
       const cl = Math.min(max, Math.max(min, v));
-      options.setAdjustments({ [key]: cl } as Partial<FloatingPictureAdjustments>);
+      const patch: Partial<FloatingPictureAdjustments> = { [key]: cl } as Partial<FloatingPictureAdjustments>;
+      if (extraPatch !== undefined) {
+        Object.assign(patch, extraPatch);
+      }
+      options.setAdjustments(patch);
       range.value = String(cl);
       num.value = format(cl);
     };
@@ -1841,6 +1973,7 @@ export function createFormatPicturePane(
       const n = Number(s.replace(/%/g, "").trim());
       return Number.isFinite(n) ? n : null;
     },
+    { recolorPreset: "none" },
   );
   const tempSl = mkSliderRow(
     secCol.body,
@@ -1854,18 +1987,46 @@ export function createFormatPicturePane(
       const n = Number(s.replace(/,/g, "").trim());
       return Number.isFinite(n) ? n : null;
     },
+    { recolorPreset: "none" },
   );
   const recolorNote = document.createElement("div");
   recolorNote.className = "fs-format-picture__subhead";
   recolorNote.textContent = "重新着色";
   secCol.body.appendChild(recolorNote);
-  const recolorSel = document.createElement("select");
-  recolorSel.style.width = "100%";
-  recolorSel.style.padding = "4px";
-  recolorSel.style.fontSize = "11px";
-  recolorSel.innerHTML =
-    '<option value="">（无）</option><option value="gray" disabled>灰度（即将支持）</option>';
-  secCol.body.appendChild(recolorSel);
+  const recolorDdRow = document.createElement("div");
+  recolorDdRow.className = "fs-format-picture__row fs-format-picture__color-dd-row";
+  const recolorDdLab = document.createElement("label");
+  recolorDdLab.textContent = "预设";
+  const recolorDdBtn = document.createElement("button");
+  recolorDdBtn.type = "button";
+  recolorDdBtn.className = "fs-format-picture__fill-dd";
+  const recolorSwatch = document.createElement("span");
+  recolorSwatch.className = "fs-format-picture__fill-swatch";
+  recolorSwatch.style.overflow = "hidden";
+  recolorSwatch.style.padding = "0";
+  const recolorSwatchImg = document.createElement("img");
+  recolorSwatchImg.alt = "";
+  recolorSwatchImg.draggable = false;
+  recolorSwatchImg.style.display = "block";
+  recolorSwatchImg.style.width = "100%";
+  recolorSwatchImg.style.height = "100%";
+  recolorSwatchImg.style.objectFit = "cover";
+  recolorSwatch.appendChild(recolorSwatchImg);
+  const recolorDdLbl = document.createElement("span");
+  recolorDdLbl.className = "fs-format-picture__fill-dd-label";
+  const recolorDdArr = document.createElement("span");
+  recolorDdArr.className = "fs-format-picture__fill-dd-arrow";
+  recolorDdBtn.appendChild(recolorSwatch);
+  recolorDdBtn.appendChild(recolorDdLbl);
+  recolorDdBtn.appendChild(recolorDdArr);
+  recolorDdRow.appendChild(recolorDdLab);
+  recolorDdRow.appendChild(recolorDdBtn);
+  secCol.body.appendChild(recolorDdRow);
+  recolorDdBtn.addEventListener("click", () => {
+    if (!syncing) {
+      mountRecolorPresetPopover(recolorDdBtn);
+    }
+  });
   const resetCol = document.createElement("button");
   resetCol.type = "button";
   resetCol.className = "fs-format-picture__reset";
@@ -1874,6 +2035,7 @@ export function createFormatPicturePane(
     options.setAdjustments({
       saturationPct: DEFAULT_FLOATING_PICTURE_ADJUSTMENTS.saturationPct,
       colorTemperatureK: DEFAULT_FLOATING_PICTURE_ADJUSTMENTS.colorTemperatureK,
+      recolorPreset: "none",
     });
     syncFromModel();
   });
@@ -1962,6 +2124,11 @@ export function createFormatPicturePane(
       satSl.num.value = `${a.saturationPct}%`;
       tempSl.range.value = String(a.colorTemperatureK);
       tempSl.num.value = `${Math.round(a.colorTemperatureK)}`;
+      const picRaw = options.getPreviewPictureDataUrl?.() ?? null;
+      const picUrl = picRaw !== null && picRaw !== "" ? picRaw : FORMAT_PICTURE_PREVIEW_PLACEHOLDER;
+      recolorSwatchImg.src = picUrl;
+      recolorSwatchImg.style.filter = buildFloatingPictureCssFilter(a);
+      recolorDdLbl.textContent = RECOLOR_PRESET_LABELS[a.recolorPreset] ?? a.recolorPreset;
       trSl.range.value = String(a.transparencyPct);
       trSl.num.value = `${a.transparencyPct}%`;
       if (layout !== null) {
@@ -1986,6 +2153,7 @@ export function createFormatPicturePane(
     root.removeAttribute("data-open");
     closeFillColorPopover();
     closeGradPopovers();
+    closeRecolorPopover();
   }
 
   btnClose.addEventListener("click", () => {

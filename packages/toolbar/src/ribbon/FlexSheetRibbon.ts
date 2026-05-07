@@ -46,6 +46,8 @@ export class FlexSheetRibbon {
   private ribbonBodyEl!: HTMLElement;
   private ribbonEmit!: RibbonEmit;
   private pictureFocusUnsub: (() => void) | null = null;
+  /** 「图片格式」面板卸载时取消「大小」区等订阅 */
+  private pictureFormatTabCleanup: (() => void) | null = null;
   /** 进入「图片格式」前的选项卡，取消选中图片后若当前仍在该选项卡则切回 */
   private tabBeforeFloatingPicture: RibbonTabId = "home";
 
@@ -291,7 +293,8 @@ export class FlexSheetRibbon {
     panel.setAttribute("aria-labelledby", `fs-ribbon-tab-${id}`);
     panel.hidden = true;
     panel.dataset.tabId = id;
-    mountPictureFormatTab(panel, this.ribbonEmit, () => this.flexSheet);
+    this.pictureFormatTabCleanup?.();
+    this.pictureFormatTabCleanup = mountPictureFormatTab(panel, this.ribbonEmit, () => this.flexSheet);
     this.panels.set(id, panel);
     this.ribbonBodyEl.appendChild(panel);
   }
@@ -303,6 +306,8 @@ export class FlexSheetRibbon {
     if (btn === undefined || panel === undefined) {
       return;
     }
+    this.pictureFormatTabCleanup?.();
+    this.pictureFormatTabCleanup = null;
     if (this.activeTab === "pictureFormat") {
       this.activeTab = this.tabBeforeFloatingPicture;
     }

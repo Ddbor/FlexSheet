@@ -580,6 +580,13 @@ export function applyRibbonCommandToFlexSheet(ev: RibbonCommandEvent, fs: FlexSh
       fs.openInsertPictureFromRibbon();
       return true;
     }
+    case "pictureFormat.changePicture": {
+      if (fs.openChangePictureFromRibbon === undefined) {
+        return false;
+      }
+      fs.openChangePictureFromRibbon();
+      return true;
+    }
     case "pictureFormat.resetPicture": {
       if (fs.resetFloatingPictureFormatting === undefined) {
         return false;

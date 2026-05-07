@@ -17,28 +17,27 @@ const DEF: FloatingPictureAdjustmentsState = {
   recolorPreset: "none",
 };
 
-const SHARP_PRESETS = [-50, -25, 0, 25, 50] as const;
-/** 自上而下：暗 → 亮 */
-const BC_BRIGHT = [-40, -20, 0, 20, 40] as const;
-/** 自左而右：低对比 → 高对比 */
-const BC_CONT = [-40, -20, 0, 20, 40] as const;
+/**
+ * 与 Excel「图片格式 → 透明度」预设一致：左不透明 → 右高透明（共 7 档）。
+ */
+const TRANSPARENCY_PRESETS = [0, 15, 30, 50, 65, 80, 95] as const;
 
 function mergeAdj(partial: Partial<FloatingPictureAdjustmentsState>): FloatingPictureAdjustmentsState {
   return { ...DEF, ...partial };
 }
 
 /**
- * 「图片格式 → 更正」：锐化/柔化条 + 亮度/对比度 5×5 + 打开右侧格式窗格。
+ * 「图片格式 → 透明度」：预设透明度一行 + 打开右侧格式窗格。
  */
-export function mountPictureCorrectionsMenu(
+export function mountPictureTransparencyMenu(
   anchor: HTMLButtonElement,
   getFlexSheet: () => FlexSheetLike | undefined,
 ): void {
   if (anchor.id === "") {
-    anchor.id = "fs-ribbon-picture-format-correct";
+    anchor.id = "fs-ribbon-picture-format-transparency";
   }
   const menu = document.createElement("div");
-  menu.className = "fs-bd-menu fs-pic-corr-menu";
+  menu.className = "fs-bd-menu fs-pic-transparency-menu";
   menu.hidden = true;
   menu.setAttribute("data-fs-floating-menu", "");
   menu.setAttribute("data-fs-menu-anchor-id", anchor.id);
@@ -50,18 +49,20 @@ export function mountPictureCorrectionsMenu(
     return u !== null && u !== "" ? u : PLACEHOLDER_IMG;
   };
 
-  const sharpenRow = document.createElement("div");
-  sharpenRow.className = "fs-pic-corr-menu__sh-row";
-  const sharpenHead = document.createElement("div");
-  sharpenHead.className = "fs-pic-corr-menu__section-head";
-  sharpenHead.textContent = "锐化/柔化";
-  menu.appendChild(sharpenHead);
-  const sharpenBtns: HTMLButtonElement[] = [];
-  for (let i = 0; i < SHARP_PRESETS.length; i++) {
+  const head = document.createElement("div");
+  head.className = "fs-pic-corr-menu__section-head";
+  head.textContent = "预设透明度";
+  menu.appendChild(head);
+
+  const row = document.createElement("div");
+  row.className = "fs-pic-corr-menu__sh-row";
+  const btns: HTMLButtonElement[] = [];
+  for (let i = 0; i < TRANSPARENCY_PRESETS.length; i++) {
     const b = document.createElement("button");
     b.type = "button";
     b.className = "fs-pic-corr-menu__thumb";
     b.setAttribute("role", "menuitem");
+    b.title = `${TRANSPARENCY_PRESETS[i]}%`;
     const img = document.createElement("img");
     img.className = "fs-pic-corr-menu__thumb-img";
     img.alt = "";
@@ -70,46 +71,12 @@ export function mountPictureCorrectionsMenu(
     const idx = i;
     b.addEventListener("click", (ev) => {
       ev.stopPropagation();
-      applyPatch({ sharpnessPct: SHARP_PRESETS[idx], recolorPreset: "none" });
+      applyPatch({ transparencyPct: TRANSPARENCY_PRESETS[idx] });
     });
-    sharpenBtns.push(b);
-    sharpenRow.appendChild(b);
+    btns.push(b);
+    row.appendChild(b);
   }
-  menu.appendChild(sharpenRow);
-
-  const bcHead = document.createElement("div");
-  bcHead.className = "fs-pic-corr-menu__section-head";
-  bcHead.textContent = "亮度/对比度";
-  menu.appendChild(bcHead);
-  const grid = document.createElement("div");
-  grid.className = "fs-pic-corr-menu__grid";
-  const gridBtns: HTMLButtonElement[] = [];
-  for (let r = 0; r < 5; r++) {
-    for (let c = 0; c < 5; c++) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "fs-pic-corr-menu__thumb fs-pic-corr-menu__thumb--cell";
-      b.setAttribute("role", "menuitem");
-      const img = document.createElement("img");
-      img.className = "fs-pic-corr-menu__thumb-img";
-      img.alt = "";
-      img.draggable = false;
-      b.appendChild(img);
-      const rr = r;
-      const cc = c;
-      b.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        applyPatch({
-          brightnessPct: BC_BRIGHT[rr],
-          contrastPct: BC_CONT[cc],
-          recolorPreset: "none",
-        });
-      });
-      gridBtns.push(b);
-      grid.appendChild(b);
-    }
-  }
-  menu.appendChild(grid);
+  menu.appendChild(row);
 
   const sep = document.createElement("div");
   sep.className = "fs-pic-corr-menu__sep";
@@ -124,7 +91,7 @@ export function mountPictureCorrectionsMenu(
   ic.appendChild(iconFormatPainter());
   const ft = document.createElement("span");
   ft.className = "fs-pic-corr-menu__footer-text";
-  ft.textContent = "图片更正选项...";
+  ft.textContent = "图片透明度选项...";
   footer.appendChild(ic);
   footer.appendChild(ft);
   footer.addEventListener("click", (ev) => {
@@ -145,26 +112,13 @@ export function mountPictureCorrectionsMenu(
 
   function refreshThumbnails(): void {
     const src = previewUrl();
-    for (let i = 0; i < sharpenBtns.length; i++) {
-      const img = sharpenBtns[i].querySelector("img");
+    for (let i = 0; i < btns.length; i++) {
+      const img = btns[i]!.querySelector("img");
       if (img instanceof HTMLImageElement) {
         img.src = src;
         img.style.filter = buildFloatingPictureCssFilterPreview(
-          mergeAdj({ sharpnessPct: SHARP_PRESETS[i] }),
+          mergeAdj({ transparencyPct: TRANSPARENCY_PRESETS[i] }),
         );
-      }
-    }
-    let k = 0;
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 5; c++) {
-        const img = gridBtns[k]?.querySelector("img");
-        if (img instanceof HTMLImageElement) {
-          img.src = src;
-          img.style.filter = buildFloatingPictureCssFilterPreview(
-            mergeAdj({ brightnessPct: BC_BRIGHT[r], contrastPct: BC_CONT[c] }),
-          );
-        }
-        k += 1;
       }
     }
   }
@@ -172,20 +126,11 @@ export function mountPictureCorrectionsMenu(
   function refreshSelection(): void {
     const fs = getFlexSheet();
     const adj = fs?.getFloatingPictureAdjustmentsState?.() ?? DEF;
-    for (let i = 0; i < sharpenBtns.length; i++) {
-      sharpenBtns[i].classList.toggle(
+    for (let i = 0; i < btns.length; i++) {
+      btns[i]!.classList.toggle(
         "fs-pic-corr-menu__thumb--selected",
-        adj.sharpnessPct === SHARP_PRESETS[i],
+        adj.transparencyPct === TRANSPARENCY_PRESETS[i],
       );
-    }
-    let k = 0;
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 5; c++) {
-        const sel =
-          adj.brightnessPct === BC_BRIGHT[r] && adj.contrastPct === BC_CONT[c];
-        gridBtns[k]?.classList.toggle("fs-pic-corr-menu__thumb--selected", sel);
-        k += 1;
-      }
     }
   }
 
@@ -211,7 +156,6 @@ export function mountPictureCorrectionsMenu(
   });
 }
 
-/** 无图时的极简占位（灰块），避免空 src。 */
 const PLACEHOLDER_IMG =
   "data:image/svg+xml," +
   encodeURIComponent(

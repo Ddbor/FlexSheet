@@ -269,6 +269,7 @@ export class FlexSheet {
   private readonly canvasMountEl: HTMLDivElement;
   private readonly floatingPictureLayer: FloatingPictureLayer;
   private pictureFileInput: HTMLInputElement | null = null;
+  private changePictureFileInput: HTMLInputElement | null = null;
   private lastFloatingPictureViewZoom = 1;
   private readonly formulaBuilderPanel: FormulaBuilderPanelController;
   private readonly formatPicturePane: FormatPicturePaneController;
@@ -432,6 +433,7 @@ export class FlexSheet {
         }
         return this.floatingPictureLayer.getFloatingPictureAdjustments(pid);
       },
+      getPreviewPictureDataUrl: () => this.getSelectedFloatingPictureDataUrl(),
       getLayout: () => {
         const pid = this.floatingPictureLayer.getSelectedPictureId();
         if (pid === null) {
@@ -1722,14 +1724,16 @@ export class FlexSheet {
     }
   }
 
-  /** 重置当前浮动图的全部显示调整（与「重置图片」等效于样式还原）。 */
+  /**
+   * Ribbon「重置图片」：恢复默认图片样式与默认显示尺寸（与插入时一致），
+   * 保持中心位置与图源；含校正/颜色/透明度、填充、旋转、裁剪铺满框。
+   */
   resetFloatingPictureFormatting(): void {
     const id = this.floatingPictureLayer.getSelectedPictureId();
     if (id === null) {
       return;
     }
-    this.floatingPictureLayer.resetFloatingPictureAdjustments(id);
-    this.floatingPictureLayer.resetFloatingPictureFrameFill(id);
+    this.floatingPictureLayer.resetFloatingPictureToDefaultFormatting(id);
     if (this.formatPicturePane.isOpen()) {
       this.formatPicturePane.syncFromModel();
     }
@@ -1741,6 +1745,51 @@ export class FlexSheet {
     }
     this.formulaBuilderPanel.hide();
     this.formatPicturePane.show();
+  }
+
+  /**
+   * Ribbon「图片格式 → 旋转」：当前选中浮动图绕中心旋转 90°（clockwise=true 为向右/顺时针）。
+   */
+  rotateSelectedFloatingPicture90Degrees(clockwise: boolean): void {
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return;
+    }
+    this.floatingPictureLayer.rotateFloatingPicture90Degrees(id, clockwise);
+    if (this.formatPicturePane.isOpen()) {
+      this.formatPicturePane.syncFromModel();
+    }
+  }
+
+  /** Ribbon「图片格式 → 大小」：当前选中图占位矩形（画布像素）。 */
+  getSelectedFloatingPictureLayoutPx(): {
+    readonly widthPx: number;
+    readonly heightPx: number;
+    readonly offsetXPx: number;
+    readonly offsetYPx: number;
+  } | null {
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return null;
+    }
+    return this.floatingPictureLayer.getFloatingPictureLayoutPx(id);
+  }
+
+  /** Ribbon「图片格式 → 大小」：设置占位宽高（画布像素），保持中心不动。 */
+  setSelectedFloatingPictureSizePx(widthPx: number, heightPx: number): void {
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return;
+    }
+    this.floatingPictureLayer.setFloatingPictureDisplaySizePixels(id, widthPx, heightPx);
+    if (this.formatPicturePane.isOpen()) {
+      this.formatPicturePane.syncFromModel();
+    }
+  }
+
+  /** 浮动图占位尺寸变化时通知（Ribbon「大小」等）；订阅后立即回调一次。 */
+  subscribeSelectedFloatingPictureLayout(listener: () => void): () => void {
+    return this.floatingPictureLayer.subscribeFloatingPictureLayout(listener);
   }
 
   /**
@@ -2236,6 +2285,23 @@ export class FlexSheet {
     inp.click();
   }
 
+  /**
+   * Ribbon「图片格式 -> 更改图片」：在已选中浮动图时打开文件选择，替换位图并保留占位尺寸；
+   * 重置旋转、校正/颜色/透明度、裁剪与裁剪区填充。
+   */
+  openChangePictureFromRibbon(): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    const id = this.floatingPictureLayer.getSelectedPictureId();
+    if (id === null) {
+      return;
+    }
+    const inp = this.ensureChangePictureFileInput();
+    inp.value = "";
+    inp.click();
+  }
+
   private ensurePictureFileInput(): HTMLInputElement {
     if (this.pictureFileInput !== null) {
       return this.pictureFileInput;
@@ -2261,6 +2327,41 @@ export class FlexSheet {
       reader.readAsDataURL(f);
     });
     this.pictureFileInput = inp;
+    return inp;
+  }
+
+  private ensureChangePictureFileInput(): HTMLInputElement {
+    if (this.changePictureFileInput !== null) {
+      return this.changePictureFileInput;
+    }
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "image/*";
+    inp.style.display = "none";
+    inp.setAttribute("aria-hidden", "true");
+    document.body.appendChild(inp);
+    inp.addEventListener("change", () => {
+      const f = inp.files?.[0];
+      if (f === undefined) {
+        return;
+      }
+      const id = this.floatingPictureLayer.getSelectedPictureId();
+      if (id === null) {
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (): void => {
+        const url = reader.result;
+        if (typeof url === "string") {
+          this.floatingPictureLayer.replaceFloatingPictureImageKeepingFrame(id, url);
+          if (this.formatPicturePane.isOpen()) {
+            this.formatPicturePane.syncFromModel();
+          }
+        }
+      };
+      reader.readAsDataURL(f);
+    });
+    this.changePictureFileInput = inp;
     return inp;
   }
 

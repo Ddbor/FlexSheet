@@ -856,6 +856,21 @@ export function iconPictureReset(): SVGSVGElement {
   );
 }
 
+/** 图片格式 — 旋转（32×32，三角示意 + 弧形箭头；单色 currentColor，无品牌色） */
+export function iconPictureRotate(): SVGSVGElement {
+  return svgElMarkup(
+    "0 0 32 32",
+    '<g fill="none" fill-rule="evenodd">' +
+      '<g fill-rule="nonzero">' +
+      '<path fill="currentColor" fill-opacity="0.14" d="M17 13v15H2z"/>' +
+      '<path fill="currentColor" fill-opacity="0.45" d="M17 13v15H2zm-1 2.414L4.414 27H16z"/>' +
+      "</g>" +
+      '<path fill="currentColor" fill-opacity="0.62" fill-rule="nonzero" d="m19 6 11 22H19z"/>' +
+      '<path fill="currentColor" fill-rule="nonzero" d="M7.5 17c-2.843 0-5.077-2.279-5.077-5S4.657 7 7.5 7h5.395L9.5 10.438l.556.562L14.5 6.5 10.056 2l-.556.563L12.895 6H7.5c-3.275 0-6 2.646-6 6s2.725 6 6 6z"/>' +
+      "</g>",
+  );
+}
+
 export function iconOrientation(): SVGSVGElement {
   return svgEl(
     "0 0 24 24",

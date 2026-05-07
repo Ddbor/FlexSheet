@@ -20,7 +20,8 @@ function adjustmentsEqual(a: FloatingPictureAdjustments, b: FloatingPictureAdjus
     a.sharpnessPct === b.sharpnessPct &&
     a.saturationPct === b.saturationPct &&
     a.colorTemperatureK === b.colorTemperatureK &&
-    a.transparencyPct === b.transparencyPct
+    a.transparencyPct === b.transparencyPct &&
+    a.recolorPreset === b.recolorPreset
   );
 }
 
