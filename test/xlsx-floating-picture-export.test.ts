@@ -10,6 +10,8 @@ import {
   unzipToMap,
   type XlsxFloatingPictureExport,
 } from "@flexsheet/import-export";
+import { REL_WORKSHEET_DRAWING } from "../packages/import-export/src/export-xlsx-drawing.js";
+import { buildZipArchive } from "../packages/import-export/src/zip-writer.js";
 
 /** 1×1 透明 PNG */
 const TINY_PNG_DATA_URL =
@@ -229,9 +231,122 @@ describe("xlsx export floating pictures", () => {
     const map = unzipToMap(
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
     );
-    const found = collectSheetFloatingPicturesFromXlsx(map, "xl/worksheets/sheet1.xml", sh, "S1", 0);
+    const found = collectSheetFloatingPicturesFromXlsx(
+      map,
+      "xl/worksheets/sheet1.xml",
+      sh,
+      "S1",
+      0,
+    );
     expect(found.length).toBe(1);
     expect(found[0]?.frameFill?.solidColor.toUpperCase()).toBe("#FDE9D9");
+  });
+
+  it("twoCellAnchor uses pic spPr xfrm absolute off/ext as frame, not from-to span", () => {
+    const EMU = 9525;
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 60, 60);
+    wb.addSheet(sh);
+    const pngB64 = TINY_PNG_DATA_URL.split(",")[1] ?? "";
+    const pngBytes = Uint8Array.from(atob(pngB64), (ch) => ch.charCodeAt(0));
+    const offX = 2 * sh.defaultColWidth * EMU;
+    const offY = 3 * sh.defaultRowHeight * EMU;
+    const cx = 100 * EMU;
+    const cy = 80 * EMU;
+    const drawingXml =
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" ` +
+      `xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">` +
+      `<xdr:twoCellAnchor>` +
+      `<xdr:from><xdr:col>0</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>` +
+      `<xdr:to><xdr:col>25</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>50</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+      `<xdr:pic>` +
+      `<xdr:nvPicPr><xdr:cNvPr id="1" name="P"/>` +
+      `<xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>` +
+      `<xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="rId1"/>` +
+      `<a:stretch/></xdr:blipFill>` +
+      `<xdr:spPr><a:xfrm><a:off x="${offX}" y="${offY}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>` +
+      `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></xdr:spPr>` +
+      `</xdr:pic><xdr:clientData/></xdr:twoCellAnchor></xdr:wsDr>`;
+    const relsXml =
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image0.png"/>` +
+      `</Relationships>`;
+    const sheetRels =
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+      `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+      `<Relationship Id="rId1" Type="${REL_WORKSHEET_DRAWING}" Target="../drawings/drawing1.xml"/>` +
+      `</Relationships>`;
+    const files = new Map<string, Uint8Array>([
+      ["xl/drawings/drawing1.xml", new TextEncoder().encode(drawingXml)],
+      ["xl/drawings/_rels/drawing1.xml.rels", new TextEncoder().encode(relsXml)],
+      ["xl/worksheets/_rels/sheet1.xml.rels", new TextEncoder().encode(sheetRels)],
+      ["xl/media/image0.png", pngBytes],
+    ]);
+    const pics = collectSheetFloatingPicturesFromXlsx(files, "xl/worksheets/sheet1.xml", sh, "S1", 0);
+    expect(pics.length).toBe(1);
+    const p = pics[0]!;
+    expect(p.width).toBeCloseTo(100, 2);
+    expect(p.height).toBeCloseTo(80, 2);
+    expect(p.imgBoxX).toBeCloseTo(0, 3);
+    expect(p.imgBoxY).toBeCloseTo(0, 3);
+    expect(p.imgBoxW).toBeCloseTo(100, 2);
+    expect(p.imgBoxH).toBeCloseTo(80, 2);
+  });
+
+  it("import honors spPr xfrm inner rect smaller than anchor (fill margins)", async () => {
+    const EMU = 9525;
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 12, 12);
+    wb.addSheet(sh);
+    const pic: XlsxFloatingPictureExport = {
+      sheetName: sh.name,
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      width: 64,
+      height: 64,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+    };
+    const bytes = exportWorkbookToXlsxBytes(wb, {
+      includeStyles: true,
+      includeFormulas: true,
+      includeSparseStyledEmpty: true,
+      viewZoom: 1,
+      floatingPictures: [pic],
+    });
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const drawPath = "xl/drawings/drawing1.xml";
+    const drawXml0 = new TextDecoder().decode(map.get(drawPath)!);
+    const outer = 64 * EMU;
+    const margin = 10 * EMU;
+    const inner = 32 * EMU;
+    const oldXfrm = `<a:off x="0" y="0"/><a:ext cx="${outer}" cy="${outer}"/>`;
+    const newXfrm = `<a:off x="${margin}" y="${margin}"/><a:ext cx="${inner}" cy="${inner}"/>`;
+    expect(drawXml0).toContain(oldXfrm);
+    const drawXml1 = drawXml0.replace(oldXfrm, newXfrm);
+    const next = new Map(map);
+    next.set(drawPath, new TextEncoder().encode(drawXml1));
+    const entries = [...next.entries()].map(([path, data]) => ({ path, data }));
+    const patched = buildZipArchive(entries);
+    const result = await importXlsx(
+      new Blob([patched], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      }),
+    );
+    expect(result.floatingPictures.length).toBe(1);
+    const p = result.floatingPictures[0]!;
+    expect(p.width).toBeCloseTo(64, 3);
+    expect(p.height).toBeCloseTo(64, 3);
+    expect(p.imgBoxX).toBeCloseTo(10, 3);
+    expect(p.imgBoxY).toBeCloseTo(10, 3);
+    expect(p.imgBoxW).toBeCloseTo(32, 3);
+    expect(p.imgBoxH).toBeCloseTo(32, 3);
   });
 
   it("importXlsx restores floating picture and solid frame fill from export", async () => {

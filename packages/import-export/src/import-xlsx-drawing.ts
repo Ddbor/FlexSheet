@@ -167,6 +167,52 @@ function sheetDistToPx(
   return { x, y };
 }
 
+/** 工作表水平方向：自左端起累计列宽（px→EMU），将绝对 x 坐标（EMU）换为逻辑 px（与 `sheetDistToPx` 一致）。 */
+function sheetAbsEmuToPxX(sheet: Worksheet, xEmu: number): number {
+  if (!Number.isFinite(xEmu)) {
+    return 0;
+  }
+  if (xEmu <= 0) {
+    return 0;
+  }
+  let remaining = xEmu;
+  let xPx = 0;
+  const lastCol = Math.max(0, sheet.colCount - 1);
+  for (let c = 0; c <= lastCol; c++) {
+    const wPx = sheet.getColWidth(c);
+    const wEmu = wPx * EMU_PER_PX;
+    if (remaining < wEmu || c === lastCol) {
+      return xPx + remaining / EMU_PER_PX;
+    }
+    remaining -= wEmu;
+    xPx += wPx;
+  }
+  return xPx + remaining / EMU_PER_PX;
+}
+
+/** 工作表垂直方向：自顶端起累计行高，将绝对 y 坐标（EMU）换为逻辑 px。 */
+function sheetAbsEmuToPxY(sheet: Worksheet, yEmu: number): number {
+  if (!Number.isFinite(yEmu)) {
+    return 0;
+  }
+  if (yEmu <= 0) {
+    return 0;
+  }
+  let remaining = yEmu;
+  let yPx = 0;
+  const lastRow = Math.max(0, sheet.rowCount - 1);
+  for (let r = 0; r <= lastRow; r++) {
+    const hPx = sheet.getRowHeight(r);
+    const hEmu = hPx * EMU_PER_PX;
+    if (remaining < hEmu || r === lastRow) {
+      return yPx + remaining / EMU_PER_PX;
+    }
+    remaining -= hEmu;
+    yPx += hPx;
+  }
+  return yPx + remaining / EMU_PER_PX;
+}
+
 function parseGridPos(el: Element): { col: number; colOff: number; row: number; rowOff: number } {
   const col = Math.max(0, Math.trunc(Number(firstLocal(el, "col")?.textContent ?? "0")));
   const colOff = Math.max(0, Math.trunc(Number(firstLocal(el, "colOff")?.textContent ?? "0")));
@@ -213,7 +259,9 @@ function parseGeomTwoCell(
   return { left, top, w, h };
 }
 
-function parseGeomAbsolute(anchor: Element): { left: number; top: number; w: number; h: number } | null {
+function parseGeomAbsolute(
+  anchor: Element,
+): { left: number; top: number; w: number; h: number } | null {
   const pos = firstLocal(anchor, "pos");
   const ext = firstLocal(anchor, "ext");
   if (pos === undefined || ext === undefined) {
@@ -234,7 +282,48 @@ function parseGeomAbsolute(anchor: Element): { left: number; top: number; w: num
   };
 }
 
-function sheetPxToTopLeftCell(sheet: Worksheet, xPx: number, yPx: number): { col: number; row: number } {
+/**
+ * `twoCellAnchor`：宿主用 `from`/`to` 表示拖拽范围，可见矩形由 `pic/xdr:spPr/a:xfrm` 的绝对 EMU `off`/`ext` 给出（与 `from`/`to` 同一工作表坐标系）。
+ */
+function parsePicShapeGeomTwoCellFromSpPr(
+  sheet: Worksheet,
+  spPr: Element | undefined,
+): { left: number; top: number; w: number; h: number } | null {
+  if (spPr === undefined) {
+    return null;
+  }
+  const xfrm = firstLocal(spPr, "xfrm");
+  if (xfrm === undefined) {
+    return null;
+  }
+  const offEl = firstLocal(xfrm, "off");
+  const extEl = firstLocal(xfrm, "ext");
+  if (offEl === undefined || extEl === undefined) {
+    return null;
+  }
+  const cx = Number(extEl.getAttribute("cx") ?? "0");
+  const cy = Number(extEl.getAttribute("cy") ?? "0");
+  if (!Number.isFinite(cx) || !Number.isFinite(cy) || cx <= 0 || cy <= 0) {
+    return null;
+  }
+  const ox = Number(offEl.getAttribute("x") ?? "0");
+  const oy = Number(offEl.getAttribute("y") ?? "0");
+  if (!Number.isFinite(ox) || !Number.isFinite(oy)) {
+    return null;
+  }
+  return {
+    left: sheetAbsEmuToPxX(sheet, ox),
+    top: sheetAbsEmuToPxY(sheet, oy),
+    w: cx / EMU_PER_PX,
+    h: cy / EMU_PER_PX,
+  };
+}
+
+function sheetPxToTopLeftCell(
+  sheet: Worksheet,
+  xPx: number,
+  yPx: number,
+): { col: number; row: number } {
   const x0 = Math.max(0, xPx);
   const y0 = Math.max(0, yPx);
   let x = x0;
@@ -262,23 +351,23 @@ function sheetPxToTopLeftCell(sheet: Worksheet, xPx: number, yPx: number): { col
   return { col, row };
 }
 
-function parseOoxmlPercentAttr(raw: string | null): number {
+/**
+ * DrawingML `CT_RelativeRect`（如 `a:srcRect`）侧：`ST_Percentage` 可为 `n%` 或整数（100000=100%，可负，见 ECMA-376）。
+ */
+function parseOoxmlRelativeRectRatio(raw: string | null): number {
   if (raw === null || raw === "") {
     return 0;
   }
   const t = raw.trim();
   if (t.endsWith("%")) {
     const n = Number(t.slice(0, -1));
-    return Number.isFinite(n) ? Math.min(1, Math.max(0, n / 100)) : 0;
+    return Number.isFinite(n) ? n / 100 : 0;
   }
   const n = Number(t);
   if (!Number.isFinite(n)) {
     return 0;
   }
-  if (n > 1 && n <= 100000) {
-    return Math.min(1, Math.max(0, n / 100000));
-  }
-  return Math.min(1, Math.max(0, n));
+  return n / 100000;
 }
 
 function sniffImageMime(bytes: Uint8Array): "image/png" | "image/jpeg" | null {
@@ -344,11 +433,116 @@ function readJpegDimensions(bytes: Uint8Array): { w: number; h: number } | null 
   return null;
 }
 
-function readImageDimensions(bytes: Uint8Array, mime: "image/png" | "image/jpeg"): { w: number; h: number } {
+function readImageDimensions(
+  bytes: Uint8Array,
+  mime: "image/png" | "image/jpeg",
+): { w: number; h: number } {
   if (mime === "image/png") {
     return readPngDimensions(bytes) ?? { w: 0, h: 0 };
   }
   return readJpegDimensions(bytes) ?? { w: 0, h: 0 };
+}
+
+/**
+ * `xdr:pic/xdr:spPr/a:xfrm` 内嵌矩形：Excel 用锚点 `xdr:ext` 表示外框（含填充边距），
+ * 用 `a:off`/`a:ext` 表示位图拉伸目标区；缺省则与锚点同大、偏移 0。
+ */
+function parsePicSpPrInnerDestPx(
+  spPr: Element | undefined,
+  anchorW: number,
+  anchorH: number,
+): { offX: number; offY: number; destW: number; destH: number } {
+  let offX = 0;
+  let offY = 0;
+  let destW = anchorW;
+  let destH = anchorH;
+  if (spPr === undefined) {
+    return { offX, offY, destW, destH };
+  }
+  const xfrm = firstLocal(spPr, "xfrm");
+  if (xfrm === undefined) {
+    return { offX, offY, destW, destH };
+  }
+  const offEl = firstLocal(xfrm, "off");
+  if (offEl !== undefined) {
+    const ox = Number(offEl.getAttribute("x") ?? "0");
+    const oy = Number(offEl.getAttribute("y") ?? "0");
+    if (Number.isFinite(ox)) {
+      offX = ox / EMU_PER_PX;
+    }
+    if (Number.isFinite(oy)) {
+      offY = oy / EMU_PER_PX;
+    }
+  }
+  const extEl = firstLocal(xfrm, "ext");
+  if (extEl !== undefined) {
+    const icx = Number(extEl.getAttribute("cx") ?? "0");
+    const icy = Number(extEl.getAttribute("cy") ?? "0");
+    if (Number.isFinite(icx) && icx > 0) {
+      destW = icx / EMU_PER_PX;
+    }
+    if (Number.isFinite(icy) && icy > 0) {
+      destH = icy / EMU_PER_PX;
+    }
+  }
+  destW = Math.max(1e-6, destW);
+  destH = Math.max(1e-6, destH);
+  return { offX, offY, destW, destH };
+}
+
+/** Office 默认主题基色（6 位 hex，无 `#`）；`schemeClr` 无 sRGB 时的兜底。 */
+const DEFAULT_OFFICE_SCHEME_SRGB: Readonly<Record<string, string>> = {
+  dk1: "000000",
+  lt1: "FFFFFF",
+  dk2: "44546A",
+  lt2: "E7E6E6",
+  accent1: "4472C4",
+  accent2: "ED7D31",
+  accent3: "A5A5A5",
+  accent4: "FFC000",
+  accent5: "5B9BD5",
+  accent6: "70AD47",
+  hlink: "0563C1",
+  folHlink: "954F72",
+  tx1: "000000",
+  tx2: "44546A",
+  bg1: "FFFFFF",
+  bg2: "E7E6E6",
+};
+
+function solidFillFromHexAttrParent(
+  hexRaw: string,
+  alphaParent: Element,
+): XlsxFloatingPictureFrameFill | undefined {
+  const digits = hexRaw.replace(/^#/, "").toUpperCase();
+  if (digits.length !== 6) {
+    return undefined;
+  }
+  const hex = `#${digits}`;
+  const alphaEl = firstLocal(alphaParent, "alpha");
+  const alphaVal = Number(alphaEl?.getAttribute("val") ?? "100000");
+  const op = Number.isFinite(alphaVal) ? Math.min(1, Math.max(0, alphaVal / 100000)) : 1;
+  const solidTransparencyPct = Math.round((1 - op) * 100);
+  return { kind: "solid", solidColor: hex, solidTransparencyPct };
+}
+
+function solidFillFromSrgbElement(srgb: Element): XlsxFloatingPictureFrameFill | undefined {
+  const raw = srgb.getAttribute("val");
+  if (raw === null || raw === "") {
+    return undefined;
+  }
+  return solidFillFromHexAttrParent(raw, srgb);
+}
+
+function resolveSchemeClrBaseHex(schemeVal: string | null): string | undefined {
+  if (schemeVal === null || schemeVal === "") {
+    return undefined;
+  }
+  const k = schemeVal.trim().toLowerCase();
+  if (k === "phclr") {
+    return undefined;
+  }
+  return DEFAULT_OFFICE_SCHEME_SRGB[k];
 }
 
 function bytesToDataUrl(bytes: Uint8Array, mime: "image/png" | "image/jpeg"): string {
@@ -375,24 +569,30 @@ function parseSpPrSolidFill(spPr: Element): XlsxFloatingPictureFrameFill | undef
     return undefined;
   }
   const srgb = firstLocal(solid, "srgbClr");
-  if (srgb === undefined) {
-    return undefined;
+  if (srgb !== undefined) {
+    return solidFillFromSrgbElement(srgb);
   }
-  const val = srgb.getAttribute("val");
-  if (val === null || val === "") {
-    return undefined;
+  const sysClr = firstLocal(solid, "sysClr");
+  if (sysClr !== undefined) {
+    const last = sysClr.getAttribute("lastClr");
+    if (last !== null && last.replace(/^#/, "").length >= 6) {
+      return solidFillFromHexAttrParent(last, sysClr);
+    }
   }
-  const hex = val.length === 6 ? `#${val.toUpperCase()}` : `#${val.toUpperCase()}`;
-  const alphaEl = firstLocal(srgb, "alpha");
-  const alphaVal = Number(alphaEl?.getAttribute("val") ?? "100000");
-  const op = Number.isFinite(alphaVal) ? Math.min(1, Math.max(0, alphaVal / 100000)) : 1;
-  const solidTransparencyPct = Math.round((1 - op) * 100);
-  return { kind: "solid", solidColor: hex, solidTransparencyPct };
+  const scheme = firstLocal(solid, "schemeClr");
+  if (scheme !== undefined) {
+    const base = resolveSchemeClrBaseHex(scheme.getAttribute("val"));
+    if (base !== undefined) {
+      return solidFillFromHexAttrParent(base, scheme);
+    }
+  }
+  return undefined;
 }
 
 function tryParsePicture(
   picEl: Element,
-  geom: { left: number; top: number; w: number; h: number },
+  anchorKind: string,
+  anchorGeom: { left: number; top: number; w: number; h: number },
   embedIdToTarget: Map<string, string>,
   drawingBasePath: string,
   files: ReadonlyMap<string, Uint8Array>,
@@ -431,16 +631,47 @@ function tryParsePicture(
   const dataUrl = bytesToDataUrl(bytes, mime);
   const { w: nw, h: nh } = readImageDimensions(bytes, mime);
 
+  const spPr = firstLocal(picEl, "spPr");
+  let geom: { left: number; top: number; w: number; h: number };
+  let offX: number;
+  let offY: number;
+  let destW: number;
+  let destH: number;
+  if (anchorKind === "twoCellAnchor") {
+    const g2 = parsePicShapeGeomTwoCellFromSpPr(sheet, spPr);
+    if (g2 !== null) {
+      geom = g2;
+      offX = 0;
+      offY = 0;
+      destW = geom.w;
+      destH = geom.h;
+    } else {
+      geom = anchorGeom;
+      const inner = parsePicSpPrInnerDestPx(spPr, geom.w, geom.h);
+      offX = inner.offX;
+      offY = inner.offY;
+      destW = inner.destW;
+      destH = inner.destH;
+    }
+  } else {
+    geom = anchorGeom;
+    const inner = parsePicSpPrInnerDestPx(spPr, geom.w, geom.h);
+    offX = inner.offX;
+    offY = inner.offY;
+    destW = inner.destW;
+    destH = inner.destH;
+  }
+
   const srcRect = firstLocal(blipFill, "srcRect");
-  let imgBoxX = 0;
-  let imgBoxY = 0;
-  let imgBoxW = geom.w;
-  let imgBoxH = geom.h;
+  let imgBoxX = offX;
+  let imgBoxY = offY;
+  let imgBoxW = destW;
+  let imgBoxH = destH;
   if (srcRect !== undefined && nw > 0 && nh > 0) {
-    const fl = parseOoxmlPercentAttr(srcRect.getAttribute("l"));
-    const ft = parseOoxmlPercentAttr(srcRect.getAttribute("t"));
-    const fr = parseOoxmlPercentAttr(srcRect.getAttribute("r"));
-    const fb = parseOoxmlPercentAttr(srcRect.getAttribute("b"));
+    const fl = parseOoxmlRelativeRectRatio(srcRect.getAttribute("l"));
+    const ft = parseOoxmlRelativeRectRatio(srcRect.getAttribute("t"));
+    const fr = parseOoxmlRelativeRectRatio(srcRect.getAttribute("r"));
+    const fb = parseOoxmlRelativeRectRatio(srcRect.getAttribute("b"));
     const u0 = fl * nw;
     const u1 = (1 - fr) * nw;
     const v0 = ft * nh;
@@ -448,19 +679,19 @@ function tryParsePicture(
     const du = u1 - u0;
     const dv = v1 - v0;
     if (du > 1e-6 && dv > 1e-6) {
-      imgBoxW = (geom.w * nw) / du;
-      imgBoxH = (geom.h * nh) / dv;
-      imgBoxX = (-u0 * geom.w) / du;
-      imgBoxY = (-v0 * geom.h) / dv;
+      imgBoxW = (destW * nw) / du;
+      imgBoxH = (destH * nh) / dv;
+      imgBoxX = offX + (-u0 * destW) / du;
+      imgBoxY = offY + (-v0 * destH) / dv;
     }
   }
 
-  const spPr = firstLocal(picEl, "spPr");
   const frameFill = spPr !== undefined ? parseSpPrSolidFill(spPr) : undefined;
 
   const xfrm = spPr !== undefined ? firstLocal(spPr, "xfrm") : undefined;
   const rotAttr = xfrm?.getAttribute("rot");
-  const rot60000 = rotAttr !== null && rotAttr !== undefined && rotAttr !== "" ? Number(rotAttr) : 0;
+  const rot60000 =
+    rotAttr !== null && rotAttr !== undefined && rotAttr !== "" ? Number(rotAttr) : 0;
   const rotationRad =
     Number.isFinite(rot60000) && rot60000 !== 0 ? (rot60000 / 60000) * (Math.PI / 180) : 0;
 
@@ -507,6 +738,7 @@ function walkElementSubtree(root: Element, visit: (el: Element) => void): void {
 
 function collectPicturesUnder(
   anchorRoot: Element,
+  anchorKind: string,
   geom: { left: number; top: number; w: number; h: number },
   embedIdToTarget: Map<string, string>,
   drawingBasePath: string,
@@ -520,7 +752,17 @@ function collectPicturesUnder(
     if (el.localName.toLowerCase() !== "pic") {
       return;
     }
-    const pic = tryParsePicture(el, geom, embedIdToTarget, drawingBasePath, files, sheet, sheetName, sheetIndex);
+    const pic = tryParsePicture(
+      el,
+      anchorKind,
+      geom,
+      embedIdToTarget,
+      drawingBasePath,
+      files,
+      sheet,
+      sheetName,
+      sheetIndex,
+    );
     if (pic !== null) {
       out.push(pic);
     }
@@ -552,7 +794,18 @@ function parseDrawingRoot(
     if (geom === null) {
       continue;
     }
-    collectPicturesUnder(anchor, geom, embedIdToTarget, drawingBasePath, files, sheet, sheetName, sheetIndex, out);
+    collectPicturesUnder(
+      anchor,
+      ln,
+      geom,
+      embedIdToTarget,
+      drawingBasePath,
+      files,
+      sheet,
+      sheetName,
+      sheetIndex,
+      out,
+    );
   }
 }
 
@@ -593,7 +846,16 @@ export function collectSheetFloatingPicturesFromXlsx(
       continue;
     }
     if (root.localName === "wsDr" || root.localName.toLowerCase() === "wsdr") {
-      parseDrawingRoot(root, embedIdToTarget, drawingPath, files, sheet, sheetName, sheetIndex, out);
+      parseDrawingRoot(
+        root,
+        embedIdToTarget,
+        drawingPath,
+        files,
+        sheet,
+        sheetName,
+        sheetIndex,
+        out,
+      );
     }
   }
   return out;
