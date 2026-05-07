@@ -1,13 +1,28 @@
 import type { Workbook, Worksheet } from "@flexsheet/core";
 import { escapeXml } from "./xml-escape.js";
 
-/** 与 FlexSheet「图片格式 → 填充」一致；仅 `solid` 参与 XLSX 导出。 */
+/** 与 FlexSheet「图片格式 → 渐变光圈」一致。 */
+export interface XlsxFloatingPictureGradientStop {
+  readonly positionPct: number;
+  readonly color: string;
+  readonly transparencyPct: number;
+  readonly brightnessPct: number;
+}
+
+/** 与 FlexSheet「图片格式 → 填充」一致；`solid` / 线性 `gradient` 写入 XLSX `spPr`。 */
 export interface XlsxFloatingPictureFrameFill {
   readonly kind: "none" | "solid" | "gradient" | "picture" | "pattern";
-  /** `solid` 时 `#rrggbb` */
+  /** `solid` / 非渐变占位 `#rrggbb` */
   readonly solidColor: string;
   /** 纯色填充透明度 0～100（100 为全透明） */
   readonly solidTransparencyPct: number;
+  readonly gradientType?: "linear" | "radial" | "rectangular" | "path";
+  /** 用户角度：0° 左→右，90° 上→下，顺时针；仅线性渐变导出 `a:lin`。 */
+  readonly gradientAngleDeg?: number;
+  readonly linearDirectionIndex?: number;
+  readonly gradientStops?: readonly XlsxFloatingPictureGradientStop[];
+  readonly gradientRotateWithShape?: boolean;
+  readonly gradientPresetId?: number | null;
 }
 
 /** 浮动图片导出描述（与 FlexSheet 浮动层模型一致；尺寸与偏移为画布 CSS 像素，需配合 `viewZoom`）。 */
@@ -188,6 +203,8 @@ function normalizeSolidColorHexForExport(input: string): string | null {
   return null;
 }
 
+const OOXML_ANGLE_FULL_CIRCLE = 360 * 60000;
+
 /**
  * `xdr:pic` / `a:spPr` 下纯色底（Excel 在几何区背后绘制；与 FlexSheet `frameFill` 对齐）。
  * `CT_PositiveFixedPercentage`：100000 = 100% 不透明度。
@@ -207,6 +224,111 @@ function buildPicSpPrSolidFillXml(fill: XlsxFloatingPictureFrameFill | undefined
   const alphaVal = Math.round(op * 100000);
   const alphaXml = alphaVal >= 100000 ? "" : `<a:alpha val="${alphaVal}"/>`;
   return `<a:solidFill><a:srgbClr val="${val}">${alphaXml}</a:srgbClr></a:solidFill>`;
+}
+
+function normalizeGradientStopsForExport(
+  stops: readonly XlsxFloatingPictureGradientStop[] | undefined,
+): XlsxFloatingPictureGradientStop[] {
+  const raw =
+    stops !== undefined && stops.length > 0
+      ? stops.map((s) => ({
+          positionPct: Math.min(100, Math.max(0, s.positionPct)),
+          color: s.color,
+          transparencyPct: Math.min(100, Math.max(0, s.transparencyPct)),
+          brightnessPct: Math.min(100, Math.max(-100, s.brightnessPct)),
+        }))
+      : [
+          { positionPct: 0, color: "#5b9bd5", transparencyPct: 0, brightnessPct: 0 },
+          { positionPct: 100, color: "#ffffff", transparencyPct: 0, brightnessPct: 0 },
+        ];
+  raw.sort((a, b) => a.positionPct - b.positionPct);
+  if (raw.length < 2) {
+    const one = raw[0] ?? {
+      positionPct: 0,
+      color: "#5b9bd5",
+      transparencyPct: 0,
+      brightnessPct: 0,
+    };
+    return [
+      { ...one, positionPct: 0 },
+      { ...one, positionPct: 100, color: "#ffffff", transparencyPct: 0, brightnessPct: 0 },
+    ];
+  }
+  return raw;
+}
+
+function stopToSrgbForOoxml(
+  s: XlsxFloatingPictureGradientStop,
+): { hex: string; alphaVal: number } | null {
+  const hex = normalizeSolidColorHexForExport(s.color);
+  if (hex === null) {
+    return null;
+  }
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  if (![r, g, b].every((x) => Number.isFinite(x))) {
+    return null;
+  }
+  const br = clamp01(1 + s.brightnessPct / 100);
+  const r2 = Math.min(255, Math.max(0, Math.round(r * br)));
+  const g2 = Math.min(255, Math.max(0, Math.round(g * br)));
+  const b2 = Math.min(255, Math.max(0, Math.round(b * br)));
+  const op = clamp01(1 - s.transparencyPct / 100);
+  const alphaVal = Math.round(op * 100000);
+  const hexOut = `${r2.toString(16).padStart(2, "0")}${g2.toString(16).padStart(2, "0")}${b2
+    .toString(16)
+    .padStart(2, "0")}`.toUpperCase();
+  return { hex: hexOut, alphaVal };
+}
+
+/**
+ * 线性渐变：`a:gradFill` + `a:lin`（与 Excel / SpreadJS 导出一致，`scaled=1`，`tileRect` 全 0）。
+ */
+function buildPicSpPrLinearGradientFillXml(fill: XlsxFloatingPictureFrameFill | undefined): string {
+  if (fill === undefined || fill.kind !== "gradient") {
+    return "";
+  }
+  /** Excel 图片 `spPr` 仅稳定互操作线性 `a:lin`；径向等在宿主中为近似，导出为线性（角度默认 90°）。 */
+  const userDeg = fill.gradientAngleDeg !== undefined ? fill.gradientAngleDeg : 90;
+  const u = ((userDeg % 360) + 360) % 360;
+  let ang = Math.round(u * 60000) % OOXML_ANGLE_FULL_CIRCLE;
+  if (ang < 0) {
+    ang += OOXML_ANGLE_FULL_CIRCLE;
+  }
+  const rotWs = fill.gradientRotateWithShape !== false ? "1" : "0";
+  const stops = normalizeGradientStopsForExport(fill.gradientStops);
+  const gsParts: string[] = [];
+  for (const s of stops) {
+    const conv = stopToSrgbForOoxml(s);
+    if (conv === null) {
+      continue;
+    }
+    const pos = Math.min(100000, Math.max(0, Math.round(s.positionPct * 1000)));
+    const alphaXml = conv.alphaVal >= 100000 ? "" : `<a:alpha val="${conv.alphaVal}"/>`;
+    gsParts.push(`<a:gs pos="${pos}"><a:srgbClr val="${conv.hex}">${alphaXml}</a:srgbClr></a:gs>`);
+  }
+  if (gsParts.length < 2) {
+    return "";
+  }
+  return (
+    `<a:gradFill rotWithShape="${rotWs}">` +
+    `<a:gsLst>${gsParts.join("")}</a:gsLst>` +
+    `<a:lin ang="${ang}" scaled="1"/>` +
+    `<a:tileRect l="0" t="0" r="0" b="0"/>` +
+    `</a:gradFill>`
+  );
+}
+
+function buildPicSpPrFillXml(fill: XlsxFloatingPictureFrameFill | undefined): string {
+  if (fill === undefined) {
+    return "";
+  }
+  if (fill.kind === "gradient") {
+    const g = buildPicSpPrLinearGradientFillXml(fill);
+    return g !== "" ? g : "";
+  }
+  return buildPicSpPrSolidFillXml(fill);
 }
 
 /** OOXML `CT_RelativeRect`：从各边裁掉的占比（ST_Percentage，如 `"12.5%"`）。 */
@@ -324,9 +446,7 @@ function picHasImgBoxMargins(pic: XlsxFloatingPictureExport, viewZoom: number): 
   const ibw = (pic.imgBoxW ?? pic.width) / z;
   const ibh = (pic.imgBoxH ?? pic.height) / z;
   const eps = 1e-3;
-  return (
-    ibx > eps || iby > eps || W - ibx - ibw > eps || H - iby - ibh > eps
-  );
+  return ibx > eps || iby > eps || W - ibx - ibw > eps || H - iby - ibh > eps;
 }
 
 /**
@@ -383,7 +503,7 @@ function buildOnePictureAnchorXml(
   const rot = rotationToOoxmlRot60000(pic.rotationRad);
   const rotAttr = rot === 0 ? "" : ` rot="${rot}"`;
   const { srcRectXml, stretchXml } = buildBlipSrcRectAndStretchXml(pic, viewZoom);
-  const spPrFillXml = buildPicSpPrSolidFillXml(pic.frameFill);
+  const spPrFillXml = buildPicSpPrFillXml(pic.frameFill);
   /**
    * Excel 将 `solidFill` 铺在 `spPr/a:xfrm` 的整个几何上；`xfrm` 与锚点外框同大。
    * 框内图片几何用 `blipFill/srcRect`（整数分度，见 SpreadJS），勿用 `stretch/fillRect` 以免裁剪模式错乱。

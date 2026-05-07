@@ -73,7 +73,11 @@ export {
   type MountGridVerticalScrollbarOptions,
 } from "./chrome/grid-vertical-scrollbar.js";
 
-export { UndoRedoPlugin, useUndoRedo, type UndoRedoPluginOptions } from "./plugins/undo-redo-plugin.js";
+export {
+  UndoRedoPlugin,
+  useUndoRedo,
+  type UndoRedoPluginOptions,
+} from "./plugins/undo-redo-plugin.js";
 
 export {
   CONTEXT_MENU_SCOPE,
@@ -88,7 +92,11 @@ export {
   type SheetChromeGuardPluginOptions,
 } from "./plugins/sheet-chrome-guard-plugin.js";
 
-export { ClipboardPlugin, useClipboard, type ClipboardPluginOptions } from "./plugins/clipboard-plugin.js";
+export {
+  ClipboardPlugin,
+  useClipboard,
+  type ClipboardPluginOptions,
+} from "./plugins/clipboard-plugin.js";
 
 export {
   CutClearRegionCommand,
@@ -119,7 +127,10 @@ export {
   ApplySelectionIndentStepCommand,
 } from "./commands/cell-style-commands.js";
 
-export type { FormatCellsBorderState, FormatCellsLineSwatchId } from "./format-cells/format-cells-border.js";
+export type {
+  FormatCellsBorderState,
+  FormatCellsLineSwatchId,
+} from "./format-cells/format-cells-border.js";
 
 export {
   createDefaultDarkTheme,
@@ -190,6 +201,7 @@ export {
   type XlsxExportOptions,
   type XlsxFloatingPictureExport,
   type XlsxFloatingPictureFrameFill,
+  type XlsxFloatingPictureGradientStop,
   parseFlexSheetJson,
   serializeWorkbookToJsonDocument,
   workbookFromFlexSheetJsonDocument,

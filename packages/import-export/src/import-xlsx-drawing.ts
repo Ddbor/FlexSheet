@@ -1,8 +1,34 @@
 import type { Worksheet } from "@flexsheet/core";
-import { REL_WORKSHEET_DRAWING, type XlsxFloatingPictureFrameFill } from "./export-xlsx-drawing.js";
+import {
+  REL_WORKSHEET_DRAWING,
+  type XlsxFloatingPictureFrameFill,
+  type XlsxFloatingPictureGradientStop,
+} from "./export-xlsx-drawing.js";
 
 const EMU_PER_PX = 9525;
 const REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+const REL_WORKBOOK_THEME =
+  "http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme";
+
+/** Office 默认主题基色（6 位 hex，无 `#`）；`schemeClr` 无主题 part 时的兜底。 */
+const DEFAULT_OFFICE_SCHEME_SRGB: Readonly<Record<string, string>> = {
+  dk1: "000000",
+  lt1: "FFFFFF",
+  dk2: "44546A",
+  lt2: "E7E6E6",
+  accent1: "4472C4",
+  accent2: "ED7D31",
+  accent3: "A5A5A5",
+  accent4: "FFC000",
+  accent5: "5B9BD5",
+  accent6: "70AD47",
+  hlink: "0563C1",
+  folHlink: "954F72",
+  tx1: "000000",
+  tx2: "44546A",
+  bg1: "FFFFFF",
+  bg2: "E7E6E6",
+};
 
 /** 自 XLSX 工作表绘图解析出的浮动图（几何为工作表逻辑像素，加载 FlexSheet 时再乘 `viewZoom`）。 */
 export interface XlsxImportedFloatingPicture {
@@ -120,6 +146,321 @@ function parseDrawingRelsIdToTarget(relsXml: string): Map<string, string> {
     }
   }
   return map;
+}
+
+/**
+ * 自 `xl/theme/theme1.xml` 解析 `clrScheme`（accent1…），供绘图 `schemeClr` + 变换与渐变导入。
+ */
+export function parseWorkbookThemeSchemeColors(
+  files: ReadonlyMap<string, Uint8Array>,
+): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  const relsBytes = files.get("xl/_rels/workbook.xml.rels");
+  if (relsBytes === undefined) {
+    return out;
+  }
+  const relsText = new TextDecoder("utf-8").decode(relsBytes);
+  const themeTargets = findRelTargetsByType(relsText, REL_WORKBOOK_THEME);
+  const themeTarget = themeTargets[0];
+  if (themeTarget === undefined) {
+    return out;
+  }
+  const themePath = resolvePartTarget("xl/workbook.xml", themeTarget);
+  const themeBytes = files.get(themePath);
+  if (themeBytes === undefined) {
+    return out;
+  }
+  const doc = parseXml(new TextDecoder("utf-8").decode(themeBytes));
+  const root = doc.documentElement;
+  if (root === null) {
+    return out;
+  }
+  const themeElements = firstLocal(root, "themeElements") ?? root;
+  const clrScheme = firstLocal(themeElements, "clrScheme");
+  if (clrScheme === undefined) {
+    return out;
+  }
+  for (const child of clrScheme.children) {
+    const name = child.localName.toLowerCase();
+    const srgb = firstLocal(child, "srgbClr");
+    if (srgb !== undefined) {
+      const v = srgb.getAttribute("val");
+      if (v !== null) {
+        const digits = v.replace(/^#/, "").toUpperCase();
+        if (digits.length >= 6) {
+          out.set(name, digits.slice(0, 6));
+        }
+      }
+      continue;
+    }
+    const sysClr = firstLocal(child, "sysClr");
+    if (sysClr !== undefined) {
+      const last = sysClr.getAttribute("lastClr");
+      if (last !== null) {
+        const digits = last.replace(/^#/, "").toUpperCase();
+        if (digits.length >= 6) {
+          out.set(name, digits.slice(0, 6));
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function impClamp01(x: number): number {
+  return Math.min(1, Math.max(0, x));
+}
+
+function impRgbToHsl(r: number, g: number, b: number): { h: number; s: number; l: number } {
+  const r1 = r / 255;
+  const g1 = g / 255;
+  const b1 = b / 255;
+  const max = Math.max(r1, g1, b1);
+  const min = Math.min(r1, g1, b1);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r1:
+        h = (g1 - b1) / d + (g1 < b1 ? 6 : 0);
+        break;
+      case g1:
+        h = (b1 - r1) / d + 2;
+        break;
+      default:
+        h = (r1 - g1) / d + 4;
+    }
+    h /= 6;
+  }
+  return { h, s, l };
+}
+
+function impHslToRgb(h: number, s: number, l: number): { r: number; g: number; b: number } {
+  if (s === 0) {
+    const v = Math.round(l * 255);
+    return { r: v, g: v, b: v };
+  }
+  const hue2rgb = (p: number, q: number, t: number): number => {
+    let tt = t;
+    if (tt < 0) {
+      tt += 1;
+    }
+    if (tt > 1) {
+      tt -= 1;
+    }
+    if (tt < 1 / 6) {
+      return p + (q - p) * 6 * tt;
+    }
+    if (tt < 1 / 2) {
+      return q;
+    }
+    if (tt < 2 / 3) {
+      return p + (q - p) * (2 / 3 - tt) * 6;
+    }
+    return p;
+  };
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const rf = hue2rgb(p, q, h + 1 / 3);
+  const gf = hue2rgb(p, q, h);
+  const bf = hue2rgb(p, q, h - 1 / 3);
+  return {
+    r: Math.min(255, Math.max(0, Math.round(rf * 255))),
+    g: Math.min(255, Math.max(0, Math.round(gf * 255))),
+    b: Math.min(255, Math.max(0, Math.round(bf * 255))),
+  };
+}
+
+/** `a:gs` 下 `srgbClr` / `schemeClr` 的子变换（tint/shade/satMod/lumMod/lumOff/alpha），顺序与 OOXML 一致。 */
+function applyDrawingmlColorModifiers(
+  r: number,
+  g: number,
+  b: number,
+  a: number,
+  parent: Element,
+): { r: number; g: number; b: number; a: number } {
+  let rf = r;
+  let gf = g;
+  let bf = b;
+  let af = a;
+  for (const ch of parent.children) {
+    const ln = ch.localName;
+    const raw = ch.getAttribute("val");
+    const v = raw !== null && raw !== "" ? Number(raw) : NaN;
+    const f = Number.isFinite(v) ? v / 100000 : 1;
+    if (ln === "alpha") {
+      af *= f;
+      continue;
+    }
+    if (ln === "tint") {
+      rf = rf + (255 - rf) * f;
+      gf = gf + (255 - gf) * f;
+      bf = bf + (255 - bf) * f;
+      continue;
+    }
+    if (ln === "shade") {
+      rf *= 1 - f;
+      gf *= 1 - f;
+      bf *= 1 - f;
+      continue;
+    }
+    if (ln === "satMod" || ln === "lumMod" || ln === "lumOff") {
+      const hsl = impRgbToHsl(rf, gf, bf);
+      if (ln === "satMod") {
+        hsl.s = impClamp01(hsl.s * f);
+      }
+      if (ln === "lumMod") {
+        hsl.l = impClamp01(hsl.l * f);
+      }
+      if (ln === "lumOff") {
+        hsl.l = impClamp01(hsl.l + f);
+      }
+      const nx = impHslToRgb(hsl.h, hsl.s, hsl.l);
+      rf = nx.r;
+      gf = nx.g;
+      bf = nx.b;
+    }
+  }
+  return {
+    r: Math.min(255, Math.max(0, Math.round(rf))),
+    g: Math.min(255, Math.max(0, Math.round(gf))),
+    b: Math.min(255, Math.max(0, Math.round(bf))),
+    a: impClamp01(af),
+  };
+}
+
+function resolveSchemeClrBaseHexFromMap(
+  schemeVal: string | null,
+  schemeColors: ReadonlyMap<string, string>,
+): string | undefined {
+  if (schemeVal === null || schemeVal === "") {
+    return undefined;
+  }
+  const k = schemeVal.trim().toLowerCase();
+  if (k === "phclr") {
+    return undefined;
+  }
+  const fromTheme = schemeColors.get(k);
+  if (fromTheme !== undefined && fromTheme.length >= 6) {
+    return fromTheme.slice(0, 6).toUpperCase();
+  }
+  return DEFAULT_OFFICE_SCHEME_SRGB[k];
+}
+
+function resolveGradientStopColor(
+  el: Element,
+  schemeColors: ReadonlyMap<string, string>,
+): { r: number; g: number; b: number; a: number } | null {
+  const ln = el.localName;
+  if (ln === "srgbClr") {
+    const raw = el.getAttribute("val")?.replace(/^#/, "") ?? "";
+    if (raw.length < 6) {
+      return null;
+    }
+    const r = parseInt(raw.slice(0, 2), 16);
+    const g = parseInt(raw.slice(2, 4), 16);
+    const b = parseInt(raw.slice(4, 6), 16);
+    if (![r, g, b].every((x) => Number.isFinite(x))) {
+      return null;
+    }
+    return applyDrawingmlColorModifiers(r, g, b, 1, el);
+  }
+  if (ln === "schemeClr") {
+    const key = el.getAttribute("val")?.trim().toLowerCase() ?? "";
+    const base = resolveSchemeClrBaseHexFromMap(key, schemeColors);
+    if (base === undefined) {
+      return null;
+    }
+    const r = parseInt(base.slice(0, 2), 16);
+    const g = parseInt(base.slice(2, 4), 16);
+    const b = parseInt(base.slice(4, 6), 16);
+    if (![r, g, b].every((x) => Number.isFinite(x))) {
+      return null;
+    }
+    return applyDrawingmlColorModifiers(r, g, b, 1, el);
+  }
+  return null;
+}
+
+function parseSpPrGradientFill(
+  spPr: Element,
+  schemeColors: ReadonlyMap<string, string>,
+): XlsxFloatingPictureFrameFill | undefined {
+  const grad = firstLocal(spPr, "gradFill");
+  if (grad === undefined) {
+    return undefined;
+  }
+  const lin = firstLocal(grad, "lin");
+  if (lin === undefined) {
+    return undefined;
+  }
+  const angAttr = lin.getAttribute("ang");
+  const ang60000 = angAttr !== null && angAttr !== "" ? Number(angAttr) : 5400000;
+  const gradientAngleDeg = Number.isFinite(ang60000)
+    ? (((ang60000 / 60000) % 360) + 360) % 360
+    : 90;
+  const rot = grad.getAttribute("rotWithShape");
+  const gradientRotateWithShape = rot !== "0" && rot !== "false";
+  const gsLst = firstLocal(grad, "gsLst");
+  if (gsLst === undefined) {
+    return undefined;
+  }
+  const stops: XlsxFloatingPictureGradientStop[] = [];
+  for (const gs of childrenLocal(gsLst, "gs")) {
+    const posAttr = gs.getAttribute("pos");
+    const posRaw = posAttr !== null && posAttr !== "" ? Number(posAttr) : 0;
+    const positionPct = Number.isFinite(posRaw) ? Math.min(100, Math.max(0, posRaw / 1000)) : 0;
+    const colorEl = [...gs.children].find((c) => {
+      const n = c.localName;
+      return n === "srgbClr" || n === "schemeClr";
+    });
+    if (colorEl === undefined) {
+      continue;
+    }
+    const rgba = resolveGradientStopColor(colorEl, schemeColors);
+    if (rgba === null) {
+      continue;
+    }
+    const transparencyPct = Math.round((1 - rgba.a) * 100);
+    const hex =
+      `#${rgba.r.toString(16).padStart(2, "0")}${rgba.g.toString(16).padStart(2, "0")}${rgba.b
+        .toString(16)
+        .padStart(2, "0")}`.toLowerCase();
+    stops.push({
+      positionPct,
+      color: hex,
+      transparencyPct,
+      brightnessPct: 0,
+    });
+  }
+  if (stops.length < 2) {
+    return undefined;
+  }
+  stops.sort((a, b) => a.positionPct - b.positionPct);
+  return {
+    kind: "gradient",
+    solidColor: "#000000",
+    solidTransparencyPct: 0,
+    gradientType: "linear",
+    gradientAngleDeg,
+    gradientStops: stops,
+    gradientRotateWithShape,
+    gradientPresetId: null,
+  };
+}
+
+function parseSpPrFrameFill(
+  spPr: Element,
+  schemeColors: ReadonlyMap<string, string>,
+): XlsxFloatingPictureFrameFill | undefined {
+  const g = parseSpPrGradientFill(spPr, schemeColors);
+  if (g !== undefined) {
+    return g;
+  }
+  return parseSpPrSolidFill(spPr, schemeColors);
 }
 
 function mergedCellSheetRectPx(
@@ -521,26 +862,6 @@ function applyStretchFillRectToDest(
   return { offX: fl * outerW, offY: ft * outerH, destW: w, destH: h };
 }
 
-/** Office 默认主题基色（6 位 hex，无 `#`）；`schemeClr` 无 sRGB 时的兜底。 */
-const DEFAULT_OFFICE_SCHEME_SRGB: Readonly<Record<string, string>> = {
-  dk1: "000000",
-  lt1: "FFFFFF",
-  dk2: "44546A",
-  lt2: "E7E6E6",
-  accent1: "4472C4",
-  accent2: "ED7D31",
-  accent3: "A5A5A5",
-  accent4: "FFC000",
-  accent5: "5B9BD5",
-  accent6: "70AD47",
-  hlink: "0563C1",
-  folHlink: "954F72",
-  tx1: "000000",
-  tx2: "44546A",
-  bg1: "FFFFFF",
-  bg2: "E7E6E6",
-};
-
 function solidFillFromHexAttrParent(
   hexRaw: string,
   alphaParent: Element,
@@ -565,17 +886,6 @@ function solidFillFromSrgbElement(srgb: Element): XlsxFloatingPictureFrameFill |
   return solidFillFromHexAttrParent(raw, srgb);
 }
 
-function resolveSchemeClrBaseHex(schemeVal: string | null): string | undefined {
-  if (schemeVal === null || schemeVal === "") {
-    return undefined;
-  }
-  const k = schemeVal.trim().toLowerCase();
-  if (k === "phclr") {
-    return undefined;
-  }
-  return DEFAULT_OFFICE_SCHEME_SRGB[k];
-}
-
 function bytesToDataUrl(bytes: Uint8Array, mime: "image/png" | "image/jpeg"): string {
   if (typeof btoa === "function") {
     let binary = "";
@@ -594,7 +904,10 @@ function bytesToDataUrl(bytes: Uint8Array, mime: "image/png" | "image/jpeg"): st
   throw new Error("无法 base64 编码图片");
 }
 
-function parseSpPrSolidFill(spPr: Element): XlsxFloatingPictureFrameFill | undefined {
+function parseSpPrSolidFill(
+  spPr: Element,
+  schemeColors: ReadonlyMap<string, string>,
+): XlsxFloatingPictureFrameFill | undefined {
   const solid = firstLocal(spPr, "solidFill");
   if (solid === undefined) {
     return undefined;
@@ -612,7 +925,7 @@ function parseSpPrSolidFill(spPr: Element): XlsxFloatingPictureFrameFill | undef
   }
   const scheme = firstLocal(solid, "schemeClr");
   if (scheme !== undefined) {
-    const base = resolveSchemeClrBaseHex(scheme.getAttribute("val"));
+    const base = resolveSchemeClrBaseHexFromMap(scheme.getAttribute("val"), schemeColors);
     if (base !== undefined) {
       return solidFillFromHexAttrParent(base, scheme);
     }
@@ -630,6 +943,7 @@ function tryParsePicture(
   sheet: Worksheet,
   sheetName: string,
   sheetIndex: number,
+  themeScheme: ReadonlyMap<string, string>,
 ): XlsxImportedFloatingPicture | null {
   const blipFill = firstLocal(picEl, "blipFill");
   if (blipFill === undefined) {
@@ -709,7 +1023,7 @@ function tryParsePicture(
     }
   }
 
-  const frameFill = spPr !== undefined ? parseSpPrSolidFill(spPr) : undefined;
+  const frameFill = spPr !== undefined ? parseSpPrFrameFill(spPr, themeScheme) : undefined;
 
   const xfrm = spPr !== undefined ? firstLocal(spPr, "xfrm") : undefined;
   const rotAttr = xfrm?.getAttribute("rot");
@@ -769,6 +1083,7 @@ function collectPicturesUnder(
   sheet: Worksheet,
   sheetName: string,
   sheetIndex: number,
+  themeScheme: ReadonlyMap<string, string>,
   out: XlsxImportedFloatingPicture[],
 ): void {
   walkElementSubtree(anchorRoot, (el) => {
@@ -785,6 +1100,7 @@ function collectPicturesUnder(
       sheet,
       sheetName,
       sheetIndex,
+      themeScheme,
     );
     if (pic !== null) {
       out.push(pic);
@@ -800,6 +1116,7 @@ function parseDrawingRoot(
   sheet: Worksheet,
   sheetName: string,
   sheetIndex: number,
+  themeScheme: ReadonlyMap<string, string>,
   out: XlsxImportedFloatingPicture[],
 ): void {
   for (const anchor of root.children) {
@@ -827,13 +1144,14 @@ function parseDrawingRoot(
       sheet,
       sheetName,
       sheetIndex,
+      themeScheme,
       out,
     );
   }
 }
 
 /**
- * 从已解压的 OPC 映射中读取单张工作表的 `drawing` 关系，解析 `xdr:pic`、嵌入图与 `spPr` 纯色填充。
+ * 从已解压的 OPC 映射中读取单张工作表的 `drawing` 关系，解析 `xdr:pic`、嵌入图与 `spPr` 填充（纯色 / 线性渐变）。
  */
 export function collectSheetFloatingPicturesFromXlsx(
   files: ReadonlyMap<string, Uint8Array>,
@@ -841,6 +1159,7 @@ export function collectSheetFloatingPicturesFromXlsx(
   sheet: Worksheet,
   sheetName: string,
   sheetIndex: number,
+  themeScheme: ReadonlyMap<string, string> = new Map(),
 ): XlsxImportedFloatingPicture[] {
   const relsPath = relsPartPathFor(sheetPartPath);
   const relsBytes = files.get(relsPath);
@@ -877,6 +1196,7 @@ export function collectSheetFloatingPicturesFromXlsx(
         sheet,
         sheetName,
         sheetIndex,
+        themeScheme,
         out,
       );
     }

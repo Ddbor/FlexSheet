@@ -8,10 +8,14 @@ export {
   type XlsxExportOptions,
   type XlsxFloatingPictureExport,
   type XlsxFloatingPictureFrameFill,
+  type XlsxFloatingPictureGradientStop,
 } from "./export-xlsx.js";
 export { decodeTextFileBytes } from "./text-file-decode.js";
 export { importXlsx, importXlsxToWorkbook, type XlsxImportResult } from "./import-xlsx.js";
-export { collectSheetFloatingPicturesFromXlsx } from "./import-xlsx-drawing.js";
+export {
+  collectSheetFloatingPicturesFromXlsx,
+  parseWorkbookThemeSchemeColors,
+} from "./import-xlsx-drawing.js";
 export type {
   FlexSheetLoadWorkbookOptions,
   XlsxImportedFloatingPicture,

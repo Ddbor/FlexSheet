@@ -180,6 +180,70 @@ describe("xlsx export floating pictures", () => {
     expect(drawing).toContain('val="FDE9D9"');
   });
 
+  it("writes a:gradFill (linear) and round-trips stops and angle", () => {
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 12, 12);
+    wb.addSheet(sh);
+    const pic: XlsxFloatingPictureExport = {
+      sheetName: sh.name,
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      width: 64,
+      height: 64,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+      frameFill: {
+        kind: "gradient",
+        solidColor: "#000000",
+        solidTransparencyPct: 0,
+        gradientType: "linear",
+        gradientAngleDeg: 90,
+        gradientRotateWithShape: true,
+        gradientPresetId: null,
+        gradientStops: [
+          { positionPct: 0, color: "#ff0000", transparencyPct: 0, brightnessPct: 0 },
+          { positionPct: 100, color: "#0000ff", transparencyPct: 0, brightnessPct: 0 },
+        ],
+      },
+    };
+    const bytes = exportWorkbookToXlsxBytes(wb, {
+      includeStyles: true,
+      includeFormulas: true,
+      includeSparseStyledEmpty: true,
+      viewZoom: 1,
+      floatingPictures: [pic],
+    });
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const drawing = new TextDecoder().decode(map.get("xl/drawings/drawing1.xml")!);
+    expect(drawing).toContain("<a:gradFill");
+    expect(drawing).toContain("<a:gsLst>");
+    expect(drawing).toContain('<a:lin ang="5400000" scaled="1"/>');
+    expect(drawing).toContain('val="FF0000"');
+    expect(drawing).toContain('val="0000FF"');
+
+    const found = collectSheetFloatingPicturesFromXlsx(
+      map,
+      "xl/worksheets/sheet1.xml",
+      sh,
+      "S1",
+      0,
+    );
+    expect(found.length).toBe(1);
+    const ff = found[0]?.frameFill;
+    expect(ff?.kind).toBe("gradient");
+    if (ff?.kind !== "gradient") {
+      return;
+    }
+    expect(ff.gradientAngleDeg).toBe(90);
+    expect(ff.gradientStops?.length).toBe(2);
+    expect(ff.gradientStops?.[0]?.color.toLowerCase()).toBe("#ff0000");
+    expect(ff.gradientStops?.[1]?.color.toLowerCase()).toBe("#0000ff");
+  });
+
   it("writes drawings, media, worksheet rel and drawing element", () => {
     const wb = new Workbook();
     const sh = new Worksheet("S1", 12, 12);

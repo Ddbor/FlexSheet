@@ -13,9 +13,15 @@ import type {
 } from "@flexsheet/core";
 import { ooxmlTableStyleNameToParsed } from "@flexsheet/core";
 import { isCellFillPatternType } from "@flexsheet/core";
-import { isUnconfiguredPivotDefinition, writeUnconfiguredPivotPlaceholderToSheet } from "@flexsheet/core";
+import {
+  isUnconfiguredPivotDefinition,
+  writeUnconfiguredPivotPlaceholderToSheet,
+} from "@flexsheet/core";
 import { parseCellRef } from "./a1.js";
-import { collectSheetFloatingPicturesFromXlsx } from "./import-xlsx-drawing.js";
+import {
+  collectSheetFloatingPicturesFromXlsx,
+  parseWorkbookThemeSchemeColors,
+} from "./import-xlsx-drawing.js";
 import type { XlsxImportedFloatingPicture } from "./import-xlsx-drawing.js";
 import { unzipToMap } from "./zip-reader.js";
 import { recalcWorksheet } from "@flexsheet/formula";
@@ -259,9 +265,7 @@ function parseBorderSidesFromBorderEl(borderEl: Element): Partial<CellStyle> {
     const colorEl = firstLocal(el, "color");
     const rgb = colorEl?.getAttribute("rgb");
     const side: CellBorderSide =
-      rgb !== null && rgb !== undefined && rgb !== ""
-        ? { kind, colorArgb: rgb }
-        : { kind };
+      rgb !== null && rgb !== undefined && rgb !== "" ? { kind, colorArgb: rgb } : { kind };
     out[prop] = side;
   };
   one("left", "borderLeft");
@@ -392,8 +396,7 @@ function parseStylesTable(stylesXml: string | undefined): (CellStyle | null)[] {
   }
   const fontEls = childrenLocal(fontsEl, "font");
   const fillEls = childrenLocal(fillsEl, "fill");
-  const borderEls =
-    bordersEl !== undefined ? childrenLocal(bordersEl, "border") : [];
+  const borderEls = bordersEl !== undefined ? childrenLocal(bordersEl, "border") : [];
   const fontParts = fontEls.map((f) => parseFontStyle(f));
   const fillParts = fillEls.map((f) => parseFillStyle(f));
   const borderParts = borderEls.map((b) => parseBorderSidesFromBorderEl(b));
@@ -798,14 +801,16 @@ function relsPartPathFor(partPath: string): string {
   return normalizePartPath(`${dir}/_rels/${file}.rels`);
 }
 
-function parseRangeA1(ref: string): { startRow: number; endRow: number; startCol: number; endCol: number } | null {
+function parseRangeA1(
+  ref: string,
+): { startRow: number; endRow: number; startCol: number; endCol: number } | null {
   const raw = ref.trim();
   if (raw.length === 0) {
     return null;
   }
   const parts = raw.split(":");
   const a = parseCellRef(parts[0] ?? "");
-  const b = parseCellRef((parts[1] ?? parts[0]) ?? "");
+  const b = parseCellRef(parts[1] ?? parts[0] ?? "");
   if (a === null || b === null) {
     return null;
   }
@@ -948,7 +953,8 @@ function applyPivotImportedPresentation(
       const isHeader = r === headerRow;
       for (let c = dstRange.startCol; c <= dstRange.endCol; c++) {
         const cell = sheet.getCell(r, c);
-        const prev = cell.style !== undefined && cell.style !== null ? { ...cell.style } : ({} as CellStyle);
+        const prev =
+          cell.style !== undefined && cell.style !== null ? { ...cell.style } : ({} as CellStyle);
         if (isHeader) {
           prev.bold = true;
           prev.fillArgb = headerFill;
@@ -1109,7 +1115,8 @@ function parsePivotCacheMeta(
     return null;
   }
   const cacheSource = firstLocal(root, "cacheSource");
-  const wsSource = cacheSource !== undefined ? firstLocal(cacheSource, "worksheetSource") : undefined;
+  const wsSource =
+    cacheSource !== undefined ? firstLocal(cacheSource, "worksheetSource") : undefined;
   let sourceSheetName = wsSource?.getAttribute("sheet") ?? "";
   let sourceRef = wsSource?.getAttribute("ref") ?? "";
 
@@ -1196,7 +1203,8 @@ function parseWorksheetPivotDefinitions(
   }
 
   const pivotFieldsRoot = firstLocal(root, "pivotFields");
-  const pivotFieldEls = pivotFieldsRoot !== undefined ? childrenLocal(pivotFieldsRoot, "pivotField") : [];
+  const pivotFieldEls =
+    pivotFieldsRoot !== undefined ? childrenLocal(pivotFieldsRoot, "pivotField") : [];
   const filterSelectedKeys: (readonly string[])[] = [];
   for (const off of filterOffsets) {
     const pField = pivotFieldEls[off];
@@ -1240,7 +1248,9 @@ function parseWorksheetPivotDefinitions(
     filterOffsets.length,
   );
   const layoutStart =
-    pageFilterStart !== undefined ? Math.min(pageFilterStart, dstRange.startRow) : dstRange.startRow;
+    pageFilterStart !== undefined
+      ? Math.min(pageFilterStart, dstRange.startRow)
+      : dstRange.startRow;
   const outputRowCount = Math.max(1, dstRange.endRow - layoutStart + 1);
   const outputColCount = Math.max(1, dstRange.endCol - dstRange.startCol + 1);
 
@@ -1444,6 +1454,7 @@ export async function importXlsx(blob: Blob): Promise<XlsxImportResult> {
     }
   }
 
+  const themeScheme = parseWorkbookThemeSchemeColors(files);
   const floatingPictures: XlsxImportedFloatingPicture[] = [];
   for (const binding of importedSheetBindings) {
     const sh = out.getSheet(binding.importedIndex);
@@ -1457,6 +1468,7 @@ export async function importXlsx(blob: Blob): Promise<XlsxImportResult> {
         sh,
         binding.sheetName,
         binding.importedIndex,
+        themeScheme,
       ),
     );
   }
