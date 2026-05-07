@@ -4,6 +4,7 @@ import {
   DEFAULT_FLOATING_PICTURE_FRAME_FILL,
   type FloatingPictureAdjustments,
   type FloatingPictureFrameFill,
+  type FloatingPictureGradientStop,
   type FloatingPictureSnapshot,
 } from "../chrome/floating-picture-layer.js";
 
@@ -27,11 +28,45 @@ function snapshotFrameFill(s: FloatingPictureSnapshot): FloatingPictureFrameFill
   return s.frameFill ?? DEFAULT_FLOATING_PICTURE_FRAME_FILL;
 }
 
+function gradientStopsEqual(
+  x: readonly FloatingPictureGradientStop[] | undefined,
+  y: readonly FloatingPictureGradientStop[] | undefined,
+): boolean {
+  if (x === undefined && y === undefined) {
+    return true;
+  }
+  if (x === undefined || y === undefined || x.length !== y.length) {
+    return false;
+  }
+  for (let i = 0; i < x.length; i++) {
+    const p = x[i]!;
+    const q = y[i]!;
+    if (
+      p.positionPct !== q.positionPct ||
+      p.color !== q.color ||
+      p.transparencyPct !== q.transparencyPct ||
+      p.brightnessPct !== q.brightnessPct
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function frameFillEqual(a: FloatingPictureFrameFill, b: FloatingPictureFrameFill): boolean {
+  if (a.kind !== b.kind || a.solidColor !== b.solidColor || a.solidTransparencyPct !== b.solidTransparencyPct) {
+    return false;
+  }
+  if (a.kind !== "gradient") {
+    return true;
+  }
   return (
-    a.kind === b.kind &&
-    a.solidColor === b.solidColor &&
-    a.solidTransparencyPct === b.solidTransparencyPct
+    a.gradientType === b.gradientType &&
+    a.gradientAngleDeg === b.gradientAngleDeg &&
+    a.linearDirectionIndex === b.linearDirectionIndex &&
+    a.gradientRotateWithShape === b.gradientRotateWithShape &&
+    a.gradientPresetId === b.gradientPresetId &&
+    gradientStopsEqual(a.gradientStops, b.gradientStops)
   );
 }
 

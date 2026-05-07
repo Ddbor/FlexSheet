@@ -498,9 +498,6 @@ export function mountExcelBottomBar(options: MountExcelBottomBarOptions): () => 
       if (wb.sheetCount <= 1) {
         return;
       }
-      if (!window.confirm(`确定删除工作表「${sheet.name}」？`)) {
-        return;
-      }
       wb.removeSheetAt(sheetIndex);
     });
 

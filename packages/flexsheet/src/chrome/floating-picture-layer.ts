@@ -34,7 +34,8 @@ function ensureStyles(): void {
 .fs-fp-item{position:absolute;pointer-events:auto;box-sizing:border-box;}
 .fs-fp-item__body{position:relative;width:100%;height:100%;overflow:hidden;box-sizing:border-box;}
 .fs-fp-item--cropping .fs-fp-item__body{overflow:visible;}
-.fs-fp-item__img-wrap{position:absolute;left:0;top:0;box-sizing:border-box;z-index:0;}
+.fs-fp-item__fill{position:absolute;left:0;top:0;width:100%;height:100%;box-sizing:border-box;pointer-events:none;z-index:0;background-color:transparent;}
+.fs-fp-item__img-wrap{position:absolute;left:0;top:0;box-sizing:border-box;z-index:1;}
 .fs-fp-item__img{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;}
 .fs-fp-crop-img-dim-layer{
   display:none;
@@ -147,13 +148,38 @@ export const DEFAULT_FLOATING_PICTURE_ADJUSTMENTS: FloatingPictureAdjustments = 
 /** 裁剪框内背景填充类型（与「设置图片格式 → 填充与线条」一致）。 */
 export type FloatingPictureFillKind = "none" | "solid" | "gradient" | "picture" | "pattern";
 
-/** 浮动图占位矩形（`fs-fp-item__body`）的填充；当前实现纯色，其它 kind 仅占位无绘制。 */
+export type FloatingPictureGradientType = "linear" | "radial" | "rectangular" | "path";
+
+export interface FloatingPictureGradientStop {
+  readonly positionPct: number;
+  readonly color: string;
+  readonly transparencyPct: number;
+  /**
+   * 光圈亮度偏移 %（与 Excel 一致）：-100～100，0 为不变；负值变暗，正值变亮。
+   * 渲染乘子为 clamp(1 + brightnessPct/100, 0, 2)。
+   */
+  readonly brightnessPct: number;
+}
+
+/** 浮动图占位矩形（`fs-fp-item__body`）的填充。 */
 export interface FloatingPictureFrameFill {
   readonly kind: FloatingPictureFillKind;
-  /** `solid` 时使用，CSS `#rrggbb` */
+  /** `solid` / 面板占位，CSS `#rrggbb` */
   readonly solidColor: string;
   /** 纯色填充透明度 0～100（0 为完全不透明） */
   readonly solidTransparencyPct: number;
+  readonly gradientType?: FloatingPictureGradientType;
+  /**
+   * 用户角度（与 Excel 习惯一致）：0°=左→右，90°=上→下，顺时针递增。
+   * 仅 `linear` 等使用；`radial` / `rectangular` / `path` 可忽略或作占位。
+   */
+  readonly gradientAngleDeg?: number;
+  /** 线性渐变方向面板 0～7，与 `LINEAR_DIRECTION_USER_ANGLES` 索引对应 */
+  readonly linearDirectionIndex?: number;
+  readonly gradientStops?: readonly FloatingPictureGradientStop[];
+  /** 与形状一起旋转：为 false 时填充在画布坐标系中保持方向（相对形状反向旋转） */
+  readonly gradientRotateWithShape?: boolean;
+  readonly gradientPresetId?: number | null;
 }
 
 export const DEFAULT_FLOATING_PICTURE_FRAME_FILL: FloatingPictureFrameFill = {
@@ -162,8 +188,117 @@ export const DEFAULT_FLOATING_PICTURE_FRAME_FILL: FloatingPictureFrameFill = {
   solidTransparencyPct: 0,
 };
 
+const DEFAULT_GRADIENT_STOPS: readonly FloatingPictureGradientStop[] = [
+  { positionPct: 0, color: "#5b9bd5", transparencyPct: 0, brightnessPct: 0 },
+  { positionPct: 100, color: "#ffffff", transparencyPct: 0, brightnessPct: 0 },
+];
+
+function defaultGradientFill(): FloatingPictureFrameFill {
+  return {
+    kind: "gradient",
+    solidColor: "#000000",
+    solidTransparencyPct: 0,
+    gradientType: "linear",
+    gradientAngleDeg: 90,
+    linearDirectionIndex: 3,
+    gradientStops: DEFAULT_GRADIENT_STOPS.map((s) => ({ ...s })),
+    gradientRotateWithShape: true,
+    gradientPresetId: null,
+  };
+}
+
+function normalizeGradientStops(
+  stops: readonly FloatingPictureGradientStop[] | undefined,
+): FloatingPictureGradientStop[] {
+  const raw =
+    stops !== undefined && stops.length > 0
+      ? stops.map((s) => ({
+          positionPct: clampN(s.positionPct, 0, 100),
+          color: normalizeSolidColorHex(s.color),
+          transparencyPct: clampN(s.transparencyPct, 0, 100),
+          brightnessPct: clampN(s.brightnessPct, -100, 100),
+        }))
+      : DEFAULT_GRADIENT_STOPS.map((s) => ({ ...s }));
+  raw.sort((a, b) => a.positionPct - b.positionPct);
+  if (raw.length < 2) {
+    const one = raw[0] ?? DEFAULT_GRADIENT_STOPS[0]!;
+    return [
+      { ...one, positionPct: 0 },
+      { ...one, positionPct: 100, color: normalizeSolidColorHex("#ffffff") },
+    ];
+  }
+  return raw;
+}
+
+function normalizeGradientFill(f: FloatingPictureFrameFill): FloatingPictureFrameFill {
+  const gt = f.gradientType ?? "linear";
+  const stops = normalizeGradientStops(f.gradientStops);
+  const angle = f.gradientAngleDeg !== undefined ? clampN(f.gradientAngleDeg, 0, 359) : 90;
+  const dirIdx =
+    f.linearDirectionIndex !== undefined ? clampN(Math.floor(f.linearDirectionIndex), 0, 7) : undefined;
+  return {
+    kind: "gradient",
+    solidColor: f.solidColor,
+    solidTransparencyPct: clampN(f.solidTransparencyPct, 0, 100),
+    gradientType: gt,
+    gradientAngleDeg: angle,
+    linearDirectionIndex: dirIdx,
+    gradientStops: stops,
+    gradientRotateWithShape: f.gradientRotateWithShape !== false,
+    gradientPresetId: f.gradientPresetId ?? null,
+  };
+}
+
 function cloneFrameFill(f: FloatingPictureFrameFill): FloatingPictureFrameFill {
-  return { kind: f.kind, solidColor: f.solidColor, solidTransparencyPct: f.solidTransparencyPct };
+  if (f.kind !== "gradient") {
+    return { kind: f.kind, solidColor: f.solidColor, solidTransparencyPct: f.solidTransparencyPct };
+  }
+  const stops = normalizeGradientStops(f.gradientStops);
+  return normalizeGradientFill({
+    kind: "gradient",
+    solidColor: f.solidColor,
+    solidTransparencyPct: f.solidTransparencyPct,
+    gradientType: f.gradientType,
+    gradientAngleDeg: f.gradientAngleDeg,
+    linearDirectionIndex: f.linearDirectionIndex,
+    gradientStops: stops,
+    gradientRotateWithShape: f.gradientRotateWithShape,
+    gradientPresetId: f.gradientPresetId,
+  });
+}
+
+function mergeFrameFill(
+  cur: FloatingPictureFrameFill,
+  patch: Partial<FloatingPictureFrameFill>,
+): FloatingPictureFrameFill {
+  const kind = patch.kind ?? cur.kind;
+  if (kind === "gradient") {
+    const base = cur.kind === "gradient" ? cur : defaultGradientFill();
+    const next: FloatingPictureFrameFill = {
+      kind: "gradient",
+      solidColor:
+        patch.solidColor !== undefined ? normalizeSolidColorHex(patch.solidColor) : base.solidColor,
+      solidTransparencyPct:
+        patch.solidTransparencyPct !== undefined
+          ? clampN(patch.solidTransparencyPct, 0, 100)
+          : base.solidTransparencyPct,
+      gradientType: patch.gradientType ?? base.gradientType,
+      gradientAngleDeg: patch.gradientAngleDeg ?? base.gradientAngleDeg,
+      linearDirectionIndex: patch.linearDirectionIndex ?? base.linearDirectionIndex,
+      gradientStops: patch.gradientStops ?? base.gradientStops,
+      gradientRotateWithShape: patch.gradientRotateWithShape ?? base.gradientRotateWithShape,
+      gradientPresetId:
+        patch.gradientPresetId !== undefined ? patch.gradientPresetId : base.gradientPresetId,
+    };
+    return normalizeGradientFill(next);
+  }
+  const solidColor =
+    patch.solidColor !== undefined ? normalizeSolidColorHex(patch.solidColor) : cur.solidColor;
+  const solidTransparencyPct =
+    patch.solidTransparencyPct !== undefined
+      ? clampN(patch.solidTransparencyPct, 0, 100)
+      : cur.solidTransparencyPct;
+  return { kind, solidColor, solidTransparencyPct };
 }
 
 function frameFillFromSnapshot(s: FloatingPictureSnapshot): FloatingPictureFrameFill {
@@ -204,7 +339,7 @@ function parseHexRgb(
   };
 }
 
-/** 将填充模型转为 `background-color`（非 solid 为透明）。 */
+/** 将填充模型转为 `background-color`（非 solid 为透明）。渐变请用 `frameFillToFillLayerStyles`。 */
 export function frameFillToCssBackground(f: FloatingPictureFrameFill): string {
   if (f.kind !== "solid") {
     return "transparent";
@@ -219,6 +354,95 @@ export function frameFillToCssBackground(f: FloatingPictureFrameFill): string {
 
 function clampN(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
+}
+
+function clamp255(n: number): number {
+  return Math.min(255, Math.max(0, Math.round(n)));
+}
+
+function userGradientAngleToCssAngle(userDeg: number): number {
+  const u = ((userDeg % 360) + 360) % 360;
+  return (90 + u) % 360;
+}
+
+function stopToRgba(s: FloatingPictureGradientStop): {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+  readonly a: number;
+} {
+  const rgb = parseHexRgb(s.color);
+  if (rgb === null) {
+    return { r: 0, g: 0, b: 0, a: 1 };
+  }
+  const f = clampN(1 + s.brightnessPct / 100, 0, 2);
+  const a = 1 - clampN(s.transparencyPct, 0, 100) / 100;
+  return {
+    r: clamp255(rgb.r * f),
+    g: clamp255(rgb.g * f),
+    b: clamp255(rgb.b * f),
+    a,
+  };
+}
+
+/** 窗格内水平渐变条预览（与用户设置的渐变角度无关，固定 90deg）。 */
+export function gradientStopsToHorizontalBarBackground(
+  stops: readonly FloatingPictureGradientStop[] | undefined,
+): string {
+  const norm = normalizeGradientStops(stops);
+  const partStr = norm
+    .map((s) => {
+      const { r, g, b, a } = stopToRgba(s);
+      return `rgba(${r},${g},${b},${a}) ${s.positionPct}%`;
+    })
+    .join(", ");
+  return `linear-gradient(90deg, ${partStr})`;
+}
+
+/** 渐变光圈把手 / 预览用（已含亮度与透明度）。 */
+export function gradientStopToRgbaCss(s: FloatingPictureGradientStop): string {
+  const { r, g, b, a } = stopToRgba(s);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function buildCssGradientBackgroundImage(f: FloatingPictureFrameFill): string {
+  const gt = f.gradientType ?? "linear";
+  const stops = normalizeGradientStops(f.gradientStops);
+  const partStr = stops
+    .map((s) => {
+      const { r, g, b, a } = stopToRgba(s);
+      return `rgba(${r},${g},${b},${a}) ${s.positionPct}%`;
+    })
+    .join(", ");
+  if (gt === "linear") {
+    const ang = userGradientAngleToCssAngle(f.gradientAngleDeg ?? 90);
+    return `linear-gradient(${ang}deg, ${partStr})`;
+  }
+  if (gt === "rectangular") {
+    return `radial-gradient(ellipse farthest-corner at center, ${partStr})`;
+  }
+  return `radial-gradient(circle at center, ${partStr})`;
+}
+
+/** `fs-fp-item__fill` 上的背景（纯色 / 渐变）。 */
+export function frameFillToFillLayerStyles(f: FloatingPictureFrameFill): {
+  readonly backgroundColor: string;
+  readonly backgroundImage: string;
+} {
+  if (f.kind === "none" || f.kind === "picture" || f.kind === "pattern") {
+    return { backgroundColor: "transparent", backgroundImage: "none" };
+  }
+  if (f.kind === "solid") {
+    return {
+      backgroundColor: frameFillToCssBackground(f),
+      backgroundImage: "none",
+    };
+  }
+  const g = normalizeGradientFill(f);
+  return {
+    backgroundColor: "transparent",
+    backgroundImage: buildCssGradientBackgroundImage(g),
+  };
 }
 
 function cloneAdjustments(a: FloatingPictureAdjustments): FloatingPictureAdjustments {
@@ -1125,10 +1349,35 @@ export class FloatingPictureLayer {
     img.src = dataUrl;
   }
 
-  private applyFrameFillToItem(el: HTMLDivElement, fill: FloatingPictureFrameFill): void {
+  private applyFrameFillToItem(
+    el: HTMLDivElement,
+    fill: FloatingPictureFrameFill,
+    rotationRad: number,
+  ): void {
     const body = el.querySelector(".fs-fp-item__body");
-    if (body instanceof HTMLElement) {
-      body.style.backgroundColor = frameFillToCssBackground(fill);
+    if (!(body instanceof HTMLElement)) {
+      return;
+    }
+    body.style.backgroundColor = "transparent";
+    const existingFill = body.querySelector(":scope > .fs-fp-item__fill");
+    let fillEl: HTMLElement;
+    if (existingFill instanceof HTMLElement) {
+      fillEl = existingFill;
+    } else {
+      const nu = document.createElement("div");
+      nu.className = "fs-fp-item__fill";
+      body.insertBefore(nu, body.firstChild);
+      fillEl = nu;
+    }
+    const st = frameFillToFillLayerStyles(fill);
+    fillEl.style.backgroundColor = st.backgroundColor;
+    fillEl.style.backgroundImage = st.backgroundImage;
+    if (fill.kind === "gradient" && fill.gradientRotateWithShape === false) {
+      fillEl.style.transform = `rotate(${-rotationRad}rad)`;
+      fillEl.style.transformOrigin = "center center";
+    } else {
+      fillEl.style.transform = "";
+      fillEl.style.transformOrigin = "";
     }
   }
 
@@ -1151,6 +1400,8 @@ export class FloatingPictureLayer {
     });
     const body = document.createElement("div");
     body.className = "fs-fp-item__body";
+    const fillEl = document.createElement("div");
+    fillEl.className = "fs-fp-item__fill";
     const imgWrap = document.createElement("div");
     imgWrap.className = "fs-fp-item__img-wrap";
     const im = document.createElement("img");
@@ -1167,6 +1418,7 @@ export class FloatingPictureLayer {
       r.model.naturalHeight = im.naturalHeight || 0;
     });
     imgWrap.appendChild(im);
+    body.appendChild(fillEl);
     body.appendChild(imgWrap);
     const cropImgDimLayer = document.createElement("div");
     cropImgDimLayer.className = "fs-fp-crop-img-dim-layer";
@@ -1194,7 +1446,7 @@ export class FloatingPictureLayer {
     wrap.appendChild(focus);
     wrap.addEventListener("pointerdown", (ev) => this.onItemPointerDown(ev, model.id));
     this.applyImageFilterToElement(wrap, model);
-    this.applyFrameFillToItem(wrap, model.frameFill);
+    this.applyFrameFillToItem(wrap, model.frameFill, model.rotationRad);
     this.ensureCropImgDimLayerMounted(wrap);
     this.ensureCropOverlayMounted(wrap);
     this.syncInnerLayout(model, wrap);
@@ -1446,7 +1698,7 @@ export class FloatingPictureLayer {
       img.src = m.dataUrl;
     }
     this.applyImageFilterToElement(rec.el, m);
-    this.applyFrameFillToItem(rec.el, m.frameFill);
+    this.applyFrameFillToItem(rec.el, m.frameFill, m.rotationRad);
     this.syncInnerLayout(m, rec.el);
     this.applyGeometry(m, rec.el);
   }
@@ -1493,16 +1745,8 @@ export class FloatingPictureLayer {
     if (rec === undefined) {
       return;
     }
-    const cur = rec.model.frameFill;
-    const kind = patch.kind ?? cur.kind;
-    const solidColor =
-      patch.solidColor !== undefined ? normalizeSolidColorHex(patch.solidColor) : cur.solidColor;
-    const solidTransparencyPct =
-      patch.solidTransparencyPct !== undefined
-        ? clampN(patch.solidTransparencyPct, 0, 100)
-        : cur.solidTransparencyPct;
-    rec.model.frameFill = { kind, solidColor, solidTransparencyPct };
-    this.applyFrameFillToItem(rec.el, rec.model.frameFill);
+    rec.model.frameFill = mergeFrameFill(rec.model.frameFill, patch);
+    this.applyFrameFillToItem(rec.el, rec.model.frameFill, rec.model.rotationRad);
   }
 
   resetFloatingPictureFrameFill(pictureId: string): void {
@@ -1511,7 +1755,7 @@ export class FloatingPictureLayer {
       return;
     }
     rec.model.frameFill = cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL);
-    this.applyFrameFillToItem(rec.el, rec.model.frameFill);
+    this.applyFrameFillToItem(rec.el, rec.model.frameFill, rec.model.rotationRad);
   }
 
   /** 画布像素下的尺寸与偏移（格式窗格「裁剪」区只读展示）。 */
@@ -1576,6 +1820,7 @@ export class FloatingPictureLayer {
     el.style.transform = `rotate(${model.rotationRad}rad)`;
     el.style.transformOrigin = "center center";
     this.syncInnerLayout(model, el);
+    this.applyFrameFillToItem(el, model.frameFill, model.rotationRad);
   }
 
   private selectById(id: string): void {
