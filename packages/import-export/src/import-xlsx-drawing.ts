@@ -37,6 +37,7 @@ export interface XlsxImportedFloatingPicture {
   readonly sheetIndex: number;
   readonly anchorRow: number;
   readonly anchorCol: number;
+  /** 相对合并锚点单元格左上角：图片左上角在工作表逻辑像素中的偏移（加载时再乘 `viewZoom`）。 */
   readonly relCX: number;
   readonly relCY: number;
   readonly width: number;
@@ -1092,10 +1093,8 @@ function tryParsePicture(
   const anchorRow = merged.row;
   const anchorCol = merged.col;
   const cr = mergedCellSheetRectPx(sheet, anchorRow, anchorCol);
-  const centerX = geom.left + geom.w / 2;
-  const centerY = geom.top + geom.h / 2;
-  const relCX = centerX - (cr.x + cr.w / 2);
-  const relCY = centerY - (cr.y + cr.h / 2);
+  const relCX = geom.left - cr.x;
+  const relCY = geom.top - cr.y;
 
   return {
     sheetName,

@@ -528,6 +528,7 @@ export interface FloatingPictureSnapshot {
   readonly sheetIndex: number;
   readonly anchorRow: number;
   readonly anchorCol: number;
+  /** 相对合并锚点单元格左上角：图片左上角偏移（画布像素）。 */
   readonly relCX: number;
   readonly relCY: number;
   readonly width: number;
@@ -554,6 +555,7 @@ export interface FloatingPicturePastePrepared {
   readonly sheetIndex: number;
   readonly anchorRow: number;
   readonly anchorCol: number;
+  /** 相对合并锚点单元格左上角（画布像素），与 {@link FloatingPictureSnapshot} 一致。 */
   readonly relCX: number;
   readonly relCY: number;
   readonly width: number;
@@ -577,6 +579,7 @@ interface PictureModel {
   sheetIndex: number;
   anchorRow: number;
   anchorCol: number;
+  /** 相对合并锚点单元格左上角：图片左上角（画布像素）。 */
   relCX: number;
   relCY: number;
   width: number;
@@ -1805,7 +1808,7 @@ export class FloatingPictureLayer {
     this.applyFrameFillToItem(rec.el, rec.model.frameFill, rec.model.rotationRad);
   }
 
-  /** 画布像素下的尺寸与偏移（格式窗格「裁剪」区只读展示）。 */
+  /** 画布像素下的尺寸与偏移（格式窗格「裁剪」区只读展示；偏移为相对锚点格左上角）。 */
   getFloatingPictureLayoutPx(pictureId: string): {
     readonly widthPx: number;
     readonly heightPx: number;
@@ -1834,9 +1837,10 @@ export class FloatingPictureLayer {
     if (cr === null) {
       return null;
     }
+    /** `relCX`/`relCY`：相对合并锚点单元格左上角到图片左上角的偏移（画布像素）。 */
     return {
-      cx: cr.x + cr.width / 2 + model.relCX,
-      cy: cr.y + cr.height / 2 + model.relCY,
+      cx: cr.x + model.relCX + model.width / 2,
+      cy: cr.y + model.relCY + model.height / 2,
     };
   }
 
@@ -2272,14 +2276,12 @@ export class FloatingPictureLayer {
     if (crNow === null) {
       return;
     }
-    const cellCx = crNow.x + crNow.width / 2;
-    const cellCy = crNow.y + crNow.height / 2;
 
     const applyCenterSize = (c1x: number, c1y: number, nw: number, nh: number): void => {
       m.width = nw;
       m.height = nh;
-      m.relCX = c1x - cellCx;
-      m.relCY = c1y - cellCy;
+      m.relCX = c1x - crNow.x - nw / 2;
+      m.relCY = c1y - crNow.y - nh / 2;
       this.applyGeometry(m, rec.el, { snapPixels: false });
     };
 

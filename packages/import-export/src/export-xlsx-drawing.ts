@@ -42,7 +42,9 @@ export interface XlsxFloatingPictureExport {
   readonly sheetName: string;
   readonly anchorRow: number;
   readonly anchorCol: number;
+  /** 相对合并锚点单元格左上角：图片左上角偏移（画布 CSS 像素，与 `width`/`height` 同尺度；导出时再除以 `viewZoom` 得工作表逻辑像素）。 */
   readonly relCX: number;
+  /** 同 `relCX`，Y 方向。 */
   readonly relCY: number;
   readonly width: number;
   readonly height: number;
@@ -106,11 +108,11 @@ function pictureSheetBoxPx(
 ): { left: number; top: number; w: number; h: number } {
   const z = Math.max(1e-6, viewZoom);
   const cr = mergedCellSheetRectPx(sheet, pic.anchorRow, pic.anchorCol);
-  const cx = cr.x + cr.w / 2 + pic.relCX / z;
-  const cy = cr.y + cr.h / 2 + pic.relCY / z;
   const w = pic.width / z;
   const h = pic.height / z;
-  return { left: cx - w / 2, top: cy - h / 2, w, h };
+  const left = cr.x + pic.relCX / z;
+  const top = cr.y + pic.relCY / z;
+  return { left, top, w, h };
 }
 
 function pxToFromAnchor(
