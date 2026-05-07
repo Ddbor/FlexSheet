@@ -2,7 +2,12 @@
  * Canvas 右侧「设置图片格式」面板：图片校正 / 颜色 / 透明度 / 裁剪占位数值。
  */
 
-import type { FloatingPictureAdjustments } from "./floating-picture-layer.js";
+import { appendRibbonColorPaletteContent, showRibbonColorDialog } from "@flexsheet/toolbar";
+import type {
+  FloatingPictureAdjustments,
+  FloatingPictureFillKind,
+  FloatingPictureFrameFill,
+} from "./floating-picture-layer.js";
 import { DEFAULT_FLOATING_PICTURE_ADJUSTMENTS } from "./floating-picture-layer.js";
 
 export interface FormatPicturePaneLayout {
@@ -27,6 +32,8 @@ export interface CreateFormatPicturePaneOptions {
   readonly getAdjustments: () => FloatingPictureAdjustments | null;
   readonly getLayout: () => FormatPicturePaneLayout | null;
   readonly setAdjustments: (patch: Partial<FloatingPictureAdjustments>) => void;
+  readonly getFrameFill: () => FloatingPictureFrameFill | null;
+  readonly setFrameFill: (patch: Partial<FloatingPictureFrameFill>) => void;
   readonly onClose: () => void;
 }
 
@@ -193,6 +200,162 @@ function ensureFormatPictureStyles(): void {
   opacity: 0.6;
   font-size: 12px;
 }
+/* 「填充与线条」：第一节可折叠；「线条」区仅占位 */
+.fs-format-picture__sec--interactive > summary {
+  pointer-events: auto;
+  cursor: pointer;
+}
+.fs-format-picture__panel-fill-line .fs-format-picture__sec--lines-static > summary {
+  pointer-events: none;
+  cursor: default;
+}
+.fs-format-picture__fill-radio-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--fs-ribbon-chrome-text, #323130);
+  cursor: pointer;
+  user-select: none;
+}
+.fs-format-picture__fill-radio-row:focus-visible {
+  outline: 1px solid #217346;
+  outline-offset: 1px;
+}
+.fs-format-picture__solid-extra {
+  border-top: 1px solid var(--fs-ribbon-border, #e1dfdd);
+  margin-top: 6px;
+  padding-top: 10px;
+}
+/* 与「设置单元格格式」填充页下拉触发器一致，复用 Ribbon 色板 DOM（appendRibbonColorPaletteContent） */
+.fs-format-picture__color-dd-row {
+  margin-bottom: 10px;
+}
+.fs-format-picture__color-dd-row > label {
+  flex: 0 0 72px;
+  min-width: 0;
+  font-size: 12px;
+}
+.fs-format-picture__fill-dd {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--fs-ribbon-border, #c8c6c4);
+  border-radius: 4px;
+  background: var(--fs-sheet-surface, #fff);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  color: inherit;
+}
+.fs-format-picture__fill-dd:hover {
+  background: var(--fs-ribbon-hover, #f3f2f1);
+}
+.fs-format-picture__fill-swatch {
+  width: 22px;
+  height: 16px;
+  border: 1px solid #a19f9d;
+  border-radius: 2px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+.fs-format-picture__fill-dd-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fs-format-picture__fill-dd-arrow {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #217346;
+  flex-shrink: 0;
+}
+.fs-format-picture__color-popover.fs-color-menu {
+  position: fixed;
+  z-index: 10005;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  max-height: min(420px, calc(100vh - 48px));
+  overflow: auto;
+  background: var(--fs-sheet-surface, #fff);
+  border: 1px solid var(--fs-ribbon-border, #c8c6c4);
+  border-radius: 4px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  padding: 10px 14px;
+  box-sizing: border-box;
+}
+.fs-format-picture__color-popover .fs-color-menu__heading {
+  padding: 6px 2px 4px;
+  font-size: 11px;
+  color: #605e5c;
+}
+.fs-format-picture__sec--chrome > summary {
+  background: var(--fs-format-picture-sec-head, #edebe9);
+  padding: 8px 10px 8px 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fs-format-picture__sec--chrome > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--fs-ribbon-chrome-text, #323130);
+  opacity: 0.75;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.fs-format-picture__sec--chrome .fs-format-picture__sec-body {
+  background: var(--fs-format-picture-sec-body, #faf9f8);
+  padding: 10px 12px 12px;
+}
+.fs-format-picture__radio-static-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--fs-ribbon-chrome-text, #323130);
+  user-select: none;
+  pointer-events: none;
+  cursor: default;
+}
+.fs-format-picture__radio-disk {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid #c8c6c4;
+  background: #fff;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  position: relative;
+}
+.fs-format-picture__radio-disk--on {
+  border-color: #217346;
+  background: #217346;
+}
+.fs-format-picture__radio-disk--on::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #fff;
+}
 `;
   document.head.appendChild(style);
 }
@@ -207,6 +370,14 @@ export function createFormatPicturePane(
   ensureFormatPictureStyles();
   let open = false;
   let syncing = false;
+  let fillColorPopoverCleanup: (() => void) | null = null;
+
+  function closeFillColorPopover(): void {
+    if (fillColorPopoverCleanup !== null) {
+      fillColorPopoverCleanup();
+      fillColorPopoverCleanup = null;
+    }
+  }
 
   const root = document.createElement("aside");
   root.className = "fs-format-picture";
@@ -227,7 +398,7 @@ export function createFormatPicturePane(
 
   const tabs = document.createElement("div");
   tabs.className = "fs-format-picture__tabs";
-  const tabIds = ["填充", "效果", "大小", "图片"] as const;
+  const tabIds = ["填充与线条", "效果", "大小", "图片"] as const;
   const tabBtns: HTMLButtonElement[] = [];
   for (let i = 0; i < tabIds.length; i++) {
     const t = document.createElement("button");
@@ -244,6 +415,253 @@ export function createFormatPicturePane(
   const panelPicture = document.createElement("div");
   panelPicture.className = "fs-format-picture__panel-picture";
 
+  const panelFillLine = document.createElement("div");
+  panelFillLine.className = "fs-format-picture__panel-fill-line";
+  panelFillLine.hidden = true;
+
+  function mkStaticRadioRow(label: string, on: boolean): HTMLDivElement {
+    const row = document.createElement("div");
+    row.className = "fs-format-picture__radio-static-row";
+    const disk = document.createElement("span");
+    disk.className =
+      "fs-format-picture__radio-disk" + (on ? " fs-format-picture__radio-disk--on" : "");
+    disk.setAttribute("aria-hidden", "true");
+    const lab = document.createElement("span");
+    lab.textContent = label;
+    row.appendChild(disk);
+    row.appendChild(lab);
+    return row;
+  }
+
+  const fillKindRows = new Map<FloatingPictureFillKind, HTMLDivElement>();
+  const fillDetails = document.createElement("details");
+  fillDetails.className =
+    "fs-format-picture__sec fs-format-picture__sec--chrome fs-format-picture__sec--interactive";
+  fillDetails.open = true;
+  const fillSum = document.createElement("summary");
+  fillSum.textContent = "填充与线条";
+  const fillBody = document.createElement("div");
+  fillBody.className = "fs-format-picture__sec-body";
+
+  const FILL_OPTIONS: readonly { readonly kind: FloatingPictureFillKind; readonly label: string }[] =
+    [
+      { kind: "none", label: "无填充" },
+      { kind: "solid", label: "纯色填充" },
+      { kind: "gradient", label: "渐变填充" },
+      { kind: "picture", label: "图片或纹理填充" },
+      { kind: "pattern", label: "图案填充" },
+    ];
+
+  for (const { kind, label } of FILL_OPTIONS) {
+    const row = document.createElement("div");
+    row.className = "fs-format-picture__fill-radio-row";
+    row.setAttribute("role", "radio");
+    row.tabIndex = 0;
+    const disk = document.createElement("span");
+    disk.className = "fs-format-picture__radio-disk";
+    disk.setAttribute("aria-hidden", "true");
+    const lab = document.createElement("span");
+    lab.textContent = label;
+    row.appendChild(disk);
+    row.appendChild(lab);
+    row.addEventListener("click", () => {
+      if (syncing) {
+        return;
+      }
+      options.setFrameFill({ kind });
+    });
+    row.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        if (!syncing) {
+          options.setFrameFill({ kind });
+        }
+      }
+    });
+    fillKindRows.set(kind, row);
+    fillBody.appendChild(row);
+  }
+
+  const solidExtra = document.createElement("div");
+  solidExtra.className = "fs-format-picture__solid-extra";
+  solidExtra.hidden = true;
+
+  const colorRow = document.createElement("div");
+  colorRow.className = "fs-format-picture__row fs-format-picture__color-dd-row";
+  const colorLab = document.createElement("label");
+  colorLab.textContent = "颜色";
+  const colorBtn = document.createElement("button");
+  colorBtn.type = "button";
+  colorBtn.className = "fs-format-picture__fill-dd";
+  colorBtn.title = "填充颜色";
+  const colorSwatch = document.createElement("span");
+  colorSwatch.className = "fs-format-picture__fill-swatch";
+  colorSwatch.setAttribute("aria-hidden", "true");
+  const colorBtnLabel = document.createElement("span");
+  colorBtnLabel.className = "fs-format-picture__fill-dd-label";
+  const colorBtnArrow = document.createElement("span");
+  colorBtnArrow.className = "fs-format-picture__fill-dd-arrow";
+  colorBtnArrow.setAttribute("aria-hidden", "true");
+  colorBtn.appendChild(colorSwatch);
+  colorBtn.appendChild(colorBtnLabel);
+  colorBtn.appendChild(colorBtnArrow);
+
+  function mountSolidFillColorPalette(anchor: HTMLButtonElement): void {
+    closeFillColorPopover();
+    const pop = document.createElement("div");
+    pop.className = "fs-format-picture__color-popover fs-color-menu";
+    appendRibbonColorPaletteContent(pop, {
+      themeHeading: "主题颜色",
+      standardHeading: "标准色",
+      includeNoneRow: true,
+      onNone: () => {
+        options.setFrameFill({ kind: "none" });
+        closeFillColorPopover();
+      },
+      onPickHex: (hex: string) => {
+        options.setFrameFill({ kind: "solid", solidColor: hex });
+        closeFillColorPopover();
+      },
+      onMoreColors: () => {
+        closeFillColorPopover();
+        void (async () => {
+          const ff = options.getFrameFill();
+          const cur =
+            ff !== null &&
+            ff.kind === "solid" &&
+            typeof ff.solidColor === "string" &&
+            /^#[0-9a-fA-F]{6}$/.test(ff.solidColor)
+              ? ff.solidColor.toLowerCase()
+              : "#000000";
+          const picked = await showRibbonColorDialog(cur);
+          if (picked !== null) {
+            options.setFrameFill({ kind: "solid", solidColor: picked });
+          }
+        })();
+      },
+    });
+    document.body.appendChild(pop);
+    const position = (): void => {
+      const r = anchor.getBoundingClientRect();
+      const pw = pop.offsetWidth;
+      const left = Math.max(8, Math.min(r.left, window.innerWidth - pw - 8));
+      pop.style.position = "fixed";
+      pop.style.left = `${left}px`;
+      pop.style.top = `${r.bottom + 4}px`;
+    };
+    requestAnimationFrame(position);
+    const onDoc = (ev: PointerEvent): void => {
+      const t = ev.target as Node | null;
+      if (t !== null && (pop.contains(t) || anchor.contains(t))) {
+        return;
+      }
+      closeFillColorPopover();
+    };
+    fillColorPopoverCleanup = (): void => {
+      pop.remove();
+      document.removeEventListener("pointerdown", onDoc, true);
+    };
+    setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0);
+  }
+
+  colorBtn.addEventListener("click", () => {
+    if (syncing) {
+      return;
+    }
+    mountSolidFillColorPalette(colorBtn);
+  });
+  colorRow.appendChild(colorLab);
+  colorRow.appendChild(colorBtn);
+
+  const fillTransRow = document.createElement("div");
+  fillTransRow.className = "fs-format-picture__row";
+  const fillTransLab = document.createElement("label");
+  fillTransLab.textContent = "透明度";
+  const fillTransRange = document.createElement("input");
+  fillTransRange.type = "range";
+  fillTransRange.min = "0";
+  fillTransRange.max = "100";
+  fillTransRange.step = "1";
+  const fillTransNum = document.createElement("input");
+  fillTransNum.type = "text";
+  fillTransNum.className = "fs-format-picture__num";
+  const applyFillTransFromRange = (): void => {
+    if (syncing) {
+      return;
+    }
+    const v = Number(fillTransRange.value);
+    options.setFrameFill({ solidTransparencyPct: v });
+    fillTransNum.value = `${v}%`;
+  };
+  const applyFillTransFromNum = (): void => {
+    if (syncing) {
+      return;
+    }
+    const n = Number(fillTransNum.value.replace(/%/g, "").trim());
+    if (!Number.isFinite(n)) {
+      return;
+    }
+    const cl = Math.min(100, Math.max(0, n));
+    options.setFrameFill({ solidTransparencyPct: cl });
+    fillTransRange.value = String(cl);
+    fillTransNum.value = `${cl}%`;
+  };
+  fillTransRange.addEventListener("input", applyFillTransFromRange);
+  fillTransNum.addEventListener("change", applyFillTransFromNum);
+  fillTransNum.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") {
+      applyFillTransFromNum();
+    }
+  });
+  fillTransRow.appendChild(fillTransLab);
+  fillTransRow.appendChild(fillTransRange);
+  fillTransRow.appendChild(fillTransNum);
+
+  solidExtra.appendChild(colorRow);
+  solidExtra.appendChild(fillTransRow);
+  fillBody.appendChild(solidExtra);
+  fillDetails.appendChild(fillSum);
+  fillDetails.appendChild(fillBody);
+  panelFillLine.appendChild(fillDetails);
+
+  function applyFillUiFromModel(ff: FloatingPictureFrameFill): void {
+    for (const [k, row] of fillKindRows) {
+      const disk = row.querySelector(".fs-format-picture__radio-disk");
+      if (disk !== null) {
+        disk.classList.toggle("fs-format-picture__radio-disk--on", ff.kind === k);
+      }
+      row.setAttribute("aria-checked", ff.kind === k ? "true" : "false");
+    }
+    solidExtra.hidden = ff.kind !== "solid";
+    const hex =
+      typeof ff.solidColor === "string" && /^#[0-9a-fA-F]{6}$/.test(ff.solidColor)
+        ? ff.solidColor.toLowerCase()
+        : "#000000";
+    colorSwatch.style.backgroundColor = hex;
+    colorBtnLabel.textContent = "自定义颜色";
+    fillTransRange.value = String(ff.solidTransparencyPct);
+    fillTransNum.value = `${ff.solidTransparencyPct}%`;
+  }
+
+  const lineDetails = document.createElement("details");
+  lineDetails.className =
+    "fs-format-picture__sec fs-format-picture__sec--chrome fs-format-picture__sec--lines-static";
+  lineDetails.open = true;
+  const lineSum = document.createElement("summary");
+  lineSum.textContent = "线条";
+  const lineBody = document.createElement("div");
+  lineBody.className = "fs-format-picture__sec-body";
+  for (const [text, sel] of [
+    ["无线条", true],
+    ["实线", false],
+    ["渐变线", false],
+  ] as const) {
+    lineBody.appendChild(mkStaticRadioRow(text, sel));
+  }
+  lineDetails.appendChild(lineSum);
+  lineDetails.appendChild(lineBody);
+  panelFillLine.appendChild(lineDetails);
+
   const panelOther = document.createElement("div");
   panelOther.className = "fs-format-picture__panel-other";
   panelOther.hidden = true;
@@ -253,9 +671,12 @@ export function createFormatPicturePane(
   panelOther.appendChild(ph);
 
   function showPanel(idx: number): void {
+    closeFillColorPopover();
     const isPic = idx === 3;
+    const isFill = idx === 0;
     panelPicture.hidden = !isPic;
-    panelOther.hidden = isPic;
+    panelFillLine.hidden = !isFill;
+    panelOther.hidden = isPic || isFill;
     for (let i = 0; i < tabBtns.length; i++) {
       tabBtns[i].classList.toggle("fs-format-picture__tab--active", i === idx);
     }
@@ -505,6 +926,7 @@ export function createFormatPicturePane(
   cropHint.textContent = "裁剪框数值为只读预览（英寸，96dpi 换算）。";
   secCrop.body.appendChild(cropHint);
 
+  scroll.appendChild(panelFillLine);
   scroll.appendChild(panelPicture);
   scroll.appendChild(panelOther);
 
@@ -516,10 +938,14 @@ export function createFormatPicturePane(
   function syncFromModel(): void {
     const a = options.getAdjustments();
     const layout = options.getLayout();
+    const ff = options.getFrameFill();
     syncing = true;
     try {
       if (a === null) {
         return;
+      }
+      if (ff !== null) {
+        applyFillUiFromModel(ff);
       }
       sharpSl.range.value = String(a.sharpnessPct);
       sharpSl.num.value = `${a.sharpnessPct}%`;
@@ -553,6 +979,7 @@ export function createFormatPicturePane(
   function hide(): void {
     open = false;
     root.removeAttribute("data-open");
+    closeFillColorPopover();
   }
 
   btnClose.addEventListener("click", () => {

@@ -541,9 +541,13 @@ export const DEFAULT_XLSX_EXPORT_OPTIONS: XlsxExportOptions = {
   includeSparseStyledEmpty: true,
 };
 
-export type { XlsxFloatingPictureExport } from "./export-xlsx-drawing.js";
+export type {
+  XlsxFloatingPictureExport,
+  XlsxFloatingPictureFrameFill,
+} from "./export-xlsx-drawing.js";
 export {
   floatingPictureNeedsFrameCompositeForXlsx,
+  floatingPictureNeedsRasterForXlsxExport,
   floatingPictureSrcRectSides,
 } from "./export-xlsx-drawing.js";
 

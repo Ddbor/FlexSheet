@@ -44,6 +44,29 @@ const titleStyle: CellStyle = {
   vAlign: "middle",
 };
 
+/** 与 `main.ts` 中预载浮动图的工作表名一致。 */
+export const DEMO_FLOATING_PICTURE_SHEET_NAME = "图片演示";
+
+function fillFloatingPictureDemo(sheet: Worksheet): void {
+  sheet.setCellLiteral(0, 0, "浮动图片演示");
+  sheet.applyMergeForSelection(
+    { startRow: 0, endRow: 0, startCol: 0, endCol: 7 },
+    "mergeCenter",
+  );
+  sheet.setCellStyle(0, 0, titleStyle);
+
+  const lines = [
+    "本工作表用于展示浮于网格之上的图片（与单元格独立）。",
+    "加载后会自动插入一张示例图：可拖动、缩放、旋转；右键支持剪切/复制/裁剪/设置图片格式。",
+    "与 Ribbon「图片格式」、导出 Excel 时浮动绘图一致；切换其他工作表时图片随表隐藏。",
+  ];
+  let r = 2;
+  for (const line of lines) {
+    sheet.setCellLiteral(r, 0, line);
+    r++;
+  }
+}
+
 function fillOverview(sheet: Worksheet): void {
   sheet.setCellLiteral(0, 0, "FlexSheet 功能演示 — 底栏切换各工作表查看");
   sheet.applyMergeForSelection(
@@ -57,6 +80,7 @@ function fillOverview(sheet: Worksheet): void {
     "【Ribbon】开始（字体/对齐/数字格式/条件格式/套用表格格式）、插入、公式、数据、视图等选项卡。",
     "【编辑栏】名称框、fx、单元格内容与公式输入（与 Ribbon、快捷键、右键菜单联动）。",
     "【网格】行列标、选择、填充柄、合并单元格、行列宽/隐藏、冻结窗格（视图）。",
+    "【浮动图片】请打开「图片演示」工作表：默认进入该页并展示示例图（裁剪、格式、导出 Excel）。",
     "【筛选】「筛选与表格」工作表：列筛选 + 表格样式联动；与 Ribbon「数据」筛选一致。",
     "【数据】排序与筛选、删除重复项、数据验证、模拟分析、合并计算、创建数据透视表等。",
     "【公式】「公式示例」工作表含从函数目录抽取的一批示例公式（与公式生成器对照），并保留季度小计演示。",
@@ -484,6 +508,10 @@ export function createDemoWorkbook(): Workbook {
   wb.addSheet(overview);
   fillOverview(overview);
 
+  const pictureDemo = new Worksheet(DEMO_FLOATING_PICTURE_SHEET_NAME, 60, 14);
+  wb.addSheet(pictureDemo);
+  fillFloatingPictureDemo(pictureDemo);
+
   const formulas = new Worksheet("公式示例", 60, 16);
   wb.addSheet(formulas);
   fillFormulas(formulas);
@@ -508,6 +536,13 @@ export function createDemoWorkbook(): Workbook {
   wb.addSheet(pivotSrc);
   fillPivotSource(pivotSrc);
 
-  wb.activeSheetIndex = 0;
+  let pictureSheetIdx = -1;
+  for (let i = 0; i < wb.sheetCount; i++) {
+    if (wb.getSheet(i)?.name === DEMO_FLOATING_PICTURE_SHEET_NAME) {
+      pictureSheetIdx = i;
+      break;
+    }
+  }
+  wb.activeSheetIndex = pictureSheetIdx >= 0 ? pictureSheetIdx : 0;
   return wb;
 }

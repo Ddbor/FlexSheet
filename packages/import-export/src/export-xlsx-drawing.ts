@@ -1,6 +1,15 @@
 import type { Workbook, Worksheet } from "@flexsheet/core";
 import { escapeXml } from "./xml-escape.js";
 
+/** 与 FlexSheet「图片格式 → 填充」一致；仅 `solid` 参与 XLSX 导出。 */
+export interface XlsxFloatingPictureFrameFill {
+  readonly kind: "none" | "solid" | "gradient" | "picture" | "pattern";
+  /** `solid` 时 `#rrggbb` */
+  readonly solidColor: string;
+  /** 纯色填充透明度 0～100（100 为全透明） */
+  readonly solidTransparencyPct: number;
+}
+
 /** 浮动图片导出描述（与 FlexSheet 浮动层模型一致；尺寸与偏移为画布 CSS 像素，需配合 `viewZoom`）。 */
 export interface XlsxFloatingPictureExport {
   readonly sheetName: string;
@@ -20,6 +29,11 @@ export interface XlsxFloatingPictureExport {
   readonly imgBoxY?: number;
   readonly imgBoxW?: number;
   readonly imgBoxH?: number;
+  /**
+   * 裁剪框内纯色填充。异步导出栅格化后应置为 `undefined`，避免与已烘焙的位图重复。
+   * 同步导出时写入 `xdr:spPr` 的 `a:solidFill`，供 Excel 显示边距区底色。
+   */
+  readonly frameFill?: XlsxFloatingPictureFrameFill;
 }
 
 const EMU_PER_PX = 9525;
@@ -154,6 +168,48 @@ function rotationToOoxmlRot60000(rotationRad: number): number {
   return Math.round(deg * 60000);
 }
 
+function clamp01(n: number): number {
+  return Math.min(1, Math.max(0, n));
+}
+
+function normalizeSolidColorHexForExport(input: string): string | null {
+  const t = input.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(t)) {
+    return t.slice(1).toUpperCase();
+  }
+  if (/^#[0-9a-fA-F]{3}$/.test(t)) {
+    const r = t[1]!;
+    const g = t[2]!;
+    const b = t[3]!;
+    return `${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(t)) {
+    return t.toUpperCase();
+  }
+  return null;
+}
+
+/**
+ * `xdr:pic` / `a:spPr` 下纯色底（Excel 在几何区背后绘制；与 FlexSheet `frameFill` 对齐）。
+ * `CT_PositiveFixedPercentage`：100000 = 100% 不透明度。
+ */
+function buildPicSpPrSolidFillXml(fill: XlsxFloatingPictureFrameFill | undefined): string {
+  if (fill === undefined || fill.kind !== "solid") {
+    return "";
+  }
+  const op = clamp01(1 - fill.solidTransparencyPct / 100);
+  if (op <= 0) {
+    return "";
+  }
+  const val = normalizeSolidColorHexForExport(fill.solidColor);
+  if (val === null) {
+    return "";
+  }
+  const alphaVal = Math.round(op * 100000);
+  const alphaXml = alphaVal >= 100000 ? "" : `<a:alpha val="${alphaVal}"/>`;
+  return `<a:solidFill><a:srgbClr val="${val}">${alphaXml}</a:srgbClr></a:solidFill>`;
+}
+
 /** OOXML `CT_RelativeRect`：从各边裁掉的占比（ST_Percentage，如 `"12.5%"`）。 */
 function formatOoxmlPercentage(fraction: number): string {
   const p = Math.max(0, Math.min(100, fraction * 100));
@@ -175,6 +231,21 @@ function formatOoxmlPercentage(fraction: number): string {
  * 裁剪框内是否存在未被图片覆盖的留白（仅几何判断）。
  * 此时仅用 `srcRect`+`stretch` 无法得到透明边距，需在导出侧合成与裁剪框同尺寸的 PNG。
  */
+/**
+ * 是否需要在导出前将占位栅格化为 PNG（透明边距、裁剪留白，或纯色填充与位图合成）。
+ * 与 `preparePicturesForXlsxExport` / 浏览器 Canvas 路径配合。
+ */
+export function floatingPictureNeedsRasterForXlsxExport(pic: XlsxFloatingPictureExport): boolean {
+  if (floatingPictureNeedsFrameCompositeForXlsx(pic)) {
+    return true;
+  }
+  const f = pic.frameFill;
+  if (f === undefined || f.kind !== "solid") {
+    return false;
+  }
+  return f.solidTransparencyPct < 100;
+}
+
 export function floatingPictureNeedsFrameCompositeForXlsx(pic: XlsxFloatingPictureExport): boolean {
   const fw = pic.width;
   const fh = pic.height;
@@ -271,6 +342,7 @@ function buildOnePictureAnchorXml(
   const src = floatingPictureSrcRectSides(pic);
   const srcRectXml =
     src === undefined ? "" : `<a:srcRect l="${src.l}" t="${src.t}" r="${src.r}" b="${src.b}"/>`;
+  const spPrFillXml = buildPicSpPrSolidFillXml(pic.frameFill);
   return (
     `<xdr:oneCellAnchor>` +
     `<xdr:from>` +
@@ -295,6 +367,7 @@ function buildOnePictureAnchorXml(
     `<a:off x="0" y="0"/>` +
     `<a:ext cx="${cxEmu}" cy="${cyEmu}"/>` +
     `</a:xfrm>` +
+    spPrFillXml +
     `<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>` +
     `</xdr:spPr>` +
     `</xdr:pic>` +

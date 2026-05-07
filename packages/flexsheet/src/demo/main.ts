@@ -9,7 +9,7 @@ import {
   type RibbonCommandEvent,
 } from "@flexsheet/toolbar";
 import { CreatePivotTableCommand } from "../pivot/pivot-table-command.js";
-import { createDemoWorkbook } from "./demo-workbook.js";
+import { createDemoWorkbook, DEMO_FLOATING_PICTURE_SHEET_NAME } from "./demo-workbook.js";
 
 const chromeRoot = document.getElementById("fs-sheet-chrome");
 const toolbar = document.getElementById("toolbar");
@@ -42,6 +42,9 @@ const flexSheet = new FlexSheet({
   chromeRoot,
 });
 
+/** 演示用浮动图：与 `demo/assets/demo-penguin.png` 同源（Vite 解析 import.meta.url）。 */
+const DEMO_PENGUIN_ASSET = new URL("./assets/demo-penguin.png", import.meta.url).href;
+
 function findSheetByName(name: string) {
   const wb = flexSheet.workbook;
   for (let i = 0; i < wb.sheetCount; i++) {
@@ -52,6 +55,42 @@ function findSheetByName(name: string) {
   }
   return undefined;
 }
+
+function findSheetIndexByName(name: string): number {
+  const wb = flexSheet.workbook;
+  for (let i = 0; i < wb.sheetCount; i++) {
+    if (wb.getSheet(i)?.name === name) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+void (async (): Promise<void> => {
+  try {
+    const res = await fetch(DEMO_PENGUIN_ASSET);
+    if (!res.ok) {
+      return;
+    }
+    const blob = await res.blob();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = (): void => resolve(r.result as string);
+      r.onerror = (): void => reject(r.error ?? new Error("read failed"));
+      r.readAsDataURL(blob);
+    });
+    const picIdx = findSheetIndexByName(DEMO_FLOATING_PICTURE_SHEET_NAME);
+    if (picIdx < 0) {
+      return;
+    }
+    flexSheet.workbook.activeSheetIndex = picIdx;
+    flexSheet.selection.selectCell(8, 3);
+    flexSheet.refresh();
+    flexSheet.addFloatingPictureFromDataUrl(dataUrl);
+  } catch {
+    /* 资源缺失或解码失败时跳过，不影响表格演示 */
+  }
+})();
 
 const pivotSource = findSheetByName("透视数据源");
 if (pivotSource !== undefined) {
@@ -65,7 +104,12 @@ if (pivotSource !== undefined) {
     destination: { kind: "newSheet", preferredName: "透视表示例" },
   });
   flexSheet.workspace.commands.execute(pivotCmd);
-  flexSheet.workbook.activeSheetIndex = 0;
+  const picIdx = findSheetIndexByName(DEMO_FLOATING_PICTURE_SHEET_NAME);
+  flexSheet.workbook.activeSheetIndex = picIdx >= 0 ? picIdx : 0;
+  if (picIdx >= 0) {
+    flexSheet.selection.selectCell(8, 3);
+    flexSheet.refresh();
+  }
 }
 
 mountGridVerticalScrollbar({ container: gridVscrollHost, flexSheet });

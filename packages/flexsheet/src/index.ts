@@ -185,6 +185,7 @@ export {
   importXlsxToWorkbook,
   type XlsxExportOptions,
   type XlsxFloatingPictureExport,
+  type XlsxFloatingPictureFrameFill,
   parseFlexSheetJson,
   serializeWorkbookToJsonDocument,
   workbookFromFlexSheetJsonDocument,

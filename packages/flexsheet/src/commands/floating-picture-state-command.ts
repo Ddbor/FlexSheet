@@ -1,8 +1,10 @@
 import type { ICommand } from "@flexsheet/core";
 
-import type {
-  FloatingPictureAdjustments,
-  FloatingPictureSnapshot,
+import {
+  DEFAULT_FLOATING_PICTURE_FRAME_FILL,
+  type FloatingPictureAdjustments,
+  type FloatingPictureFrameFill,
+  type FloatingPictureSnapshot,
 } from "../chrome/floating-picture-layer.js";
 
 /** 由 FlexSheet 实现，避免命令模块反向依赖 flex-sheet（循环引用）。 */
@@ -18,6 +20,18 @@ function adjustmentsEqual(a: FloatingPictureAdjustments, b: FloatingPictureAdjus
     a.saturationPct === b.saturationPct &&
     a.colorTemperatureK === b.colorTemperatureK &&
     a.transparencyPct === b.transparencyPct
+  );
+}
+
+function snapshotFrameFill(s: FloatingPictureSnapshot): FloatingPictureFrameFill {
+  return s.frameFill ?? DEFAULT_FLOATING_PICTURE_FRAME_FILL;
+}
+
+function frameFillEqual(a: FloatingPictureFrameFill, b: FloatingPictureFrameFill): boolean {
+  return (
+    a.kind === b.kind &&
+    a.solidColor === b.solidColor &&
+    a.solidTransparencyPct === b.solidTransparencyPct
   );
 }
 
@@ -40,7 +54,8 @@ function snapshotsFloatingGeometryEqual(a: FloatingPictureSnapshot, b: FloatingP
     (a.imgBoxY ?? 0) === (b.imgBoxY ?? 0) &&
     (a.imgBoxW ?? a.width) === (b.imgBoxW ?? b.width) &&
     (a.imgBoxH ?? a.height) === (b.imgBoxH ?? b.height) &&
-    adjustmentsEqual(a.adjustments, b.adjustments)
+    adjustmentsEqual(a.adjustments, b.adjustments) &&
+    frameFillEqual(snapshotFrameFill(a), snapshotFrameFill(b))
   );
 }
 

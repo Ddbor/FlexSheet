@@ -5,7 +5,7 @@
 
 import type { Workbook } from "@flexsheet/core";
 import {
-  floatingPictureNeedsFrameCompositeForXlsx,
+  floatingPictureNeedsRasterForXlsxExport,
   type XlsxFloatingPictureExport,
 } from "@flexsheet/import-export";
 import {
@@ -129,6 +129,75 @@ export const DEFAULT_FLOATING_PICTURE_ADJUSTMENTS: FloatingPictureAdjustments = 
   transparencyPct: 0,
 };
 
+/** 裁剪框内背景填充类型（与「设置图片格式 → 填充与线条」一致）。 */
+export type FloatingPictureFillKind = "none" | "solid" | "gradient" | "picture" | "pattern";
+
+/** 浮动图占位矩形（`fs-fp-item__body`）的填充；当前实现纯色，其它 kind 仅占位无绘制。 */
+export interface FloatingPictureFrameFill {
+  readonly kind: FloatingPictureFillKind;
+  /** `solid` 时使用，CSS `#rrggbb` */
+  readonly solidColor: string;
+  /** 纯色填充透明度 0～100（0 为完全不透明） */
+  readonly solidTransparencyPct: number;
+}
+
+export const DEFAULT_FLOATING_PICTURE_FRAME_FILL: FloatingPictureFrameFill = {
+  kind: "none",
+  solidColor: "#000000",
+  solidTransparencyPct: 0,
+};
+
+function cloneFrameFill(f: FloatingPictureFrameFill): FloatingPictureFrameFill {
+  return { kind: f.kind, solidColor: f.solidColor, solidTransparencyPct: f.solidTransparencyPct };
+}
+
+function frameFillFromSnapshot(s: FloatingPictureSnapshot): FloatingPictureFrameFill {
+  return s.frameFill !== undefined ? cloneFrameFill(s.frameFill) : cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL);
+}
+
+function normalizeSolidColorHex(input: string): string {
+  const t = input.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(t)) {
+    return t.toLowerCase();
+  }
+  if (/^#[0-9a-fA-F]{3}$/.test(t)) {
+    const r = t[1]!;
+    const g = t[2]!;
+    const b = t[3]!;
+    return `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(t)) {
+    return `#${t.toLowerCase()}`;
+  }
+  return "#000000";
+}
+
+function parseHexRgb(hex: string): { readonly r: number; readonly g: number; readonly b: number } | null {
+  const h = normalizeSolidColorHex(hex);
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/.exec(h);
+  if (m === null) {
+    return null;
+  }
+  return {
+    r: Number.parseInt(m[1]!, 16),
+    g: Number.parseInt(m[2]!, 16),
+    b: Number.parseInt(m[3]!, 16),
+  };
+}
+
+/** 将填充模型转为 `background-color`（非 solid 为透明）。 */
+export function frameFillToCssBackground(f: FloatingPictureFrameFill): string {
+  if (f.kind !== "solid") {
+    return "transparent";
+  }
+  const rgb = parseHexRgb(f.solidColor);
+  if (rgb === null) {
+    return "transparent";
+  }
+  const a = clampN(1 - f.solidTransparencyPct / 100, 0, 1);
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`;
+}
+
 function clampN(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
@@ -184,6 +253,8 @@ export interface FloatingPictureSnapshot {
   readonly dataUrl: string;
   readonly z: number;
   readonly adjustments: FloatingPictureAdjustments;
+  /** 裁剪框内背景填充；旧快照省略则视为无填充 */
+  readonly frameFill?: FloatingPictureFrameFill;
   /** 源图像素（解码后；旧快照省略则为 0） */
   readonly naturalWidth?: number;
   readonly naturalHeight?: number;
@@ -212,6 +283,7 @@ export interface FloatingPicturePastePrepared {
   readonly imgBoxY?: number;
   readonly imgBoxW?: number;
   readonly imgBoxH?: number;
+  readonly frameFill?: FloatingPictureFrameFill;
 }
 
 interface PictureModel {
@@ -237,6 +309,7 @@ interface PictureModel {
   imgBoxY: number;
   imgBoxW: number;
   imgBoxH: number;
+  frameFill: FloatingPictureFrameFill;
 }
 
 type ResizeHandleId = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -487,6 +560,7 @@ export class FloatingPictureLayer {
       imgBoxY: m.imgBoxY,
       imgBoxW: m.imgBoxW,
       imgBoxH: m.imgBoxH,
+      frameFill: cloneFrameFill(m.frameFill),
     };
   }
 
@@ -515,6 +589,7 @@ export class FloatingPictureLayer {
       imgBoxY: snapshot.imgBoxY ?? 0,
       imgBoxW: snapshot.imgBoxW ?? snapshot.width,
       imgBoxH: snapshot.imgBoxH ?? snapshot.height,
+      frameFill: frameFillFromSnapshot(snapshot),
     };
     normalizeImgBoxInModel(model);
     this.zCounter = Math.max(this.zCounter, snapshot.z);
@@ -615,6 +690,10 @@ export class FloatingPictureLayer {
       imgBoxY: p.imgBoxY ?? 0,
       imgBoxW: p.imgBoxW ?? p.width,
       imgBoxH: p.imgBoxH ?? p.height,
+      frameFill:
+        p.frameFill !== undefined
+          ? cloneFrameFill(p.frameFill)
+          : cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL),
     };
     normalizeImgBoxInModel(model);
     const el = this.createItemElement(model);
@@ -642,6 +721,7 @@ export class FloatingPictureLayer {
       imgBoxY: model.imgBoxY,
       imgBoxW: model.imgBoxW,
       imgBoxH: model.imgBoxH,
+      frameFill: cloneFrameFill(model.frameFill),
     };
   }
 
@@ -662,6 +742,7 @@ export class FloatingPictureLayer {
       imgBoxY: model.imgBoxY,
       imgBoxW: model.imgBoxW,
       imgBoxH: model.imgBoxH,
+      frameFill: cloneFrameFill(model.frameFill),
     };
   }
 
@@ -703,6 +784,10 @@ export class FloatingPictureLayer {
     }
     const f = buildFloatingPictureCssFilter(model.adjustments);
     ctx.clearRect(0, 0, W, H);
+    if (model.frameFill.kind === "solid") {
+      ctx.fillStyle = frameFillToCssBackground(model.frameFill);
+      ctx.fillRect(0, 0, W, H);
+    }
     ctx.filter = f;
     try {
       ctx.drawImage(img, 0, 0, nw, nh, model.imgBoxX, model.imgBoxY, model.imgBoxW, model.imgBoxH);
@@ -739,7 +824,7 @@ export class FloatingPictureLayer {
     const out: XlsxFloatingPictureExport[] = [];
     for (const { model } of this.byId.values()) {
       const dto = this.pictureModelToXlsxExportDto(model);
-      if (floatingPictureNeedsFrameCompositeForXlsx(dto)) {
+      if (floatingPictureNeedsRasterForXlsxExport(dto)) {
         const url = await this.rasterizePictureModelToFramePngDataUrl(model);
         if (url !== null) {
           const rw = Math.max(1, Math.round(model.width));
@@ -753,6 +838,7 @@ export class FloatingPictureLayer {
             imgBoxY: 0,
             imgBoxW: rw,
             imgBoxH: rh,
+            frameFill: undefined,
           });
           continue;
         }
@@ -921,6 +1007,7 @@ export class FloatingPictureLayer {
         imgBoxY: 0,
         imgBoxW: w,
         imgBoxH: h,
+        frameFill: cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL),
       };
       normalizeImgBoxInModel(model);
       const el = this.createItemElement(model);
@@ -933,6 +1020,13 @@ export class FloatingPictureLayer {
       /* 忽略损坏文件 */
     };
     img.src = dataUrl;
+  }
+
+  private applyFrameFillToItem(el: HTMLDivElement, fill: FloatingPictureFrameFill): void {
+    const body = el.querySelector(".fs-fp-item__body");
+    if (body instanceof HTMLElement) {
+      body.style.backgroundColor = frameFillToCssBackground(fill);
+    }
   }
 
   private createItemElement(model: PictureModel): HTMLDivElement {
@@ -993,6 +1087,7 @@ export class FloatingPictureLayer {
     wrap.appendChild(focus);
     wrap.addEventListener("pointerdown", (ev) => this.onItemPointerDown(ev, model.id));
     this.applyImageFilterToElement(wrap, model);
+    this.applyFrameFillToItem(wrap, model.frameFill);
     this.ensureCropOverlayMounted(wrap);
     this.syncInnerLayout(model, wrap);
     return wrap;
@@ -1187,6 +1282,7 @@ export class FloatingPictureLayer {
     m.imgBoxY = snapshot.imgBoxY ?? 0;
     m.imgBoxW = snapshot.imgBoxW ?? snapshot.width;
     m.imgBoxH = snapshot.imgBoxH ?? snapshot.height;
+    m.frameFill = frameFillFromSnapshot(snapshot);
     normalizeImgBoxInModel(m);
     rec.el.style.zIndex = String(m.z);
     const img = rec.el.querySelector(".fs-fp-item__img");
@@ -1194,6 +1290,7 @@ export class FloatingPictureLayer {
       img.src = m.dataUrl;
     }
     this.applyImageFilterToElement(rec.el, m);
+    this.applyFrameFillToItem(rec.el, m.frameFill);
     this.syncInnerLayout(m, rec.el);
     this.applyGeometry(m, rec.el);
   }
@@ -1225,6 +1322,40 @@ export class FloatingPictureLayer {
     }
     rec.model.adjustments = cloneAdjustments(DEFAULT_FLOATING_PICTURE_ADJUSTMENTS);
     this.applyImageFilterToElement(rec.el, rec.model);
+  }
+
+  getFloatingPictureFrameFill(pictureId: string): FloatingPictureFrameFill | null {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return null;
+    }
+    return cloneFrameFill(rec.model.frameFill);
+  }
+
+  setFloatingPictureFrameFill(pictureId: string, patch: Partial<FloatingPictureFrameFill>): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    const cur = rec.model.frameFill;
+    const kind = patch.kind ?? cur.kind;
+    const solidColor =
+      patch.solidColor !== undefined ? normalizeSolidColorHex(patch.solidColor) : cur.solidColor;
+    const solidTransparencyPct =
+      patch.solidTransparencyPct !== undefined
+        ? clampN(patch.solidTransparencyPct, 0, 100)
+        : cur.solidTransparencyPct;
+    rec.model.frameFill = { kind, solidColor, solidTransparencyPct };
+    this.applyFrameFillToItem(rec.el, rec.model.frameFill);
+  }
+
+  resetFloatingPictureFrameFill(pictureId: string): void {
+    const rec = this.byId.get(pictureId);
+    if (rec === undefined) {
+      return;
+    }
+    rec.model.frameFill = cloneFrameFill(DEFAULT_FLOATING_PICTURE_FRAME_FILL);
+    this.applyFrameFillToItem(rec.el, rec.model.frameFill);
   }
 
   /** 画布像素下的尺寸与偏移（格式窗格「裁剪」区只读展示）。 */

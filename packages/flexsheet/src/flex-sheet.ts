@@ -447,6 +447,21 @@ export class FlexSheet {
         this.floatingPictureLayer.setFloatingPictureAdjustments(pid, patch);
         this.formatPicturePane.syncFromModel();
       },
+      getFrameFill: () => {
+        const pid = this.floatingPictureLayer.getSelectedPictureId();
+        if (pid === null) {
+          return null;
+        }
+        return this.floatingPictureLayer.getFloatingPictureFrameFill(pid);
+      },
+      setFrameFill: (patch) => {
+        const pid = this.floatingPictureLayer.getSelectedPictureId();
+        if (pid === null) {
+          return;
+        }
+        this.floatingPictureLayer.setFloatingPictureFrameFill(pid, patch);
+        this.formatPicturePane.syncFromModel();
+      },
       onClose: () => {},
     });
     this.floatingPictureLayer.subscribeFloatingPictureFocus((active) => {
@@ -1663,6 +1678,17 @@ export class FlexSheet {
     return this.floatingPictureLayer.insertFloatingPictureFromPrepared(prepared);
   }
 
+  /**
+   * 从图片 data URL 插入浮动图（与 Ribbon「插入 -> 图片」一致，锚定当前活动单元格）。
+   * 供演示页或宿主预载资源使用。
+   */
+  addFloatingPictureFromDataUrl(dataUrl: string): void {
+    if (this.isCellEditing()) {
+      return;
+    }
+    this.floatingPictureLayer.addPictureFromDataUrl(dataUrl);
+  }
+
   /** Ribbon「更正」缩略图预览：当前选中浮动图 dataUrl。 */
   getSelectedFloatingPictureDataUrl(): string | null {
     const id = this.floatingPictureLayer.getSelectedPictureId();
@@ -1698,6 +1724,7 @@ export class FlexSheet {
       return;
     }
     this.floatingPictureLayer.resetFloatingPictureAdjustments(id);
+    this.floatingPictureLayer.resetFloatingPictureFrameFill(id);
     if (this.formatPicturePane.isOpen()) {
       this.formatPicturePane.syncFromModel();
     }

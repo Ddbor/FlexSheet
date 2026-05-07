@@ -3,9 +3,11 @@ export {
   exportWorkbookToXlsxBlob,
   exportWorkbookToXlsxBytes,
   floatingPictureNeedsFrameCompositeForXlsx,
+  floatingPictureNeedsRasterForXlsxExport,
   floatingPictureSrcRectSides,
   type XlsxExportOptions,
   type XlsxFloatingPictureExport,
+  type XlsxFloatingPictureFrameFill,
 } from "./export-xlsx.js";
 export { decodeTextFileBytes } from "./text-file-decode.js";
 export { importXlsxToWorkbook } from "./import-xlsx.js";

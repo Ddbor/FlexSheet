@@ -3,6 +3,7 @@ import { Workbook, Worksheet } from "@flexsheet/core";
 import {
   exportWorkbookToXlsxBytes,
   floatingPictureNeedsFrameCompositeForXlsx,
+  floatingPictureNeedsRasterForXlsxExport,
   floatingPictureSrcRectSides,
   unzipToMap,
   type XlsxFloatingPictureExport,
@@ -59,6 +60,65 @@ describe("xlsx export floating pictures", () => {
         imgBoxH: 50,
       }),
     ).toBe(true);
+  });
+
+  it("raster export when solid frame fill even if image fills geometry", () => {
+    const base: Pick<
+      XlsxFloatingPictureExport,
+      "sheetName" | "anchorRow" | "anchorCol" | "relCX" | "relCY" | "rotationRad" | "dataUrl"
+    > = {
+      sheetName: "S",
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+    };
+    const full: XlsxFloatingPictureExport = {
+      ...base,
+      width: 100,
+      height: 100,
+      imgBoxX: 0,
+      imgBoxY: 0,
+      imgBoxW: 100,
+      imgBoxH: 100,
+      frameFill: { kind: "solid", solidColor: "#fde9d9", solidTransparencyPct: 0 },
+    };
+    expect(floatingPictureNeedsFrameCompositeForXlsx(full)).toBe(false);
+    expect(floatingPictureNeedsRasterForXlsxExport(full)).toBe(true);
+  });
+
+  it("writes a:solidFill in drawing when frameFill is solid (sync export)", () => {
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 12, 12);
+    wb.addSheet(sh);
+    const pic: XlsxFloatingPictureExport = {
+      sheetName: sh.name,
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      width: 64,
+      height: 64,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+      frameFill: { kind: "solid", solidColor: "#FDE9D9", solidTransparencyPct: 0 },
+    };
+    const bytes = exportWorkbookToXlsxBytes(wb, {
+      includeStyles: true,
+      includeFormulas: true,
+      includeSparseStyledEmpty: true,
+      viewZoom: 1,
+      floatingPictures: [pic],
+    });
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const drawing = new TextDecoder().decode(map.get("xl/drawings/drawing1.xml"));
+    expect(drawing).toContain("<a:solidFill>");
+    expect(drawing).toContain("<a:srgbClr");
+    expect(drawing).toContain('val="FDE9D9"');
   });
 
   it("writes drawings, media, worksheet rel and drawing element", () => {

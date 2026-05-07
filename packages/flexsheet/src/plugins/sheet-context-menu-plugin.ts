@@ -467,6 +467,15 @@ export class SheetContextMenuPlugin extends PluginBase {
           flex.enterFloatingPictureCropMode(pictureId);
         },
       },
+      {
+        id: "floatingPicture.formatPane",
+        label: "设置图片格式",
+        order: 3,
+        onSelect: () => {
+          flex.focusFloatingPictureById(pictureId);
+          flex.openFloatingPictureFormatPane();
+        },
+      },
     ];
     this.showMenu(ev.clientX, ev.clientY, items);
   };
