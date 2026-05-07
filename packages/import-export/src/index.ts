@@ -8,6 +8,7 @@ export {
   type XlsxExportOptions,
   type XlsxFloatingPictureExport,
   type XlsxFloatingPictureFrameFill,
+  type XlsxFloatingPictureGradientRelativeRect,
   type XlsxFloatingPictureGradientStop,
 } from "./export-xlsx.js";
 export { decodeTextFileBytes } from "./text-file-decode.js";

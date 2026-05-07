@@ -9,20 +9,32 @@ export interface XlsxFloatingPictureGradientStop {
   readonly brightnessPct: number;
 }
 
-/** 与 FlexSheet「图片格式 → 填充」一致；`solid` / 线性 `gradient` 写入 XLSX `spPr`。 */
+/** DrawingML `a:fillToRect` / `a:tileRect`：OOXML 百分度（100000=100%，可为负）。 */
+export interface XlsxFloatingPictureGradientRelativeRect {
+  readonly l: number;
+  readonly t: number;
+  readonly r: number;
+  readonly b: number;
+}
+
+/** 与 FlexSheet「图片格式 → 填充」一致；`solid` / `gradient`（线性 `a:lin`、射线 `a:path`）写入 XLSX `spPr`。 */
 export interface XlsxFloatingPictureFrameFill {
   readonly kind: "none" | "solid" | "gradient" | "picture" | "pattern";
   /** `solid` / 非渐变占位 `#rrggbb` */
   readonly solidColor: string;
   /** 纯色填充透明度 0～100（100 为全透明） */
   readonly solidTransparencyPct: number;
-  readonly gradientType?: "linear" | "radial" | "rectangular" | "path";
+  readonly gradientType?: "linear" | "radial";
   /** 用户角度：0° 左→右，90° 上→下，顺时针；仅线性渐变导出 `a:lin`。 */
   readonly gradientAngleDeg?: number;
   readonly linearDirectionIndex?: number;
   readonly gradientStops?: readonly XlsxFloatingPictureGradientStop[];
   readonly gradientRotateWithShape?: boolean;
   readonly gradientPresetId?: number | null;
+  /** 射线渐变 `a:fillToRect`；缺省导出 `0,0,100000,100000`（与 Excel / SpreadJS 常见射线一致）。 */
+  readonly radialFillLtrb?: XlsxFloatingPictureGradientRelativeRect;
+  /** 射线渐变 `a:tileRect`；缺省导出 `-100000,-100000,0,0`。 */
+  readonly radialTileLtrb?: XlsxFloatingPictureGradientRelativeRect;
 }
 
 /** 浮动图片导出描述（与 FlexSheet 浮动层模型一致；尺寸与偏移为画布 CSS 像素，需配合 `viewZoom`）。 */
@@ -289,7 +301,6 @@ function buildPicSpPrLinearGradientFillXml(fill: XlsxFloatingPictureFrameFill | 
   if (fill === undefined || fill.kind !== "gradient") {
     return "";
   }
-  /** Excel 图片 `spPr` 仅稳定互操作线性 `a:lin`；径向等在宿主中为近似，导出为线性（角度默认 90°）。 */
   const userDeg = fill.gradientAngleDeg !== undefined ? fill.gradientAngleDeg : 90;
   const u = ((userDeg % 360) + 360) % 360;
   let ang = Math.round(u * 60000) % OOXML_ANGLE_FULL_CIRCLE;
@@ -320,11 +331,63 @@ function buildPicSpPrLinearGradientFillXml(fill: XlsxFloatingPictureFrameFill | 
   );
 }
 
+const DEFAULT_RADIAL_FILL_LTRB: Readonly<XlsxFloatingPictureGradientRelativeRect> = {
+  l: 0,
+  t: 0,
+  r: 100000,
+  b: 100000,
+};
+
+const DEFAULT_RADIAL_TILE_LTRB: Readonly<XlsxFloatingPictureGradientRelativeRect> = {
+  l: -100000,
+  t: -100000,
+  r: 0,
+  b: 0,
+};
+
+/**
+ * 射线渐变：`a:gradFill` + `a:path path="circle"` + `fillToRect` + `tileRect`（与 Excel 一致）。
+ */
+function buildPicSpPrRadialGradientFillXml(fill: XlsxFloatingPictureFrameFill | undefined): string {
+  if (fill === undefined || fill.kind !== "gradient") {
+    return "";
+  }
+  const rotWs = fill.gradientRotateWithShape !== false ? "1" : "0";
+  const stops = normalizeGradientStopsForExport(fill.gradientStops);
+  const gsParts: string[] = [];
+  for (const s of stops) {
+    const conv = stopToSrgbForOoxml(s);
+    if (conv === null) {
+      continue;
+    }
+    const pos = Math.min(100000, Math.max(0, Math.round(s.positionPct * 1000)));
+    const alphaXml = conv.alphaVal >= 100000 ? "" : `<a:alpha val="${conv.alphaVal}"/>`;
+    gsParts.push(`<a:gs pos="${pos}"><a:srgbClr val="${conv.hex}">${alphaXml}</a:srgbClr></a:gs>`);
+  }
+  if (gsParts.length < 2) {
+    return "";
+  }
+  const ftr = fill.radialFillLtrb ?? DEFAULT_RADIAL_FILL_LTRB;
+  const tr = fill.radialTileLtrb ?? DEFAULT_RADIAL_TILE_LTRB;
+  return (
+    `<a:gradFill rotWithShape="${rotWs}">` +
+    `<a:gsLst>${gsParts.join("")}</a:gsLst>` +
+    `<a:path path="circle"><a:fillToRect l="${ftr.l}" t="${ftr.t}" r="${ftr.r}" b="${ftr.b}"/></a:path>` +
+    `<a:tileRect l="${tr.l}" t="${tr.t}" r="${tr.r}" b="${tr.b}"/>` +
+    `</a:gradFill>`
+  );
+}
+
 function buildPicSpPrFillXml(fill: XlsxFloatingPictureFrameFill | undefined): string {
   if (fill === undefined) {
     return "";
   }
   if (fill.kind === "gradient") {
+    const gt = fill.gradientType ?? "linear";
+    if (gt === "radial") {
+      const r = buildPicSpPrRadialGradientFillXml(fill);
+      return r !== "" ? r : "";
+    }
     const g = buildPicSpPrLinearGradientFillXml(fill);
     return g !== "" ? g : "";
   }

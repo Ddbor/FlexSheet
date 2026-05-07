@@ -544,6 +544,7 @@ export const DEFAULT_XLSX_EXPORT_OPTIONS: XlsxExportOptions = {
 export type {
   XlsxFloatingPictureExport,
   XlsxFloatingPictureFrameFill,
+  XlsxFloatingPictureGradientRelativeRect,
   XlsxFloatingPictureGradientStop,
 } from "./export-xlsx-drawing.js";
 export {

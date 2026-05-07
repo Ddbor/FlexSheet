@@ -2,6 +2,7 @@ import type { Worksheet } from "@flexsheet/core";
 import {
   REL_WORKSHEET_DRAWING,
   type XlsxFloatingPictureFrameFill,
+  type XlsxFloatingPictureGradientRelativeRect,
   type XlsxFloatingPictureGradientStop,
 } from "./export-xlsx-drawing.js";
 
@@ -385,29 +386,31 @@ function resolveGradientStopColor(
   return null;
 }
 
-function parseSpPrGradientFill(
-  spPr: Element,
+function parseOoxmlRelativeRectLtrb(
+  el: Element | undefined,
+): XlsxFloatingPictureGradientRelativeRect | undefined {
+  if (el === undefined) {
+    return undefined;
+  }
+  const q = (a: string | null): number => {
+    if (a === null || a === "") {
+      return 0;
+    }
+    const n = Number(a);
+    return Number.isFinite(n) ? Math.round(n) : 0;
+  };
+  return {
+    l: q(el.getAttribute("l")),
+    t: q(el.getAttribute("t")),
+    r: q(el.getAttribute("r")),
+    b: q(el.getAttribute("b")),
+  };
+}
+
+function parseGradientStopsFromGsLst(
+  gsLst: Element,
   schemeColors: ReadonlyMap<string, string>,
-): XlsxFloatingPictureFrameFill | undefined {
-  const grad = firstLocal(spPr, "gradFill");
-  if (grad === undefined) {
-    return undefined;
-  }
-  const lin = firstLocal(grad, "lin");
-  if (lin === undefined) {
-    return undefined;
-  }
-  const angAttr = lin.getAttribute("ang");
-  const ang60000 = angAttr !== null && angAttr !== "" ? Number(angAttr) : 5400000;
-  const gradientAngleDeg = Number.isFinite(ang60000)
-    ? (((ang60000 / 60000) % 360) + 360) % 360
-    : 90;
-  const rot = grad.getAttribute("rotWithShape");
-  const gradientRotateWithShape = rot !== "0" && rot !== "false";
-  const gsLst = firstLocal(grad, "gsLst");
-  if (gsLst === undefined) {
-    return undefined;
-  }
+): XlsxFloatingPictureGradientStop[] | undefined {
   const stops: XlsxFloatingPictureGradientStop[] = [];
   for (const gs of childrenLocal(gsLst, "gs")) {
     const posAttr = gs.getAttribute("pos");
@@ -440,16 +443,68 @@ function parseSpPrGradientFill(
     return undefined;
   }
   stops.sort((a, b) => a.positionPct - b.positionPct);
-  return {
-    kind: "gradient",
-    solidColor: "#000000",
-    solidTransparencyPct: 0,
-    gradientType: "linear",
-    gradientAngleDeg,
-    gradientStops: stops,
-    gradientRotateWithShape,
-    gradientPresetId: null,
-  };
+  return stops;
+}
+
+function parseSpPrGradientFill(
+  spPr: Element,
+  schemeColors: ReadonlyMap<string, string>,
+): XlsxFloatingPictureFrameFill | undefined {
+  const grad = firstLocal(spPr, "gradFill");
+  if (grad === undefined) {
+    return undefined;
+  }
+  const gsLst = firstLocal(grad, "gsLst");
+  if (gsLst === undefined) {
+    return undefined;
+  }
+  const stops = parseGradientStopsFromGsLst(gsLst, schemeColors);
+  if (stops === undefined) {
+    return undefined;
+  }
+  const rot = grad.getAttribute("rotWithShape");
+  const gradientRotateWithShape = rot !== "0" && rot !== "false";
+
+  const lin = firstLocal(grad, "lin");
+  if (lin !== undefined) {
+    const angAttr = lin.getAttribute("ang");
+    const ang60000 = angAttr !== null && angAttr !== "" ? Number(angAttr) : 5400000;
+    const gradientAngleDeg = Number.isFinite(ang60000)
+      ? (((ang60000 / 60000) % 360) + 360) % 360
+      : 90;
+    return {
+      kind: "gradient",
+      solidColor: "#000000",
+      solidTransparencyPct: 0,
+      gradientType: "linear",
+      gradientAngleDeg,
+      gradientStops: stops,
+      gradientRotateWithShape,
+      gradientPresetId: null,
+    };
+  }
+
+  const pathEl = firstLocal(grad, "path");
+  if (pathEl !== undefined) {
+    const ftrEl = firstLocal(pathEl, "fillToRect");
+    const tileEl = firstLocal(grad, "tileRect");
+    const radialFillLtrb = parseOoxmlRelativeRectLtrb(ftrEl);
+    const radialTileLtrb = parseOoxmlRelativeRectLtrb(tileEl);
+    return {
+      kind: "gradient",
+      solidColor: "#000000",
+      solidTransparencyPct: 0,
+      gradientType: "radial",
+      gradientAngleDeg: 90,
+      gradientStops: stops,
+      gradientRotateWithShape,
+      gradientPresetId: null,
+      ...(radialFillLtrb !== undefined ? { radialFillLtrb } : {}),
+      ...(radialTileLtrb !== undefined ? { radialTileLtrb } : {}),
+    };
+  }
+
+  return undefined;
 }
 
 function parseSpPrFrameFill(

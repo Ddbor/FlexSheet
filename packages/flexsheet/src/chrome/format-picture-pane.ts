@@ -623,14 +623,16 @@ export function createFormatPicturePane(
   const fillBody = document.createElement("div");
   fillBody.className = "fs-format-picture__sec-body";
 
-  const FILL_OPTIONS: readonly { readonly kind: FloatingPictureFillKind; readonly label: string }[] =
-    [
-      { kind: "none", label: "无填充" },
-      { kind: "solid", label: "纯色填充" },
-      { kind: "gradient", label: "渐变填充" },
-      { kind: "picture", label: "图片或纹理填充" },
-      { kind: "pattern", label: "图案填充" },
-    ];
+  const FILL_OPTIONS: readonly {
+    readonly kind: FloatingPictureFillKind;
+    readonly label: string;
+  }[] = [
+    { kind: "none", label: "无填充" },
+    { kind: "solid", label: "纯色填充" },
+    { kind: "gradient", label: "渐变填充" },
+    { kind: "picture", label: "图片或纹理填充" },
+    { kind: "pattern", label: "图案填充" },
+  ];
 
   for (const { kind, label } of FILL_OPTIONS) {
     const row = document.createElement("div");
@@ -838,8 +840,6 @@ export function createFormatPicturePane(
   for (const [v, lab] of [
     ["linear", "线性"],
     ["radial", "射线"],
-    ["rectangular", "矩形"],
-    ["path", "路径"],
   ] as const) {
     const o = document.createElement("option");
     o.value = v;
@@ -1042,7 +1042,8 @@ export function createFormatPicturePane(
     }
     const st = frameFillToFillLayerStyles(ff);
     presetSwatch.style.backgroundImage = st.backgroundImage;
-    presetSwatch.style.backgroundColor = st.backgroundColor === "transparent" ? "" : st.backgroundColor;
+    presetSwatch.style.backgroundColor =
+      st.backgroundColor === "transparent" ? "" : st.backgroundColor;
   }
 
   function refreshGradientMarkers(ff: FloatingPictureFrameFill): void {
@@ -1155,7 +1156,8 @@ export function createFormatPicturePane(
     if (ff.kind !== "gradient") {
       return;
     }
-    const gt = ff.gradientType ?? "linear";
+    const rawGt = ff.gradientType ?? "linear";
+    const gt = rawGt === "linear" || rawGt === "radial" ? rawGt : "radial";
     typeSel.value = gt;
     const ang = ff.gradientAngleDeg ?? 90;
     angNum.value = String(Math.round(ang));
@@ -1235,7 +1237,8 @@ export function createFormatPicturePane(
       const cell = document.createElement("button");
       cell.type = "button";
       cell.className =
-        "fs-format-picture__grad-dir-cell" + (i === curIdx ? " fs-format-picture__grad-dir-cell--on" : "");
+        "fs-format-picture__grad-dir-cell" +
+        (i === curIdx ? " fs-format-picture__grad-dir-cell--on" : "");
       const css = userAngleToCssDeg(u);
       cell.style.backgroundImage = `linear-gradient(${css}deg, #5b9bd5, #ffffff)`;
       cell.title = `${u}°`;
@@ -1295,7 +1298,17 @@ export function createFormatPicturePane(
       return;
     }
     const v = typeSel.value as FloatingPictureGradientType;
-    options.setFrameFill({ kind: "gradient", gradientType: v, gradientPresetId: null });
+    if (v === "radial") {
+      options.setFrameFill({
+        kind: "gradient",
+        gradientType: "radial",
+        gradientPresetId: null,
+        radialFillLtrb: { l: 0, t: 0, r: 100000, b: 100000 },
+        radialTileLtrb: { l: -100000, t: -100000, r: 0, b: 0 },
+      });
+    } else {
+      options.setFrameFill({ kind: "gradient", gradientType: "linear", gradientPresetId: null });
+    }
     const ff = options.getFrameFill();
     if (ff !== null) {
       syncGradientFromModel(ff);
@@ -1339,9 +1352,7 @@ export function createFormatPicturePane(
       }
     }
     const baseColor =
-      lo !== null && hi !== null
-        ? lo.color
-        : ff.gradientStops[0]?.color ?? "#5b9bd5";
+      lo !== null && hi !== null ? lo.color : (ff.gradientStops[0]?.color ?? "#5b9bd5");
     const newStop: FloatingPictureGradientStop = {
       positionPct: pct,
       color: baseColor,
@@ -1367,9 +1378,7 @@ export function createFormatPicturePane(
       return;
     }
     const mid =
-      stops.length >= 2
-        ? (stops[0]!.positionPct + stops[stops.length - 1]!.positionPct) / 2
-        : 50;
+      stops.length >= 2 ? (stops[0]!.positionPct + stops[stops.length - 1]!.positionPct) / 2 : 50;
     const last = stops[stops.length - 1] ?? {
       positionPct: 100,
       color: "#ffffff",
@@ -1497,7 +1506,9 @@ export function createFormatPicturePane(
     }
     const pct = Math.min(100, Math.max(0, n));
     const ix = Math.min(selectedGradientStopIdx, ff.gradientStops.length - 1);
-    const next = ff.gradientStops.map((st, i) => (i === ix ? { ...st, positionPct: pct } : { ...st }));
+    const next = ff.gradientStops.map((st, i) =>
+      i === ix ? { ...st, positionPct: pct } : { ...st },
+    );
     options.setFrameFill({ gradientStops: next, gradientPresetId: null });
   };
   gPosNum.addEventListener("change", applyGPos);

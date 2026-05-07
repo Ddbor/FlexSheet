@@ -201,6 +201,7 @@ export {
   type XlsxExportOptions,
   type XlsxFloatingPictureExport,
   type XlsxFloatingPictureFrameFill,
+  type XlsxFloatingPictureGradientRelativeRect,
   type XlsxFloatingPictureGradientStop,
   parseFlexSheetJson,
   serializeWorkbookToJsonDocument,

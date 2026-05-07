@@ -4,7 +4,11 @@
  */
 
 import type { Workbook } from "@flexsheet/core";
-import { type XlsxFloatingPictureExport, type XlsxImportedFloatingPicture } from "@flexsheet/import-export";
+import {
+  type XlsxFloatingPictureExport,
+  type XlsxFloatingPictureGradientRelativeRect,
+  type XlsxImportedFloatingPicture,
+} from "@flexsheet/import-export";
 import {
   HEADER_STRIP_BASE_HEIGHT,
   HEADER_STRIP_BASE_WIDTH,
@@ -148,7 +152,10 @@ export const DEFAULT_FLOATING_PICTURE_ADJUSTMENTS: FloatingPictureAdjustments = 
 /** 裁剪框内背景填充类型（与「设置图片格式 → 填充与线条」一致）。 */
 export type FloatingPictureFillKind = "none" | "solid" | "gradient" | "picture" | "pattern";
 
-export type FloatingPictureGradientType = "linear" | "radial" | "rectangular" | "path";
+export type FloatingPictureGradientType = "linear" | "radial";
+
+/** DrawingML `a:fillToRect` / `a:tileRect`（100000=100%，可为负）；与 {@link XlsxFloatingPictureGradientRelativeRect} 同形。 */
+export type FloatingPictureGradientRelativeRect = XlsxFloatingPictureGradientRelativeRect;
 
 export interface FloatingPictureGradientStop {
   readonly positionPct: number;
@@ -170,8 +177,7 @@ export interface FloatingPictureFrameFill {
   readonly solidTransparencyPct: number;
   readonly gradientType?: FloatingPictureGradientType;
   /**
-   * 用户角度（与 Excel 习惯一致）：0°=左→右，90°=上→下，顺时针递增。
-   * 仅 `linear` 等使用；`radial` / `rectangular` / `path` 可忽略或作占位。
+   * 用户角度（与 Excel 习惯一致）：0°=左→右，90°=上→下，顺时针递增；仅线性渐变使用。
    */
   readonly gradientAngleDeg?: number;
   /** 线性渐变方向面板 0～7，与 `LINEAR_DIRECTION_USER_ANGLES` 索引对应 */
@@ -180,6 +186,10 @@ export interface FloatingPictureFrameFill {
   /** 与形状一起旋转：为 false 时填充在画布坐标系中保持方向（相对形状反向旋转） */
   readonly gradientRotateWithShape?: boolean;
   readonly gradientPresetId?: number | null;
+  /** 射线渐变 `a:fillToRect`；缺省导出由 import-export 填 Excel 常见默认。 */
+  readonly radialFillLtrb?: FloatingPictureGradientRelativeRect;
+  /** 射线渐变 `a:tileRect`。 */
+  readonly radialTileLtrb?: FloatingPictureGradientRelativeRect;
 }
 
 export const DEFAULT_FLOATING_PICTURE_FRAME_FILL: FloatingPictureFrameFill = {
@@ -230,12 +240,26 @@ function normalizeGradientStops(
   return raw;
 }
 
+function coerceGradientType(
+  gt: FloatingPictureGradientType | "rectangular" | "path" | undefined,
+): FloatingPictureGradientType {
+  const x = gt ?? "linear";
+  if (x === "rectangular" || x === "path") {
+    return "radial";
+  }
+  return x;
+}
+
 function normalizeGradientFill(f: FloatingPictureFrameFill): FloatingPictureFrameFill {
-  const gt = f.gradientType ?? "linear";
+  const gt = coerceGradientType(
+    f.gradientType as FloatingPictureGradientType | "rectangular" | "path" | undefined,
+  );
   const stops = normalizeGradientStops(f.gradientStops);
   const angle = f.gradientAngleDeg !== undefined ? clampN(f.gradientAngleDeg, 0, 359) : 90;
   const dirIdx =
-    f.linearDirectionIndex !== undefined ? clampN(Math.floor(f.linearDirectionIndex), 0, 7) : undefined;
+    f.linearDirectionIndex !== undefined
+      ? clampN(Math.floor(f.linearDirectionIndex), 0, 7)
+      : undefined;
   return {
     kind: "gradient",
     solidColor: f.solidColor,
@@ -246,6 +270,8 @@ function normalizeGradientFill(f: FloatingPictureFrameFill): FloatingPictureFram
     gradientStops: stops,
     gradientRotateWithShape: f.gradientRotateWithShape !== false,
     gradientPresetId: f.gradientPresetId ?? null,
+    ...(f.radialFillLtrb !== undefined ? { radialFillLtrb: { ...f.radialFillLtrb } } : {}),
+    ...(f.radialTileLtrb !== undefined ? { radialTileLtrb: { ...f.radialTileLtrb } } : {}),
   };
 }
 
@@ -258,12 +284,16 @@ function cloneFrameFill(f: FloatingPictureFrameFill): FloatingPictureFrameFill {
     kind: "gradient",
     solidColor: f.solidColor,
     solidTransparencyPct: f.solidTransparencyPct,
-    gradientType: f.gradientType,
+    gradientType: coerceGradientType(
+      f.gradientType as FloatingPictureGradientType | "rectangular" | "path" | undefined,
+    ),
     gradientAngleDeg: f.gradientAngleDeg,
     linearDirectionIndex: f.linearDirectionIndex,
     gradientStops: stops,
     gradientRotateWithShape: f.gradientRotateWithShape,
     gradientPresetId: f.gradientPresetId,
+    radialFillLtrb: f.radialFillLtrb !== undefined ? { ...f.radialFillLtrb } : undefined,
+    radialTileLtrb: f.radialTileLtrb !== undefined ? { ...f.radialTileLtrb } : undefined,
   });
 }
 
@@ -282,13 +312,23 @@ function mergeFrameFill(
         patch.solidTransparencyPct !== undefined
           ? clampN(patch.solidTransparencyPct, 0, 100)
           : base.solidTransparencyPct,
-      gradientType: patch.gradientType ?? base.gradientType,
+      gradientType: coerceGradientType(
+        (patch.gradientType !== undefined ? patch.gradientType : base.gradientType) as
+          | FloatingPictureGradientType
+          | "rectangular"
+          | "path"
+          | undefined,
+      ),
       gradientAngleDeg: patch.gradientAngleDeg ?? base.gradientAngleDeg,
       linearDirectionIndex: patch.linearDirectionIndex ?? base.linearDirectionIndex,
       gradientStops: patch.gradientStops ?? base.gradientStops,
       gradientRotateWithShape: patch.gradientRotateWithShape ?? base.gradientRotateWithShape,
       gradientPresetId:
         patch.gradientPresetId !== undefined ? patch.gradientPresetId : base.gradientPresetId,
+      radialFillLtrb:
+        patch.radialFillLtrb !== undefined ? { ...patch.radialFillLtrb } : base.radialFillLtrb,
+      radialTileLtrb:
+        patch.radialTileLtrb !== undefined ? { ...patch.radialTileLtrb } : base.radialTileLtrb,
     };
     return normalizeGradientFill(next);
   }
@@ -406,7 +446,7 @@ export function gradientStopToRgbaCss(s: FloatingPictureGradientStop): string {
 }
 
 function buildCssGradientBackgroundImage(f: FloatingPictureFrameFill): string {
-  const gt = f.gradientType ?? "linear";
+  const gt = coerceGradientType(f.gradientType);
   const stops = normalizeGradientStops(f.gradientStops);
   const partStr = stops
     .map((s) => {
@@ -418,10 +458,10 @@ function buildCssGradientBackgroundImage(f: FloatingPictureFrameFill): string {
     const ang = userGradientAngleToCssAngle(f.gradientAngleDeg ?? 90);
     return `linear-gradient(${ang}deg, ${partStr})`;
   }
-  if (gt === "rectangular") {
-    return `radial-gradient(ellipse farthest-corner at center, ${partStr})`;
-  }
-  return `radial-gradient(circle at center, ${partStr})`;
+  const d = f.radialFillLtrb;
+  const cx = d !== undefined ? clampN((d.l + d.r) / 2000, 0, 100) : 50;
+  const cy = d !== undefined ? clampN((d.t + d.b) / 2000, 0, 100) : 50;
+  return `radial-gradient(circle at ${cx}% ${cy}%, ${partStr})`;
 }
 
 /** `fs-fp-item__fill` 上的背景（纯色 / 渐变）。 */
@@ -619,7 +659,12 @@ function computeImageOutsideFrameDimRects(
   iy: number,
   iw: number,
   ih: number,
-): { readonly left: number; readonly top: number; readonly width: number; readonly height: number }[] {
+): {
+  readonly left: number;
+  readonly top: number;
+  readonly width: number;
+  readonly height: number;
+}[] {
   const out: { left: number; top: number; width: number; height: number }[] = [];
   const eps = 1e-6;
   if (!(iw > eps) || !(ih > eps) || !(frameW > eps) || !(frameH > eps)) {
@@ -1084,7 +1129,9 @@ export class FloatingPictureLayer {
    * 仅将 CSS 滤镜烘焙进嵌入位图（不绘制 `frameFill`、不改变 `imgBox`/裁剪语义），供 XLSX 嵌入；
    * 填充与边距仍由 OOXML `spPr` 与内嵌 `xfrm` 表达，避免与主体图合并。
    */
-  private async rasterizePictureModelFilteredSourceOnly(model: PictureModel): Promise<string | null> {
+  private async rasterizePictureModelFilteredSourceOnly(
+    model: PictureModel,
+  ): Promise<string | null> {
     if (typeof document === "undefined") {
       return null;
     }

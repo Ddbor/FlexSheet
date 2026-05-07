@@ -244,6 +244,73 @@ describe("xlsx export floating pictures", () => {
     expect(ff.gradientStops?.[1]?.color.toLowerCase()).toBe("#0000ff");
   });
 
+  it("writes a:gradFill (radial a:path circle) and round-trips fillToRect / tileRect", () => {
+    const wb = new Workbook();
+    const sh = new Worksheet("S1", 12, 12);
+    wb.addSheet(sh);
+    const pic: XlsxFloatingPictureExport = {
+      sheetName: sh.name,
+      anchorRow: 0,
+      anchorCol: 0,
+      relCX: 0,
+      relCY: 0,
+      width: 64,
+      height: 64,
+      rotationRad: 0,
+      dataUrl: TINY_PNG_DATA_URL,
+      frameFill: {
+        kind: "gradient",
+        solidColor: "#000000",
+        solidTransparencyPct: 0,
+        gradientType: "radial",
+        gradientAngleDeg: 90,
+        gradientRotateWithShape: true,
+        gradientPresetId: null,
+        radialFillLtrb: { l: 0, t: 0, r: 100000, b: 100000 },
+        radialTileLtrb: { l: -100000, t: -100000, r: 0, b: 0 },
+        gradientStops: [
+          { positionPct: 0, color: "#00ff00", transparencyPct: 0, brightnessPct: 0 },
+          { positionPct: 100, color: "#000000", transparencyPct: 0, brightnessPct: 0 },
+        ],
+      },
+    };
+    const bytes = exportWorkbookToXlsxBytes(wb, {
+      includeStyles: true,
+      includeFormulas: true,
+      includeSparseStyledEmpty: true,
+      viewZoom: 1,
+      floatingPictures: [pic],
+    });
+    const map = unzipToMap(
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    );
+    const drawing = new TextDecoder().decode(map.get("xl/drawings/drawing1.xml")!);
+    expect(drawing).toContain("<a:gradFill");
+    expect(drawing).toContain('<a:path path="circle">');
+    expect(drawing).toContain('<a:fillToRect l="0" t="0" r="100000" b="100000"/>');
+    expect(drawing).toContain('<a:tileRect l="-100000" t="-100000" r="0" b="0"/>');
+    expect(drawing).toContain('val="00FF00"');
+    expect(drawing).not.toContain("<a:lin ");
+
+    const found = collectSheetFloatingPicturesFromXlsx(
+      map,
+      "xl/worksheets/sheet1.xml",
+      sh,
+      "S1",
+      0,
+    );
+    expect(found.length).toBe(1);
+    const ff = found[0]?.frameFill;
+    expect(ff?.kind).toBe("gradient");
+    if (ff?.kind !== "gradient") {
+      return;
+    }
+    expect(ff.gradientType).toBe("radial");
+    expect(ff.radialFillLtrb).toEqual({ l: 0, t: 0, r: 100000, b: 100000 });
+    expect(ff.radialTileLtrb).toEqual({ l: -100000, t: -100000, r: 0, b: 0 });
+    expect(ff.gradientStops?.[0]?.color.toLowerCase()).toBe("#00ff00");
+  });
+
   it("writes drawings, media, worksheet rel and drawing element", () => {
     const wb = new Workbook();
     const sh = new Worksheet("S1", 12, 12);

@@ -53,8 +53,25 @@ function gradientStopsEqual(
   return true;
 }
 
+function gradientRelativeRectEqual(
+  x: { readonly l: number; readonly t: number; readonly r: number; readonly b: number } | undefined,
+  y: { readonly l: number; readonly t: number; readonly r: number; readonly b: number } | undefined,
+): boolean {
+  if (x === undefined && y === undefined) {
+    return true;
+  }
+  if (x === undefined || y === undefined) {
+    return false;
+  }
+  return x.l === y.l && x.t === y.t && x.r === y.r && x.b === y.b;
+}
+
 function frameFillEqual(a: FloatingPictureFrameFill, b: FloatingPictureFrameFill): boolean {
-  if (a.kind !== b.kind || a.solidColor !== b.solidColor || a.solidTransparencyPct !== b.solidTransparencyPct) {
+  if (
+    a.kind !== b.kind ||
+    a.solidColor !== b.solidColor ||
+    a.solidTransparencyPct !== b.solidTransparencyPct
+  ) {
     return false;
   }
   if (a.kind !== "gradient") {
@@ -66,11 +83,16 @@ function frameFillEqual(a: FloatingPictureFrameFill, b: FloatingPictureFrameFill
     a.linearDirectionIndex === b.linearDirectionIndex &&
     a.gradientRotateWithShape === b.gradientRotateWithShape &&
     a.gradientPresetId === b.gradientPresetId &&
-    gradientStopsEqual(a.gradientStops, b.gradientStops)
+    gradientStopsEqual(a.gradientStops, b.gradientStops) &&
+    gradientRelativeRectEqual(a.radialFillLtrb, b.radialFillLtrb) &&
+    gradientRelativeRectEqual(a.radialTileLtrb, b.radialTileLtrb)
   );
 }
 
-function snapshotsFloatingGeometryEqual(a: FloatingPictureSnapshot, b: FloatingPictureSnapshot): boolean {
+function snapshotsFloatingGeometryEqual(
+  a: FloatingPictureSnapshot,
+  b: FloatingPictureSnapshot,
+): boolean {
   return (
     a.id === b.id &&
     a.sheetName === b.sheetName &&
